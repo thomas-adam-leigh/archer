@@ -2,6 +2,9 @@
 // projection of the Postgres schema in ../supabase/migrations. Python services
 // generate their own models from the same migrations — see the architecture doc.
 export type { Database, Json } from "./database.types.js";
+// Runtime enum values (e.g. Constants.public.Enums.candidacy_status) — the
+// contract's allowed values, usable for validation.
+export { Constants } from "./database.types.js";
 
 import type { Database } from "./database.types.js";
 

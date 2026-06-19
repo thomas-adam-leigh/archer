@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@archer/db": "workspace:*",
     "@hono/node-server": "^2.0.5",
     "hono": "^4.12.26"
   },
