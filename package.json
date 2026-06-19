@@ -1,0 +1,13 @@
+{
+  "name": "archer",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.32.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "cli": "pnpm --filter @archer/cli",
+    "api": "pnpm --filter @archer/api"
+  }
+}
