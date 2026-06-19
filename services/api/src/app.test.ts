@@ -1,15 +1,21 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import app from "./app";
 
-const json = (body: unknown, headers: Record<string, string> = {}) => ({
+const VALID_UUID = "00000000-0000-0000-0000-000000000000";
+const post = (body: unknown, headers: Record<string, string> = {}) => ({
   method: "POST",
   body: JSON.stringify(body),
   headers: { "content-type": "application/json", ...headers },
 });
 
 describe("archer-api", () => {
+  beforeEach(() => {
+    // Dev opt-in so command/webhook routes are reachable without a shared secret.
+    process.env.ARCHER_API_DEV_OPEN = "1";
+    delete process.env.ARCHER_API_SECRET;
+  });
   afterEach(() => {
-    process.env.ARCHER_API_SECRET = undefined;
+    delete process.env.ARCHER_API_DEV_OPEN;
     delete process.env.ARCHER_API_SECRET;
   });
 
@@ -25,29 +31,47 @@ describe("archer-api", () => {
     expect(await res.json()).toEqual({ name: "archer-api", status: "ok" });
   });
 
-  it("rejects an invalid candidacy transition before touching the DB", async () => {
-    const res = await app.request("/commands/candidacies/x/transition", json({ to: "nope" }));
+  it("rejects an invalid board (argv-injection guard)", async () => {
+    const res = await app.request("/commands/collect/-evil", post({}));
     expect(res.status).toBe(400);
   });
 
-  it("rejects a transition with no target status", async () => {
-    const res = await app.request("/commands/candidacies/x/transition", json({}));
+  it("rejects an invalid candidacy id", async () => {
+    const res = await app.request(
+      "/commands/candidacies/not-a-uuid/transition",
+      post({ to: "shortlisted" }),
+    );
     expect(res.status).toBe(400);
+  });
+
+  it("rejects an invalid transition status", async () => {
+    const res = await app.request(
+      `/commands/candidacies/${VALID_UUID}/transition`,
+      post({ to: "nope" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies commands with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request("/hooks/activity-failed", post({}));
+    expect(res.status).toBe(401);
   });
 
   it("gates webhooks behind the shared secret when configured", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
     process.env.ARCHER_API_SECRET = "s3cret";
-    const noAuth = await app.request("/hooks/external-form", json({}));
+    const noAuth = await app.request("/hooks/external-form", post({}));
     expect(noAuth.status).toBe(401);
     const withAuth = await app.request(
       "/hooks/external-form",
-      json({}, { "x-archer-secret": "s3cret" }),
+      post({}, { "x-archer-secret": "s3cret" }),
     );
     expect(withAuth.status).toBe(202);
   });
 
-  it("allows webhooks in dev when no secret is set", async () => {
-    const res = await app.request("/hooks/activity-failed", json({}));
+  it("allows webhooks with the dev opt-in", async () => {
+    const res = await app.request("/hooks/activity-failed", post({}));
     expect(res.status).toBe(202);
   });
 });

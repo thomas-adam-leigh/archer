@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Constants, setCandidacyStatus } from "@archer/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -5,12 +6,22 @@ import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
+// Validate path/query values before they reach the CLI argv or the DB.
+const BOARD_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Shared-secret gate for command + webhook routes. Open in dev when unset.
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
+// Fail closed: require the shared secret (constant-time compare). With no secret
+// set, deny unless an explicit dev opt-in (ARCHER_API_DEV_OPEN=1, non-prod) is on.
 function authorized(c: Context): boolean {
   const secret = process.env.ARCHER_API_SECRET;
-  if (!secret) return true;
-  return c.req.header("x-archer-secret") === secret;
+  if (secret) return safeEqual(c.req.header("x-archer-secret") ?? "", secret);
+  return process.env.NODE_ENV !== "production" && process.env.ARCHER_API_DEV_OPEN === "1";
 }
 
 const app = new Hono()
@@ -20,7 +31,9 @@ const app = new Hono()
   .post("/commands/collect/:board", async (c) => {
     if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
     const board = c.req.param("board");
+    if (!BOARD_RE.test(board)) return c.json({ error: "invalid board" }, 400);
     const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (user && !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
     const args = ["collect", board, "--json"];
     if (user) args.push("--user", user);
     const res = await runCli(args);
@@ -33,6 +46,7 @@ const app = new Hono()
   .post("/commands/candidacies/:id/transition", async (c) => {
     if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
     const id = c.req.param("id");
+    if (!UUID_RE.test(id)) return c.json({ error: "invalid candidacy id" }, 400);
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     const to = typeof body.to === "string" ? body.to : undefined;
     if (!to || !CANDIDACY_STATUSES.includes(to)) {
