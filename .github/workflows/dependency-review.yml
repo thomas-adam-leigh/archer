@@ -8,6 +8,8 @@ permissions:
 
 jobs:
   review:
+    # Dependency Review needs GitHub Advanced Security on private repos — skip until public/GHAS.
+    if: github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

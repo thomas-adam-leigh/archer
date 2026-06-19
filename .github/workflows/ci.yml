@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read # dorny/paths-filter reads PR file lists via the API
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -137,11 +138,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
   # ── Security: secrets + vulnerabilities ─────────────────────────────────────
+  # Scanners gate directly (no SARIF upload), so this needs no GitHub Advanced
+  # Security and works on a private repo.
   security:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write # upload SARIF to the Security tab
     steps:
       - uses: actions/checkout@v4
         with:
@@ -151,20 +151,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Vulnerability + misconfig scan (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
-          format: sarif
-          output: trivy.sarif
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy.sarif
+          format: table
 
   # ── Required status check (point branch protection at this one) ─────────────
   ci-ok:
