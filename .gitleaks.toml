@@ -1,0 +1,14 @@
+title = "Archer gitleaks config"
+
+# Start from gitleaks' bundled rules, then narrow false positives below.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Archer allowlist"
+paths = [
+  '''\.env\.example$''',
+  '''pnpm-lock\.yaml$''',
+  # Supabase local config uses env(...) placeholders and empty stubs, not real secrets.
+  '''packages/db/supabase/config\.toml$''',
+]

@@ -1,0 +1,7 @@
+# squawk — Postgres migration linter config.
+# Tuned for a small, single-operator project; tighten as the schema grows.
+[lint]
+excluded_rules = [
+  "prefer-robust-stmts",            # we don't require IF NOT EXISTS everywhere yet
+  "require-concurrent-index-creation",
+]

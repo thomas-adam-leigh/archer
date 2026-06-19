@@ -1,0 +1,179 @@
+name: CI
+
+# Integration loop: runs on every PR and on feature-branch pushes.
+# Pushes to `main` are handled by release.yml (which calls these same gates first).
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+  pull-requests: read # dorny/paths-filter reads PR file lists via the API
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Change detection ────────────────────────────────────────────────────────
+  # Gate each downstream job so a docs-only PR doesn't rebuild the world.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      node: ${{ steps.filter.outputs.node }}
+      python: ${{ steps.filter.outputs.python }}
+      db: ${{ steps.filter.outputs.db }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            node:
+              - 'apps/**'
+              - 'services/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'biome.json'
+              - 'vitest.config.ts'
+              - '.github/workflows/ci.yml'
+            python:
+              - '**/*.py'
+              - '**/pyproject.toml'
+              - '**/uv.lock'
+              - 'ruff.toml'
+            db:
+              - 'packages/db/**'
+            docker:
+              - '**/Dockerfile'
+              - '.dockerignore'
+
+  # ── Node: lint · typecheck · test · build ───────────────────────────────────
+  node:
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint + format check (Biome)
+        run: pnpm exec biome ci .
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Unit tests (Vitest)
+        run: pnpm run test
+      # Build affected packages since the base. At this scale a full `-r build`
+      # is fine; swap to `--filter "...[origin/main]"` (or Turborepo) when it's slow.
+      - name: Build
+        run: pnpm -r build
+
+  # ── Database: the contract drift gate ───────────────────────────────────────
+  # Regenerate types from the migrations against an ephemeral Postgres and fail
+  # if the committed packages/db/src/database.types.ts is stale. This is what
+  # enforces "the database is the contract" across the polyglot repo.
+  db:
+    needs: changes
+    if: needs.changes.outputs.db == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Drift gate — types must match migrations
+        run: bash packages/db/scripts/gen-types.sh --check
+      - name: Migration lint (squawk)
+        continue-on-error: true # advisory until the schema grows
+        run: bash packages/db/scripts/lint-migrations.sh
+
+  # ── Python: dormant until Scout (Patchwright) lands ─────────────────────────
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Ruff lint + format check
+        run: |
+          uvx ruff check .
+          uvx ruff format --check .
+      - name: Tests (pytest)
+        run: |
+          if find . -name pyproject.toml -not -path '*/node_modules/*' | grep -q .; then
+            uvx --with pytest pytest
+          else
+            echo "no Python project yet — skipping pytest"
+          fi
+
+  # ── Docker: lint + build affected images (no push) ──────────────────────────
+  docker:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' || needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, cli]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/${{ matrix.service }}/Dockerfile
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (validate, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ── Security: secrets + vulnerabilities ─────────────────────────────────────
+  # Scanners gate directly (no SARIF upload), so this needs no GitHub Advanced
+  # Security and works on a private repo.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for secret scanning
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Vulnerability + misconfig scan (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+  # ── Required status check (point branch protection at this one) ─────────────
+  ci-ok:
+    needs: [changes, node, db, python, docker, security]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify no required job failed
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required job result was '$r'."
+              exit 1
+            fi
+          done
+          echo "All required jobs passed (or were skipped)."

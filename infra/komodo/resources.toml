@@ -1,0 +1,111 @@
+# ============================================================================
+# Archer — Komodo GitOps resource definitions
+# ============================================================================
+# This file is the source of truth for Archer's runtime on Komodo. A Komodo
+# ResourceSync reads it from the repo and reconciles Komodo to match.
+#
+# SAFETY: the sync is intentionally NON-managed (no auto-delete). The Archer box
+# also runs sibling stacks (finance, job-hunter, n8n, shelby, akuna-matata) and
+# the existing `archer` (hermes-agent) stack. This sync only ADDS the resources
+# below; review the diff in the Komodo UI before executing the first sync.
+#
+# Separation of concerns: GitHub Actions BUILDS + SIGNS images (release.yml).
+# Komodo only DEPLOYS them. There is deliberately no [[build]] here.
+# ============================================================================
+
+# --- Pinned image tag (release.yml can update this to a :sha for traceability) ---
+[[variable]]
+name = "ARCHER_API_IMAGE"
+description = "GHCR image deployed for archer-api. Pin to a :sha-<commit> for rollback."
+value = "ghcr.io/thomas-adam-leigh/archer-api:latest"
+
+# --- The deployable API service (pulls the GHCR image; never built here) ---
+[[stack]]
+name = "archer-api"
+description = "Archer Hono API — built + signed by GitHub Actions, deployed by Komodo."
+tags = ["archer"]
+
+[stack.config]
+server = "computer"
+git_provider = "github.com"
+git_account = "thomas-adam-leigh"
+repo = "thomas-adam-leigh/archer"
+branch = "main"
+run_directory = "infra/komodo/compose"
+file_paths = ["archer-api.compose.yaml"]
+auto_pull = true            # pull the fresh image on deploy
+run_build = false           # Komodo does not build — Actions does
+webhook_enabled = true      # allow release.yml to trigger redeploys
+env_file_path = ".env"      # runtime secrets live in Komodo's managed stack env
+send_alerts = true
+poll_for_updates = true
+
+# --- The deploy procedure release.yml invokes (deploy → smoke test) ---
+[[procedure]]
+name = "archer-deploy"
+description = "Pull + redeploy archer-api, then smoke-test it. Self-heals on failure via the alerter."
+tags = ["archer"]
+
+[[procedure.config.stage]]
+name = "Deploy API"
+enabled = true
+executions = [
+  { execution.type = "DeployStack", execution.params.stack = "archer-api", enabled = true },
+]
+
+[[procedure.config.stage]]
+name = "Smoke test"
+enabled = true
+executions = [
+  { execution.type = "RunAction", execution.params.action = "archer-smoke", enabled = true },
+]
+
+# --- Post-deploy smoke test (Deno). Source of truth: actions/archer-smoke.ts ---
+[[action]]
+name = "archer-smoke"
+description = "Fail the deploy (and alert) if archer-api isn't healthy after release."
+tags = ["archer"]
+
+[action.config]
+file_contents = '''
+// Keep in sync with infra/komodo/actions/archer-smoke.ts
+const url = Deno.env.get("ARCHER_API_HEALTH_URL") ?? "http://host.docker.internal:9125/health";
+const deadline = Date.now() + 60_000;
+while (Date.now() < deadline) {
+  try {
+    const res = await fetch(url);
+    if (res.ok) { console.log(`OK archer-api healthy at ${url}`); Deno.exit(0); }
+    console.log(`... ${url} -> ${res.status}`);
+  } catch (err) { console.log(`... ${url} unreachable (${err})`); }
+  await new Promise((r) => setTimeout(r, 3000));
+}
+console.error("archer-api did not become healthy within 60s");
+Deno.exit(1);
+'''
+
+# --- Failure notifications (point endpoint at n8n / Discord / ntfy as you like) ---
+[[alerter]]
+name = "archer-alerts"
+description = "Build/deploy/health failures for Archer."
+tags = ["archer"]
+
+[alerter.config]
+enabled = true
+endpoint.type = "Slack"
+endpoint.params.url = "[[ARCHER_ALERT_WEBHOOK]]"  # a Komodo Secret, not committed
+
+# --- The sync resource itself (so GitOps is self-describing) ---
+# Non-managed: Komodo shows a diff you execute manually; it will NOT delete the
+# sibling stacks. Flip to managed only once you're confident in the scope.
+[[resource_sync]]
+name = "archer-gitops"
+description = "Syncs Archer's Komodo resources from infra/komodo in the archer repo."
+tags = ["archer"]
+
+[resource_sync.config]
+git_provider = "github.com"
+git_account = "thomas-adam-leigh"
+repo = "thomas-adam-leigh/archer"
+branch = "main"
+resource_path = ["infra/komodo"]
+managed = false

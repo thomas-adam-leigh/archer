@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommits", "schedule:weekly"],
+  "labels": ["dependencies"],
+  "lockFileMaintenance": { "enabled": true },
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": true
+  },
+  "packageRules": [
+    {
+      "description": "Auto-merge low-risk updates once CI is green.",
+      "matchUpdateTypes": ["patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Group GitHub Actions bumps.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Group the Python/Scout toolchain together.",
+      "matchFileNames": ["services/cli/**", "**/pyproject.toml", "ruff.toml"],
+      "groupName": "scout (python)"
+    },
+    {
+      "description": "Pin Docker base images by digest for supply-chain integrity.",
+      "matchManagers": ["dockerfile"],
+      "pinDigests": true
+    }
+  ]
+}

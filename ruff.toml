@@ -1,0 +1,13 @@
+# Ruff — Python lint + format for polyglot services (the Scout CLI / Patchwright code).
+# Dormant until Python sources land under services/**; harmless until then.
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ASYNC", "S"]
+# S = flake8-bandit (security) — relevant for a scraper that handles credentials/proxies.
+ignore = []
+
+[format]
+quote-style = "double"
+indent-style = "space"

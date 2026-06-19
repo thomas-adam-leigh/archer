@@ -1,0 +1,116 @@
+name: Release
+
+# Delivery loop: on merge to main, re-run the gates, build + sign + push images,
+# then (behind a manual Environment gate) tell Komodo to redeploy.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # never abort a half-finished deploy
+
+jobs:
+  # Re-assert the same gates on the merged commit (defence in depth vs. direct pushes).
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec biome ci .
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm -r build
+      - name: DB contract drift gate
+        run: bash packages/db/scripts/gen-types.sh --check
+
+  # Build, SBOM, provenance, sign, push. One job per service image.
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+      id-token: write # cosign keyless signing via OIDC
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, cli]
+    outputs:
+      sha: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/archer-${{ matrix.service }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+      - name: Build + push (with SBOM + SLSA provenance)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          provenance: mode=max
+          sbom: true
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign image (keyless)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/archer-${{ matrix.service }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        # Verify later with:
+        #   cosign verify ghcr.io/<owner>/archer-<svc>@<digest> \
+        #     --certificate-identity-regexp 'https://github.com/<owner>/archer/.*' \
+        #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+  # Tell Komodo to pull + redeploy. Manual-approval Environment = the Proposal gate.
+  deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: production # configure required reviewers in repo Settings → Environments
+      url: https://build.n8n.computer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger Komodo redeploy
+        env:
+          KOMODO_URL: ${{ secrets.KOMODO_URL }}
+          KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY }}
+          KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET }}
+          KOMODO_PROCEDURE: ${{ vars.KOMODO_PROCEDURE }}
+          SHA: ${{ github.sha }}
+        run: bash infra/komodo/scripts/redeploy.sh
+      - name: Record deploy as an Activity (best-effort)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          DEPLOY_STATUS: ${{ job.status }}
+          SHA: ${{ github.sha }}
+        run: bash infra/komodo/scripts/record-deploy-activity.sh

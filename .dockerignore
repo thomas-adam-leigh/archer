@@ -1,0 +1,19 @@
+# Build context is the repo root (monorepo). Keep it lean and force a clean install.
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/.turbo
+.git
+.github
+.husky
+.changeset
+agent
+docs
+infra
+*.md
+**/*.test.ts
+**/.env
+**/.env.*
+!**/.env.example
+.DS_Store

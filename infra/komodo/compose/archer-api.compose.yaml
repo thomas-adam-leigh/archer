@@ -1,0 +1,29 @@
+# Deploys the GHCR image that GitHub Actions built + signed (release.yml).
+# Komodo owns runtime; it pulls this image, it does NOT build it.
+# Runtime secrets (SUPABASE_*, etc.) come from Komodo's managed stack env — never git.
+name: archer-api
+services:
+  api:
+    image: ${ARCHER_API_IMAGE:-ghcr.io/thomas-adam-leigh/archer-api:latest}
+    container_name: archer-api
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - PORT=3000
+    env_file:
+      - path: .env
+        required: false # Komodo writes this at runtime; absent during local validation
+    # Bound to loopback; the host's Caddy reverse-proxies TLS to it (next to :9122).
+    ports:
+      - "127.0.0.1:9125:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s

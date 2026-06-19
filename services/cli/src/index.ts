@@ -4,10 +4,7 @@ import { api, apiBaseUrl } from "./api.js";
 
 const program = new Command();
 
-program
-  .name("archer")
-  .description("Archer CLI")
-  .version("0.1.0");
+program.name("archer").description("Archer CLI").version("0.1.0");
 
 program
   .command("hello")
