@@ -100,7 +100,7 @@ stateDiagram-v2
 
 - **Clients** — Mobile app (candidate: onboarding, cover-letter swipe loop, live view, notifications); Admin app (owner: proposal approvals, oversight); optional Web app on the same database.
 - **Control plane — Supabase** — Postgres as the source of truth, with **Row-Level Security** for per-candidate isolation; Auth; Storage (resumes/portfolios); **pg_cron** (13:00 collect, per-minute matcher); **Database/Edge Functions + Triggers** (the event engine); the **matching LLM** (via OpenRouter); **Realtime** as a candidate-facing transport for the live view.
-- **Execution plane — your server (Hetzner)** — a **Hono API** wrapping `claude -p` / the Claude Agents SDK, authenticated with your **OAuth token** (not the metered API); **Claude Code agent workers** (Researcher, Scribe, Applicant, Mechanic); the **Archer MCP** (a custom, least-privilege tool surface); third-party tools (**LinkedIn MCP**, **Firecrawl**, **Chrome DevTools MCP**); **ElevenLabs** (Speech v3 TTS for Archer's spoken notes, plus STT for the candidate's voicenotes — **[decision]** confirm the STT provider); and the **Scout CLI**.
+- **Execution plane — your server (Hetzner)** — a **Hono API** wrapping `claude -p` / the Claude Agents SDK, authenticated with your **OAuth token** (not the metered API); **Claude Code agent workers** (Researcher, Scribe, Applicant, Mechanic); the **Archer MCP** (a custom, least-privilege tool surface); third-party tools (**LinkedIn MCP**, **Firecrawl**, **Chrome DevTools MCP**); **ElevenLabs** (Speech v3 TTS for Archer's spoken notes, plus STT for the candidate's voicenotes — **[decision]** confirm the STT provider); and the **Archer CLI**.
 - **DevOps plane** — a **monorepo**; **GitHub Actions** + **Komodo** for CI/CD and Docker deploys; the self-healing loop closes here.
 
 ### 3.2 Agents vs automations vs LLM-judgments
@@ -117,18 +117,18 @@ The database is the orchestrator, not just storage. State changes — not a cent
 
 ### 3.4 The daily lifecycle (happy path)
 
-1. **13:00, weekdays — Collect.** pg_cron starts a Collect Activity per board. The Hono API runs the Scout CLI, which scrapes that day's postings under each candidate's target titles, deduplicates, and inserts **Postings** + per-candidate **Candidacies** at status `new`.
+1. **13:00, weekdays — Collect.** pg_cron starts a Collect Activity per board. The Hono API runs the Archer CLI, which scrapes that day's postings under each candidate's target titles, deduplicates, and inserts **Postings** + per-candidate **Candidacies** at status `new`.
 2. **Every minute — Match.** The matcher cron does nothing unless `new` candidacies exist; otherwise the Matchmaker LLM scores each against the profile + negative criteria and sets `dismissed` (with a logged reason), `shortlisted`, or `alternative_outreach`.
 3. **On shortlist / alt — Enrich.** The linked Company leaves `new`; the Researcher (LinkedIn MCP + Firecrawl) advances it `researching → enriched | enrichment_failed`.
 4. **On shortlist + enriched — Cover-letter loop.** The Scribe composes a spoken note (ElevenLabs) + push notification; the candidate records a voicenote; the Scribe drafts; the candidate swipes right (approve) or left (re-record). Repeat until `approved`.
-5. **On approve — Apply.** An Apply Activity runs the Scout CLI's apply adapter for that board → `applied`, or a redirect.
+5. **On approve — Apply.** An Apply Activity runs the Archer CLI's apply adapter for that board → `applied`, or a redirect.
 6. **On redirect — External fill.** A row lands in `external_application_forms` at `pending`; a trigger webhooks the server; a Claude agent opens the URL via Chrome DevTools, reads profile/portfolio/cover letter/enriched company through the Archer MCP, fills the form, and sets `applied | failed`.
 7. **Throughout — Live view.** Each Activity streams AG-UI events to the candidate's own live view.
 8. **On any failure — Self-heal.** A failed Collect/Apply Activity webhooks the Mechanic, which investigates and may submit a Proposal to repair the CLI; on your approval it rebuilds and redeploys via Komodo.
 
 ```mermaid
 flowchart TD
-    A["pg_cron 13:00 — Collect"] --> B["Scout CLI scrapes boards"]
+    A["pg_cron 13:00 — Collect"] --> B["Archer CLI scrapes boards"]
     B --> C[("Postings + Candidacies<br/>status = new")]
     C --> D["Per-minute Matchmaker<br/>(LLM judgment)"]
     D -->|no fit| E[dismissed]
@@ -137,7 +137,7 @@ flowchart TD
     F --> H["Researcher enriches Company<br/>new to researching to enriched"]
     G --> H
     H --> I["Scribe: cover-letter loop<br/>voicenote to draft to swipe"]
-    I -->|approved| J["Applicant: Scout CLI apply"]
+    I -->|approved| J["Applicant: Archer CLI apply"]
     J -->|on-board| K[applied]
     J -->|redirect| L[("external_application_forms<br/>status = pending")]
     L --> M["Claude agent + Chrome DevTools<br/>fills external form"]
@@ -160,7 +160,7 @@ flowchart TD
 3. **Orchestration mechanism.** Standardize on **Postgres triggers + webhooks + Hono** as the spine. Decide explicitly whether **n8n** stays (handy for schedules/glue) or is retired for this product, so we don't have two overlapping orchestrators.
 4. **AG-UI transport.** Supabase Realtime vs a dedicated SSE stream from Hono. Either way, channels must be **per-candidate and RLS-guarded** — you watch *your* Archer, never anyone else's.
 5. **Fan-out model.** Confirm the Matchmaker evaluates each new Posting against *every* accepted candidate's titles/criteria (creating Candidacies), versus a single-user MVP that sidesteps fan-out entirely.
-6. **Naming.** **[decision]** Agent = **Archer**; CLI = **Scout** (it scouts the boards — semantically perfect, and reuses the name you already coined); Product/app = pick one (**Job Zooka**?). This frees all three names from colliding.
+6. **Naming.** **[decision, updated 2026-06-19]** The agent and the CLI both fall under **Archer** — the CLI (`@archer/cli`, invoked as `archer`) is Archer's command-line face, not a separate brand. Product/app name still open (**Job Zooka**?).
 7. **Voicenote STT.** ElevenLabs covers TTS; choose the speech-to-text path for the candidate's voicenotes (on-device, Whisper, or other).
 8. **Secrets & compliance.** Per-candidate board credentials need a real vault/encryption story. Auto-apply + residential proxies (Decodo) + scraping carry ToS/anti-bot risk worth designing around early rather than retrofitting.
 

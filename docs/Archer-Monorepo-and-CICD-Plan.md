@@ -42,7 +42,7 @@ archer/
 │  └─ admin/          # owner/operator dashboard (approvals, oversight, live view)
 ├─ services/
 │  ├─ api/            # Hono API over `claude -p` / Agents SDK (OAuth token)
-│  ├─ cli/            # Scout — Python (Patchwright + Decodo): `collect` + `apply`
+│  ├─ cli/            # the Archer CLI — Python (Patchwright + Decodo): `collect` + `apply`
 │  ├─ mcp/            # Archer MCP: propose, notify_owner, profile/company/status tools
 │  └─ worker/         # agent runners (Researcher, Scribe, Applicant) — optional split from api
 ├─ packages/
@@ -79,7 +79,7 @@ Principles: **only build/test/deploy what changed**, one image per service, `mai
 - **Komodo's role [rec]:** GitHub Actions owns *build + test*; Komodo owns *runtime + deploy*. Actions pushes the image to GHCR and calls Komodo (webhook/API) to redeploy the matching Deployment/Stack on your Hetzner box. Clean separation, and it keeps the polyglot build logic in Actions where it's easiest. (The alternative — Komodo builds straight from the Git repo on a push webhook — is simpler but couples build to Komodo; I'd avoid it for a polyglot repo.)
 - **Environments:** start with a single `prod` + a GitHub Environments manual-approval gate. Add `staging` only if you feel the need — matches your earlier instinct to drop the dev/prod duplication for personal use.
 - **Secrets:** repo build secrets in GitHub Actions (or OIDC); *runtime* secrets (board credentials, your Claude OAuth token, Decodo proxy creds) live in Komodo env / a vault, never in git.
-- **Self-healing hook:** a failed deploy or a failed Scout Activity webhooks the Mechanic, which files a `proposal` — closing the loop back to §1.
+- **Self-healing hook:** a failed deploy or a failed CLI Activity webhooks the Mechanic, which files a `proposal` — closing the loop back to §1.
 
 ```mermaid
 flowchart LR
@@ -119,7 +119,7 @@ flowchart LR
 
 **Locked (2026-06-14):**
 
-1. **Mobile stack — Lynx (ReactLynx).** Front-end stays TypeScript; only Scout (Python) is polyglot.
+1. **Mobile stack — Lynx (ReactLynx).** Front-end stays TypeScript; only the CLI (Python) is polyglot.
 2. **Monorepo tooling — pnpm workspaces only.** Turborepo/Nx deferred until a task cache is worth it.
 3. **Repo grouping — `apps/ + services/ + packages/`.**
 

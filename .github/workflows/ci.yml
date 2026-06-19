@@ -92,7 +92,7 @@ jobs:
         continue-on-error: true # advisory until the schema grows
         run: bash packages/db/scripts/lint-migrations.sh
 
-  # ── Python: dormant until Scout (Patchwright) lands ─────────────────────────
+  # ── Python: dormant until the Archer CLI (Patchwright) lands ─────────────────────────
   python:
     needs: changes
     if: needs.changes.outputs.python == 'true'

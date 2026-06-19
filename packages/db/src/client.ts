@@ -2,7 +2,7 @@ import postgres from "postgres";
 
 /**
  * A service-level Postgres connection (connects as the service role via the
- * Supabase pooler, so it bypasses RLS) — for Scout, the API, and agents.
+ * Supabase pooler, so it bypasses RLS) — for the CLI, the API, and agents.
  * Clients (mobile/admin) talk to Supabase/PostgREST directly instead.
  */
 export type Db = postgres.Sql;

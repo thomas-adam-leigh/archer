@@ -3,7 +3,7 @@
 *
 * Models the choreographed state machine from docs/Archer-Terminology-and-Architecture.md:
 *   - Shared objective tables (boards, companies, contacts, postings): facts, not
-*     user-owned. Authenticated users read; only the service role (Scout / agents) writes.
+*     user-owned. Authenticated users read; only the service role (the CLI / agents) writes.
 *   - Per-user state tables (profiles, target_titles, negative_criteria, candidacies,
 *     notifications): carry user_id + RLS "own rows only".
 *   - Execution & control (activities, proposals): the universal run primitive and the
