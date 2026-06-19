@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+.next/
+.turbo/
+
+# Supabase
+**/supabase/.branches
+**/supabase/.temp
+**/supabase/.env
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/
