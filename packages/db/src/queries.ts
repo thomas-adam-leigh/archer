@@ -205,3 +205,70 @@ export async function setCandidacyStatus(
     returning *`;
   return rows[0];
 }
+
+// ── collect: idempotent upserts ───────────────────────────────────────────
+export async function upsertCompany(db: Db, name: string): Promise<string> {
+  const rows = await db<{ id: string }[]>`
+    insert into companies (name) values (${name})
+    on conflict (normalized_name) do update set name = excluded.name
+    returning id`;
+  return rows[0].id;
+}
+
+export interface UpsertPostingInput {
+  boardSlug: string;
+  url: string;
+  title: string;
+  companyId?: string | null;
+  companyNameRaw?: string | null;
+  externalId?: string | null;
+  location?: string | null;
+  workMode?: Enum<"work_mode">;
+  salaryRaw?: string | null;
+  description?: string | null;
+  postedOn?: string | null;
+  contentHash?: string | null;
+}
+
+/** Insert or refresh a posting (idempotent on board_slug + url). `inserted` is
+ *  true when the row was newly created (xmax = 0), false when it already existed. */
+export async function upsertPosting(
+  db: Db,
+  p: UpsertPostingInput,
+): Promise<{ id: string; inserted: boolean }> {
+  const rows = await db<{ id: string; inserted: boolean }[]>`
+    insert into postings
+      (board_slug, url, title, company_id, company_name_raw, external_id,
+       location, work_mode, salary_raw, description, posted_on, content_hash, collected_at)
+    values
+      (${p.boardSlug}, ${p.url}, ${p.title}, ${p.companyId ?? null}, ${p.companyNameRaw ?? null},
+       ${p.externalId ?? null}, ${p.location ?? null}, ${p.workMode ?? "unknown"}::work_mode,
+       ${p.salaryRaw ?? null}, ${p.description ?? null}, ${p.postedOn ?? null},
+       ${p.contentHash ?? null}, now())
+    on conflict (board_slug, url) do update set
+      title = excluded.title,
+      company_id = coalesce(excluded.company_id, postings.company_id),
+      company_name_raw = excluded.company_name_raw,
+      location = excluded.location,
+      work_mode = excluded.work_mode,
+      salary_raw = excluded.salary_raw,
+      description = excluded.description,
+      posted_on = excluded.posted_on,
+      collected_at = now()
+    returning id, (xmax = 0) as inserted`;
+  return rows[0];
+}
+
+/** Create a candidacy unless the user already pursues this posting. Returns the
+ *  new row, or null when it already existed (one candidacy per user per posting). */
+export async function insertCandidacy(
+  db: Db,
+  userId: string,
+  postingId: string,
+): Promise<{ id: string } | null> {
+  const rows = await db<{ id: string }[]>`
+    insert into candidacies (user_id, posting_id) values (${userId}, ${postingId})
+    on conflict (user_id, posting_id) do nothing
+    returning id`;
+  return rows[0] ?? null;
+}
