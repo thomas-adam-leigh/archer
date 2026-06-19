@@ -2,13 +2,14 @@
 
 An event-driven job-application platform where **the database is the source of truth
 and the orchestrator**, and stateless Claude agents do the work. See
-[`VISION.md`](./VISION.md) and the foundation docs in [`docs/`](./docs).
+[`VISION.md`](./docs/VISION.md) and the foundation docs in [`docs/`](./docs).
 
 ## Monorepo layout
 
 ```
 archer/
-├─ apps/                 # front-ends (mobile · web · admin) — to come
+├─ apps/
+│  └─ agent/             # Obsidian vault — Archer's system prompts & memory (front-ends to come)
 ├─ services/
 │  ├─ api/               # @archer/api — Hono API (deployable)
 │  └─ cli/               # @archer/cli — Archer's CLI (deployable; → Python/Patchwright)
@@ -17,7 +18,7 @@ archer/
 ├─ infra/
 │  ├─ komodo/            # GitOps runtime definitions (Komodo)
 │  └─ observability/     # Uptime Kuma + dead-man's-switch
-├─ docs/                 # architecture + CI/CD design
+├─ docs/                 # VISION · architecture · CI/CD design
 └─ .github/workflows/    # CI · release · canary · codeql · dependency-review
 ```
 
