@@ -1,7 +1,7 @@
 name: Board Canary
 
 # Preventive self-healing: before the daily 13:00 SAST collect, dry-run the
-# deployed surface (and, once Scout lands, each board adapter against the live
+# deployed surface (and, once the Archer CLI lands, each board adapter against the live
 # site). On drift, file a Proposal + issue so a fix is in flight BEFORE collect
 # fails for real. See docs/Archer-CICD-Pipeline-Vision-v0.2.md.
 on:
@@ -30,9 +30,9 @@ jobs:
           echo "GET $URL -> $code"
           [ "$code" = "200" ] || { echo "::warning::API health returned $code"; exit 1; }
 
-      - name: Board adapter dry-run (Scout)
+      - name: Board adapter dry-run (Archer CLI)
         run: |
-          echo "Scout/board adapters not present yet."
+          echo "Archer CLI / board adapters not present yet."
           echo "When M0/M5 land, this step runs each adapter in --dry-run against the"
           echo "live board and fails on selector drift — turning reactive repair preventive."
 

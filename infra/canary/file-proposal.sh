@@ -6,7 +6,7 @@
 set -uo pipefail
 
 TITLE="Board canary drift — $(date -u +%Y-%m-%d)"
-BODY="The board canary detected drift. Investigate and, if needed, propose a Scout adapter repair.
+BODY="The board canary detected drift. Investigate and, if needed, propose an Archer CLI adapter repair.
 
 Run: ${RUN_URL:-n/a}"
 

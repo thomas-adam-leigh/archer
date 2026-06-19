@@ -11,7 +11,7 @@ archer/
 ├─ apps/                 # front-ends (mobile · web · admin) — to come
 ├─ services/
 │  ├─ api/               # @archer/api — Hono API (deployable)
-│  └─ cli/               # @archer/cli — Scout (deployable; → Python/Patchwright)
+│  └─ cli/               # @archer/cli — Archer's CLI (deployable; → Python/Patchwright)
 ├─ packages/
 │  └─ db/                # @archer/db — Supabase migrations + generated types (the contract)
 ├─ infra/

@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.9
 #
-# Archer CLI (Scout) — built from the monorepo root as context:
+# Archer CLI — built from the monorepo root as context:
 #   docker build -f services/cli/Dockerfile -t archer-cli .
 #
 # Runs as a one-shot / scheduled container (e.g. the daily collect job).
-# NOTE: when Scout becomes Python (Patchwright), this Dockerfile is replaced by a
+# NOTE: when the CLI becomes Python (Patchwright), this Dockerfile is replaced by a
 # uv-based build that bakes Chromium — the CI/CD wiring around it stays identical.
 
 FROM node:22-slim AS base

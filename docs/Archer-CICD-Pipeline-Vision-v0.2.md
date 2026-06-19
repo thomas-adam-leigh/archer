@@ -105,10 +105,10 @@ describes, drawn as infrastructure.
 - Workflows: `actionlint` clean.
 
 **Dormant by design (activate when their inputs exist):**
-- Python CI job (gated on `pyproject.toml` — fires when Scout becomes Python).
+- Python CI job (gated on `pyproject.toml` — fires when the CLI becomes Python).
 - `record-deploy-activity.sh` / canary Proposal (need the `activities`/`proposals`
   tables — milestones M0/M4).
-- Board-adapter canary dry-run (needs Scout + adapters — M0/M5).
+- Board-adapter canary dry-run (needs the CLI + adapters — M0/M5).
 
 ## 6. Go-live checklist (the handoff)
 

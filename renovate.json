@@ -19,9 +19,9 @@
       "groupName": "github-actions"
     },
     {
-      "description": "Group the Python/Scout toolchain together.",
+      "description": "Group the Python/CLI toolchain together.",
       "matchFileNames": ["services/cli/**", "**/pyproject.toml", "ruff.toml"],
-      "groupName": "scout (python)"
+      "groupName": "cli (python)"
     },
     {
       "description": "Pin Docker base images by digest for supply-chain integrity.",

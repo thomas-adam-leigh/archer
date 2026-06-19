@@ -1,4 +1,4 @@
-# Ruff — Python lint + format for polyglot services (the Scout CLI / Patchwright code).
+# Ruff — Python lint + format for polyglot services (the Archer CLI / Patchwright code).
 # Dormant until Python sources land under services/**; harmless until then.
 target-version = "py312"
 line-length = 100

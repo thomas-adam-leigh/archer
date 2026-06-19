@@ -3,18 +3,29 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts"
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
     },
     "./types": {
       "types": "./src/database.types.ts"
     }
   },
   "scripts": {
+    "build": "tsc",
     "db:gen": "./scripts/gen-types.sh",
     "db:gen:check": "./scripts/gen-types.sh --check",
     "lint:migrations": "./scripts/lint-migrations.sh",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.3"
   }
 }

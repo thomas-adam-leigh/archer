@@ -10,8 +10,15 @@ set -euo pipefail
 : "${SUPABASE_URL:?}"
 : "${SUPABASE_SECRET_KEY:?}"
 
+# Map GitHub's job.status (success|failure|cancelled) to the activity_status enum
+# (queued|in_progress|succeeded|failed) defined in the core schema migration.
+case "${DEPLOY_STATUS:-success}" in
+  success | succeeded) status="succeeded" ;;
+  *) status="failed" ;;
+esac
+
 payload="$(cat <<JSON
-{"type":"deploy","status":"${DEPLOY_STATUS:-succeeded}","detail":{"sha":"${SHA:-}","actor":"${GITHUB_ACTOR:-ci}","run_id":"${GITHUB_RUN_ID:-}"}}
+{"type":"deploy","status":"${status}","detail":{"sha":"${SHA:-}","actor":"${GITHUB_ACTOR:-ci}","run_id":"${GITHUB_RUN_ID:-}"}}
 JSON
 )"
 

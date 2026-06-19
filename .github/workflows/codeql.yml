@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Add 'python' here once Scout lands.
+        # Add 'python' here once the Archer CLI lands.
         language: [javascript-typescript]
     steps:
       - uses: actions/checkout@v4
