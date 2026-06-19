@@ -16,5 +16,8 @@
     "db:gen:check": "./scripts/gen-types.sh --check",
     "lint:migrations": "./scripts/lint-migrations.sh",
     "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }

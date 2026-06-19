@@ -12,6 +12,575 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      activities: {
+        Row: {
+          board_slug: string | null
+          candidacy_id: string | null
+          company_id: string | null
+          created_at: string
+          detail: Json | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          posting_id: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["activity_status"]
+          type: Database["public"]["Enums"]["activity_type"]
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          board_slug?: string | null
+          candidacy_id?: string | null
+          company_id?: string | null
+          created_at?: string
+          detail?: Json | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          posting_id?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["activity_status"]
+          type: Database["public"]["Enums"]["activity_type"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          board_slug?: string | null
+          candidacy_id?: string | null
+          company_id?: string | null
+          created_at?: string
+          detail?: Json | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          posting_id?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["activity_status"]
+          type?: Database["public"]["Enums"]["activity_type"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activities_board_slug_fkey"
+            columns: ["board_slug"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "activities_candidacy_id_fkey"
+            columns: ["candidacy_id"]
+            isOneToOne: false
+            referencedRelation: "candidacies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activities_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activities_posting_id_fkey"
+            columns: ["posting_id"]
+            isOneToOne: false
+            referencedRelation: "postings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activities_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      boards: {
+        Row: {
+          apply_status: Database["public"]["Enums"]["integration_status"]
+          base_url: string
+          collect_status: Database["public"]["Enums"]["integration_status"]
+          country: string
+          created_at: string
+          cred_env_prefix: string
+          name: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          apply_status?: Database["public"]["Enums"]["integration_status"]
+          base_url: string
+          collect_status?: Database["public"]["Enums"]["integration_status"]
+          country?: string
+          created_at?: string
+          cred_env_prefix: string
+          name: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          apply_status?: Database["public"]["Enums"]["integration_status"]
+          base_url?: string
+          collect_status?: Database["public"]["Enums"]["integration_status"]
+          country?: string
+          created_at?: string
+          cred_env_prefix?: string
+          name?: string
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      candidacies: {
+        Row: {
+          created_at: string
+          id: string
+          match_score: number | null
+          posting_id: string
+          status: Database["public"]["Enums"]["candidacy_status"]
+          status_changed_at: string
+          triage_decision: Database["public"]["Enums"]["triage_decision"] | null
+          triage_reason: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          match_score?: number | null
+          posting_id: string
+          status?: Database["public"]["Enums"]["candidacy_status"]
+          status_changed_at?: string
+          triage_decision?:
+            | Database["public"]["Enums"]["triage_decision"]
+            | null
+          triage_reason?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          match_score?: number | null
+          posting_id?: string
+          status?: Database["public"]["Enums"]["candidacy_status"]
+          status_changed_at?: string
+          triage_decision?:
+            | Database["public"]["Enums"]["triage_decision"]
+            | null
+          triage_reason?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "candidacies_posting_id_fkey"
+            columns: ["posting_id"]
+            isOneToOne: false
+            referencedRelation: "postings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "candidacies_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      companies: {
+        Row: {
+          created_at: string
+          description: string | null
+          domain: string | null
+          enrichment: Json | null
+          id: string
+          linkedin_url: string | null
+          name: string
+          normalized_name: string | null
+          recruitment_email: string | null
+          status: Database["public"]["Enums"]["company_status"]
+          updated_at: string
+          website_url: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          domain?: string | null
+          enrichment?: Json | null
+          id?: string
+          linkedin_url?: string | null
+          name: string
+          normalized_name?: string | null
+          recruitment_email?: string | null
+          status?: Database["public"]["Enums"]["company_status"]
+          updated_at?: string
+          website_url?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          domain?: string | null
+          enrichment?: Json | null
+          id?: string
+          linkedin_url?: string | null
+          name?: string
+          normalized_name?: string | null
+          recruitment_email?: string | null
+          status?: Database["public"]["Enums"]["company_status"]
+          updated_at?: string
+          website_url?: string | null
+        }
+        Relationships: []
+      }
+      contacts: {
+        Row: {
+          company_id: string
+          created_at: string
+          email: string | null
+          full_name: string
+          id: string
+          linkedin_url: string | null
+          notes: string | null
+          role_title: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          email?: string | null
+          full_name: string
+          id?: string
+          linkedin_url?: string | null
+          notes?: string | null
+          role_title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          email?: string | null
+          full_name?: string
+          id?: string
+          linkedin_url?: string | null
+          notes?: string | null
+          role_title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      negative_criteria: {
+        Row: {
+          created_at: string
+          id: string
+          text: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          text: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          text?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "negative_criteria_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          body: string | null
+          created_at: string
+          id: string
+          kind: string
+          read_at: string | null
+          ref: Json | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          read_at?: string | null
+          ref?: Json | null
+          title: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          read_at?: string | null
+          ref?: Json | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      postings: {
+        Row: {
+          board_slug: string
+          collected_at: string
+          company_id: string | null
+          company_name_raw: string | null
+          content_hash: string | null
+          created_at: string
+          description: string | null
+          external_id: string | null
+          id: string
+          location: string | null
+          posted_on: string | null
+          salary_raw: string | null
+          title: string
+          updated_at: string
+          url: string
+          work_mode: Database["public"]["Enums"]["work_mode"]
+        }
+        Insert: {
+          board_slug: string
+          collected_at?: string
+          company_id?: string | null
+          company_name_raw?: string | null
+          content_hash?: string | null
+          created_at?: string
+          description?: string | null
+          external_id?: string | null
+          id?: string
+          location?: string | null
+          posted_on?: string | null
+          salary_raw?: string | null
+          title: string
+          updated_at?: string
+          url: string
+          work_mode?: Database["public"]["Enums"]["work_mode"]
+        }
+        Update: {
+          board_slug?: string
+          collected_at?: string
+          company_id?: string | null
+          company_name_raw?: string | null
+          content_hash?: string | null
+          created_at?: string
+          description?: string | null
+          external_id?: string | null
+          id?: string
+          location?: string | null
+          posted_on?: string | null
+          salary_raw?: string | null
+          title?: string
+          updated_at?: string
+          url?: string
+          work_mode?: Database["public"]["Enums"]["work_mode"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "postings_board_slug_fkey"
+            columns: ["board_slug"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "postings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          about: string | null
+          created_at: string
+          current_salary: string | null
+          linkedin_url: string | null
+          location: string | null
+          notice_period: string | null
+          portfolio_url: string | null
+          preferred_salary: string | null
+          resume_text: string | null
+          resume_url: string | null
+          updated_at: string
+          user_id: string
+          willing_remote: boolean
+          work_pref: Database["public"]["Enums"]["work_mode"]
+          years_experience: number | null
+        }
+        Insert: {
+          about?: string | null
+          created_at?: string
+          current_salary?: string | null
+          linkedin_url?: string | null
+          location?: string | null
+          notice_period?: string | null
+          portfolio_url?: string | null
+          preferred_salary?: string | null
+          resume_text?: string | null
+          resume_url?: string | null
+          updated_at?: string
+          user_id: string
+          willing_remote?: boolean
+          work_pref?: Database["public"]["Enums"]["work_mode"]
+          years_experience?: number | null
+        }
+        Update: {
+          about?: string | null
+          created_at?: string
+          current_salary?: string | null
+          linkedin_url?: string | null
+          location?: string | null
+          notice_period?: string | null
+          portfolio_url?: string | null
+          preferred_salary?: string | null
+          resume_text?: string | null
+          resume_url?: string | null
+          updated_at?: string
+          user_id?: string
+          willing_remote?: boolean
+          work_pref?: Database["public"]["Enums"]["work_mode"]
+          years_experience?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      proposals: {
+        Row: {
+          board_slug: string | null
+          candidacy_id: string | null
+          created_at: string
+          created_by: string | null
+          decided_at: string | null
+          decision_note: string | null
+          id: string
+          kind: string | null
+          plan: Json | null
+          rationale: string | null
+          status: Database["public"]["Enums"]["proposal_status"]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          board_slug?: string | null
+          candidacy_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          decided_at?: string | null
+          decision_note?: string | null
+          id?: string
+          kind?: string | null
+          plan?: Json | null
+          rationale?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          board_slug?: string | null
+          candidacy_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          decided_at?: string | null
+          decision_note?: string | null
+          id?: string
+          kind?: string | null
+          plan?: Json | null
+          rationale?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposals_board_slug_fkey"
+            columns: ["board_slug"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "proposals_candidacy_id_fkey"
+            columns: ["candidacy_id"]
+            isOneToOne: false
+            referencedRelation: "candidacies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      target_titles: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          title: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "target_titles_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       users: {
         Row: {
           avatar_url: string | null
@@ -41,7 +610,45 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      activity_status: "queued" | "in_progress" | "succeeded" | "failed"
+      activity_type:
+        | "collect"
+        | "match"
+        | "enrich"
+        | "cover_letter"
+        | "apply"
+        | "external_fill"
+        | "proposal_exec"
+        | "cli_repair"
+        | "deploy"
+      candidacy_status:
+        | "new"
+        | "dismissed"
+        | "shortlisted"
+        | "alternative_outreach"
+        | "awaiting_cover_letter"
+        | "drafting"
+        | "in_review"
+        | "approved"
+        | "applying"
+        | "applied"
+        | "external_pending"
+        | "application_failed"
+      company_status: "new" | "researching" | "enriched" | "enrichment_failed"
+      integration_status:
+        | "not_integrated"
+        | "in_progress"
+        | "integrated"
+        | "broken"
+      proposal_status:
+        | "submitted"
+        | "approved"
+        | "rejected"
+        | "in_progress"
+        | "completed"
+        | "failed"
+      triage_decision: "shortlisted" | "alternative_outreach" | "dismissed"
+      work_mode: "remote" | "hybrid" | "office" | "unknown"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -168,6 +775,50 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      activity_status: ["queued", "in_progress", "succeeded", "failed"],
+      activity_type: [
+        "collect",
+        "match",
+        "enrich",
+        "cover_letter",
+        "apply",
+        "external_fill",
+        "proposal_exec",
+        "cli_repair",
+        "deploy",
+      ],
+      candidacy_status: [
+        "new",
+        "dismissed",
+        "shortlisted",
+        "alternative_outreach",
+        "awaiting_cover_letter",
+        "drafting",
+        "in_review",
+        "approved",
+        "applying",
+        "applied",
+        "external_pending",
+        "application_failed",
+      ],
+      company_status: ["new", "researching", "enriched", "enrichment_failed"],
+      integration_status: [
+        "not_integrated",
+        "in_progress",
+        "integrated",
+        "broken",
+      ],
+      proposal_status: [
+        "submitted",
+        "approved",
+        "rejected",
+        "in_progress",
+        "completed",
+        "failed",
+      ],
+      triage_decision: ["shortlisted", "alternative_outreach", "dismissed"],
+      work_mode: ["remote", "hybrid", "office", "unknown"],
+    },
   },
 } as const
