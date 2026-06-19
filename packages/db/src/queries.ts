@@ -113,3 +113,95 @@ export async function getProfile(db: Db, userId: string): Promise<Profile | unde
   const rows = await db<Profile[]>`select * from profiles where user_id = ${userId}`;
   return rows[0];
 }
+
+export type ProfilePatch = Partial<
+  Pick<
+    Profile,
+    | "about"
+    | "location"
+    | "willing_remote"
+    | "work_pref"
+    | "current_salary"
+    | "preferred_salary"
+    | "notice_period"
+    | "years_experience"
+    | "resume_url"
+    | "resume_text"
+    | "portfolio_url"
+    | "linkedin_url"
+  >
+>;
+
+export async function upsertProfile(db: Db, userId: string, patch: ProfilePatch): Promise<Profile> {
+  if (Object.keys(patch).length === 0) {
+    const existing = await getProfile(db, userId);
+    if (existing) return existing;
+  }
+  const insertRow = { user_id: userId, ...patch };
+  const rows = await db<Profile[]>`
+    insert into profiles ${db(insertRow as never)}
+    on conflict (user_id) do update set ${db(patch as never)}
+    returning *`;
+  return rows[0];
+}
+
+// ── candidacies (the jobs kanban) ─────────────────────────────────────────
+export type Candidacy = Row<"candidacies">;
+
+/** A candidacy joined with its posting/company for human-readable listing. */
+export interface CandidacyListItem {
+  id: string;
+  status: Enum<"candidacy_status">;
+  triage_decision: Enum<"triage_decision"> | null;
+  posting_title: string;
+  board_slug: string;
+  company_name: string | null;
+  created_at: string;
+}
+
+export async function listCandidacies(
+  db: Db,
+  userId: string,
+  opts: { status?: Enum<"candidacy_status"> } = {},
+): Promise<CandidacyListItem[]> {
+  if (opts.status) {
+    return await db<CandidacyListItem[]>`
+      select c.id, c.status, c.triage_decision, p.title as posting_title,
+             p.board_slug, co.name as company_name, c.created_at
+      from candidacies c
+      join postings p on p.id = c.posting_id
+      left join companies co on co.id = p.company_id
+      where c.user_id = ${userId} and c.status = ${opts.status}::candidacy_status
+      order by c.created_at desc`;
+  }
+  return await db<CandidacyListItem[]>`
+    select c.id, c.status, c.triage_decision, p.title as posting_title,
+           p.board_slug, co.name as company_name, c.created_at
+    from candidacies c
+    join postings p on p.id = c.posting_id
+    left join companies co on co.id = p.company_id
+    where c.user_id = ${userId}
+    order by c.created_at desc`;
+}
+
+export async function getCandidacy(db: Db, id: string): Promise<Candidacy | undefined> {
+  const rows = await db<Candidacy[]>`select * from candidacies where id = ${id}`;
+  return rows[0];
+}
+
+export async function setCandidacyStatus(
+  db: Db,
+  id: string,
+  status: Enum<"candidacy_status">,
+  opts: { reason?: string; triageDecision?: Enum<"triage_decision"> } = {},
+): Promise<Candidacy | undefined> {
+  const rows = await db<Candidacy[]>`
+    update candidacies set
+      status = ${status}::candidacy_status,
+      status_changed_at = now(),
+      triage_decision = coalesce(${opts.triageDecision ?? null}::triage_decision, triage_decision),
+      triage_reason = coalesce(${opts.reason ?? null}, triage_reason)
+    where id = ${id}
+    returning *`;
+  return rows[0];
+}
