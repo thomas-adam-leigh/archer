@@ -18,9 +18,6 @@ build/
 **/supabase/.temp
 **/supabase/.env
 
-# Obsidian vault (its own git repo)
-/agent/
-
 # OS / editor
 .DS_Store
 *.log
