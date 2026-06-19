@@ -1,0 +1,6 @@
+# Separate RUN steps (install / build / deploy) are intentional — they maximise
+# Docker layer-cache reuse, which matters for the monorepo build. So ignore the
+# "consolidate consecutive RUN" style hint.
+ignored:
+  - DL3059
+failure-threshold: warning

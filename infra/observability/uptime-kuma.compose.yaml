@@ -1,0 +1,16 @@
+# Lightweight, self-hosted observability for a tenant-of-one.
+# Add to Komodo as a stack (server: computer) — or fold into resources.toml.
+# Reverse-proxy :9126 behind Caddy for the dashboard (status.archer.careers).
+name: archer-observability
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: archer-uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime-kuma-data:/app/data
+    ports:
+      - "127.0.0.1:9126:3001"
+
+volumes:
+  uptime-kuma-data:

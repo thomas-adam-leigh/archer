@@ -1,0 +1,46 @@
+name: Board Canary
+
+# Preventive self-healing: before the daily 13:00 SAST collect, dry-run the
+# deployed surface (and, once Scout lands, each board adapter against the live
+# site). On drift, file a Proposal + issue so a fix is in flight BEFORE collect
+# fails for real. See docs/Archer-CICD-Pipeline-Vision-v0.2.md.
+on:
+  schedule:
+    - cron: '0 5 * * 1-5' # 05:00 UTC weekdays (~07:00 SAST), ahead of the 13:00 collect
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deployed API health
+        env:
+          URL: ${{ vars.ARCHER_API_HEALTH_URL }}
+        run: |
+          if [ -z "${URL:-}" ]; then
+            echo "ARCHER_API_HEALTH_URL not set — skipping liveness check."; exit 0
+          fi
+          code="$(curl -s -o /dev/null -w '%{http_code}' "$URL" || echo 000)"
+          echo "GET $URL -> $code"
+          [ "$code" = "200" ] || { echo "::warning::API health returned $code"; exit 1; }
+
+      - name: Board adapter dry-run (Scout)
+        run: |
+          echo "Scout/board adapters not present yet."
+          echo "When M0/M5 land, this step runs each adapter in --dry-run against the"
+          echo "live board and fails on selector drift — turning reactive repair preventive."
+
+      - name: File Proposal + issue on drift
+        if: failure()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash infra/canary/file-proposal.sh

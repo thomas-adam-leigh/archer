@@ -1,0 +1,4 @@
+# Single operator owns everything for now (tenant-of-one). Branch protection on
+# `main` should require review from a code owner — which is also the human gate
+# that makes agent-authored PRs safe to merge.
+* @thomas-adam-leigh

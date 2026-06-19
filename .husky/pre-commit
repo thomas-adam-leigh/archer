@@ -1,0 +1,12 @@
+# Secret scan — best-effort locally, hard gate in CI.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --no-banner --redact || {
+    echo "✖ gitleaks flagged potential secrets in staged changes — commit blocked."
+    exit 1
+  }
+else
+  echo "ℹ gitleaks not installed; CI enforces it. Install: https://github.com/gitleaks/gitleaks"
+fi
+
+# Format + lint + autofix only the staged files.
+pnpm exec lint-staged

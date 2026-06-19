@@ -8,6 +8,27 @@
   },
   "scripts": {
     "cli": "pnpm --filter @archer/cli",
-    "api": "pnpm --filter @archer/api"
+    "api": "pnpm --filter @archer/api",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "db:gen": "./packages/db/scripts/gen-types.sh",
+    "db:lint": "./packages/db/scripts/lint-migrations.sh",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@changesets/cli": "^2.27.0",
+    "@commitlint/cli": "^19.6.0",
+    "@commitlint/config-conventional": "^19.6.0",
+    "husky": "^9.1.0",
+    "lint-staged": "^15.2.0",
+    "vitest": "^3.0.0"
   }
 }
