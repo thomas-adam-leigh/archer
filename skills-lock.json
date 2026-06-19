@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "Linear Automation": {
+      "source": "claude-office-skills/skills",
+      "sourceType": "github",
+      "skillPath": "linear-automation/SKILL.md",
+      "computedHash": "89d8a80e8de458c4fb57b87c053ffbec00014ddd610e205d196e5d53383e04f2"
+    }
+  }
+}

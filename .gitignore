@@ -23,3 +23,6 @@ build/
 *.log
 .vscode/
 .idea/
+
+# Installed agent skills (manifest tracked via skills-lock.json)
+.agents/
