@@ -36,6 +36,17 @@ describe("archer-api", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects /commands/match with an invalid user", async () => {
+    const res = await app.request("/commands/match?user=not-a-uuid", post({}));
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies /commands/match with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request("/commands/match", post({}));
+    expect(res.status).toBe(401);
+  });
+
   it("rejects an invalid candidacy id", async () => {
     const res = await app.request(
       "/commands/candidacies/not-a-uuid/transition",

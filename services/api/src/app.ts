@@ -97,6 +97,25 @@ const app = new Hono()
     }
     return c.json(JSON.parse(res.stdout));
   })
+  // Trigger a Matchmaker pass by invoking the CLI. This is the per-minute matcher
+  // cron's target (20260620180000_event_engine.sql): the cron only POSTs here when
+  // `new` candidacies exist, and `match` is itself a no-op when there are none.
+  .post("/commands/match", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (user && !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    // Acceptance gate (ARC-31): collect/match run only for an accepted account.
+    if (user && !(await isAccepted(getDb(), user))) {
+      return c.json({ error: "account not accepted" }, 403);
+    }
+    const args = ["match", "--json"];
+    if (user) args.push("--user", user);
+    const res = await runCli(args);
+    if (res.code !== 0) {
+      return c.json({ error: res.stderr.trim() || "match failed", code: res.code }, 502);
+    }
+    return c.json(JSON.parse(res.stdout));
+  })
   // Jobs feed (ARC-11): a user's candidacies joined to their posting/company —
   // title, board, company, status, triage decision, match score — optionally
   // filtered by status. RLS own-rows-only (scoped on user_id); the thin clients
