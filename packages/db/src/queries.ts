@@ -363,6 +363,45 @@ export async function failCompanyEnrichment(db: Db, id: string, reason: string):
     where id = ${id}`;
 }
 
+/** One person to promote into public.contacts (structurally the CLI's FoundContact;
+ *  phone is omitted by design — the contacts schema has no phone column). */
+export interface ContactInput {
+  fullName: string;
+  email?: string | null;
+  linkedinUrl?: string | null;
+  roleTitle?: string | null;
+}
+
+/** Promote the contacts a (stubbed) enrichment found into public.contacts under the
+ *  company FK. Idempotent without a DB unique constraint: each contact is inserted
+ *  only when no existing row shares its stable key — company_id + lower(email) when it
+ *  carries an email, else company_id + lower(full_name) among the company's
+ *  emailless rows — so re-running an enriched company adds no duplicates. Returns the
+ *  count of rows newly inserted. */
+export async function upsertContacts(
+  db: Db,
+  companyId: string,
+  contacts: ContactInput[],
+): Promise<number> {
+  let inserted = 0;
+  for (const c of contacts) {
+    const email = c.email ?? null;
+    const rows = await db<{ id: string }[]>`
+      insert into contacts (company_id, full_name, email, linkedin_url, role_title)
+      select ${companyId}, ${c.fullName}, ${email}, ${c.linkedinUrl ?? null}, ${c.roleTitle ?? null}
+      where not exists (
+        select 1 from contacts where company_id = ${companyId} and
+          case
+            when ${email}::text is not null then lower(email) = lower(${email})
+            else email is null and lower(full_name) = lower(${c.fullName})
+          end
+      )
+      returning id`;
+    if (rows[0]) inserted++;
+  }
+  return inserted;
+}
+
 export interface UpsertPostingInput {
   boardSlug: string;
   url: string;

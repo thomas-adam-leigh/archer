@@ -99,6 +99,7 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
       "Enrich Fail Co Arc13",
       "Enrich Seam Co Arc13",
       "Enrich Ungated Co Arc33",
+      "Enrich Contacts Co Arc34",
     ])
       await purge(sql, n);
     await purgeSeed(sql);
@@ -116,6 +117,7 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
       "Enrich Fail Co Arc13",
       "Enrich Seam Co Arc13",
       "Enrich Ungated Co Arc33",
+      "Enrich Contacts Co Arc34",
     ])
       await purge(sql, n);
     await purgeSeed(sql);
@@ -142,6 +144,13 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
     expect(act.type).toBe("enrich");
     expect(act.status).toBe("succeeded");
     expect(act.company_id).toBe(id);
+
+    // ARC-34: the found people are promoted into the dedicated contacts table.
+    const contacts = await sql<{ full_name: string; email: string; role_title: string }[]>`
+      select full_name, email, role_title from public.contacts where company_id = ${id}`;
+    expect(contacts).toHaveLength(1);
+    expect(contacts[0].role_title).toBe("Talent Acquisition");
+    expect(contacts[0].email).toContain("talent@");
   });
 
   it("is idempotent — re-running an enriched company is a no-op (no new Activity)", async () => {
@@ -204,6 +213,38 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
 
     const company = await getCompany(sql, id);
     expect(company?.recruitment_email).toBe("jobs@mock.example");
+  });
+
+  it("promotes found contacts into public.contacts, idempotently across re-runs (ARC-34)", async () => {
+    const id = await upsertCompany(sql, "Enrich Contacts Co Arc34");
+    await shortlist(sql, id);
+    // Two people, one without an email — exercises both dedup keys
+    // (company_id + lower(email) and, for the emailless row, + lower(full_name)).
+    const mock: Enricher = () => ({
+      websiteUrl: null,
+      recruitmentEmail: null,
+      description: null,
+      linkedinUrl: null,
+      domain: null,
+      contacts: [
+        { fullName: "Rita Recruiter", email: "rita@contacts.example", roleTitle: "Recruiter" },
+        { fullName: "Nora NoEmail", linkedinUrl: "https://www.linkedin.com/in/nora" },
+      ],
+      source: { provider: "mock" },
+    });
+
+    await runEnrich(sql, { companyId: id, enrich: mock });
+    const first = await sql<{ full_name: string; email: string | null }[]>`
+      select full_name, email from public.contacts where company_id = ${id} order by full_name`;
+    expect(first).toHaveLength(2);
+    expect(first.map((c) => c.full_name)).toEqual(["Nora NoEmail", "Rita Recruiter"]);
+    expect(first.find((c) => c.full_name === "Nora NoEmail")?.email).toBeNull();
+
+    // Re-enriching (forced) the same company adds no duplicate contact rows.
+    await runEnrich(sql, { companyId: id, force: true, enrich: mock });
+    const [{ n }] = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.contacts where company_id = ${id}`;
+    expect(n).toBe(2);
   });
 
   it("refuses a company with no shortlisted candidacy and opens no Activity (gate)", async () => {
