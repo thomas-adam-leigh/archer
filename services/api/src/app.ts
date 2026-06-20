@@ -2,18 +2,25 @@ import { timingSafeEqual } from "node:crypto";
 import {
   appendEvents,
   Constants,
+  createInterruptProposal,
   createRun,
+  decideInterruptProposal,
   finishRun,
   type Json,
   loadThreadEvents,
+  loadThreadInterrupts,
   setCandidacyStatus,
 } from "@archer/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import {
+  classifyRun,
+  interruptsFromEvents,
   outcomeFromEvents,
+  type ResolvedInterrupt,
   type RunAgentInput,
   restoreThread,
+  runError,
   runStub,
   statusFromEvents,
 } from "./agui.js";
@@ -75,16 +82,91 @@ const app = new Hono()
   // AG-UI run lifecycle: open a run, drive the stubbed agent, persist its ordered
   // event log, then close the run with its terminal status/outcome. The agent is a
   // deterministic stub (see ./agui.ts) — the run loop is real, the brain is stubbed.
+  //
+  // The interrupt/resume contract is enforced here from the thread's open vs
+  // decided interrupts (classifyRun): a fresh request while interrupts are open is
+  // a RunError; a resume opens a CHILD run (parent_run_id set), records the human's
+  // decision on the proposal substrate, and continues; a replayed resume is a no-op.
   .post("/agui/run", async (c) => {
     if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
     const input = (await c.req.json().catch(() => ({}))) as RunAgentInput;
     const threadId = input.threadId;
     if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
     const db = getDb();
-    const run = await createRun(db, { threadId, input: input as unknown as Json });
+    const asJson = input as unknown as Json;
+
+    const interrupts = await loadThreadInterrupts(db, threadId);
+    const open = interrupts.filter((i) => i.status === "submitted").map((i) => i.interruptId);
+    const decided = interrupts.filter((i) => i.status !== "submitted").map((i) => i.interruptId);
+    const decision = classifyRun({ resume: input.resume, state: { open, decided } });
+
+    // Contract violation: persist a bounded RunError run so it stays auditable.
+    if (decision.action === "error") {
+      const run = await createRun(db, { threadId, input: asJson });
+      const events = runError(threadId, run.id, decision.reason);
+      await appendEvents(db, threadId, run.id, events);
+      await finishRun(db, run.id, { status: "error", error: decision.reason });
+      return c.json(
+        { threadId, runId: run.id, status: "error", error: decision.reason, events },
+        409,
+      );
+    }
+
+    // Idempotent replay: the interrupts are already decided — do nothing.
+    if (decision.action === "replay") {
+      return c.json({ threadId, status: "noop", replay: true });
+    }
+
+    // Resume: record each decision on its proposal, then open a child run whose
+    // parent is the interrupted run and let the stub continue from the payload.
+    if (decision.action === "resume") {
+      const byId = new Map(interrupts.map((i) => [i.interruptId, i]));
+      const resolved: ResolvedInterrupt[] = [];
+      let parentRunId: string | null = null;
+      for (const d of decision.resolves) {
+        const loc = byId.get(d.interruptId);
+        if (!loc) continue; // classifyRun guarantees membership; satisfies the types
+        const payload = (d.payload ?? {}) as { approved?: boolean; editedArgs?: Json };
+        const approved = d.status === "resolved" && payload.approved === true;
+        await decideInterruptProposal(db, loc.proposalId, {
+          status: approved ? "approved" : "rejected",
+          note: approved ? "approved" : "rejected",
+        });
+        resolved.push({
+          interruptId: d.interruptId,
+          toolCallId: loc.toolCallId,
+          approved,
+          editedArgs: payload.editedArgs,
+        });
+        parentRunId = loc.runId;
+      }
+      const run = await createRun(db, { threadId, parentRunId, input: asJson });
+      const events = runStub({ threadId, runId: run.id, input, parentRunId, resolved });
+      await appendEvents(db, threadId, run.id, events);
+      const status = statusFromEvents(events);
+      await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+      return c.json({ threadId, runId: run.id, status, parentRunId, events });
+    }
+
+    // Fresh run.
+    const run = await createRun(db, { threadId, input: asJson });
     const events = runStub({ threadId, runId: run.id, input });
     await appendEvents(db, threadId, run.id, events);
     const status = statusFromEvents(events);
+    // An interrupt outcome durably backs each interrupt with a proposals row.
+    if (status === "interrupted") {
+      for (const it of interruptsFromEvents(events)) {
+        await createInterruptProposal(db, {
+          threadId,
+          runId: run.id,
+          interruptId: it.id,
+          toolCallId: it.toolCallId,
+          action: it.action ?? "unknown",
+          title: it.message ?? "Approval required",
+          rationale: it.reason ?? null,
+        });
+      }
+    }
     await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
     return c.json({ threadId, runId: run.id, status, events });
   })

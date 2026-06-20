@@ -6,6 +6,7 @@
 // (docs/docs/ag-ui/concepts/02-events.md). Keeping it pure (no DB, no IO) makes
 // the ordering contract unit-testable; the route persists what this returns.
 import type { Enums, Json } from "@archer/db";
+import { type AutonomyPolicy, needsApproval } from "./autonomy.js";
 
 /** The persisted enum vocabulary — the event log's `type` column. */
 export type EventType = Enums<"event_type">;
@@ -33,15 +34,29 @@ export interface RunAgentInput {
   forwardedProps?: { outcome?: StubOutcome } & Record<string, Json>;
 }
 
+/** A resolved interrupt the route hands a resume run: the original tool call plus
+ *  the human's decision (and any edited args). Drives the resume continuation. */
+export interface ResolvedInterrupt {
+  interruptId: string;
+  toolCallId: string;
+  approved: boolean;
+  editedArgs?: Json;
+}
+
 export interface StubArgs {
   threadId: string;
   runId: string;
   input: RunAgentInput;
   parentRunId?: string | null;
+  /** The user's autonomy policy; gates whether a proposed action interrupts. */
+  policy?: AutonomyPolicy;
+  /** Set on a resume run: the decisions the continuation consumes. */
+  resolved?: ResolvedInterrupt[];
 }
 
 const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
 const STEP = "respond";
+const ACTION = "sendEmail";
 
 /**
  * Produce the ordered event log for one stubbed run. Always bounded by
@@ -50,9 +65,13 @@ const STEP = "respond";
  * proposes a tool call and, per the interrupts contract, emits StateSnapshot +
  * MessagesSnapshot before a `run_finished` carrying an interrupt outcome.
  */
-export function runStub({ threadId, runId, input, parentRunId = null }: StubArgs): AgUiEvent[] {
-  const outcome: StubOutcome =
-    input.forwardedProps?.outcome === "interrupt" ? "interrupt" : "success";
+export function runStub(args: StubArgs): AgUiEvent[] {
+  // A resume run is a different script: it consumes the human's decision and
+  // continues the conversation, rather than greeting from scratch.
+  if (args.input.resume && args.input.resume.length > 0) return resumeScript(args);
+
+  const { threadId, runId, input, parentRunId = null, policy = {} } = args;
+  const wantInterrupt = input.forwardedProps?.outcome === "interrupt";
   const messageId = `${runId}:m1`;
   const events: AgUiEvent[] = [
     { type: "run_started", data: { threadId, runId, parentRunId } },
@@ -62,27 +81,43 @@ export function runStub({ threadId, runId, input, parentRunId = null }: StubArgs
     { type: "text_message_end", data: { messageId } },
   ];
 
-  if (outcome === "success") {
+  if (!wantInterrupt) {
     events.push({ type: "state_snapshot", data: { snapshot: { phase: "greeted" } } });
     events.push({ type: "step_finished", data: { stepName: STEP } });
     events.push({ type: "run_finished", data: { threadId, runId, outcome: { type: "success" } } });
     return events;
   }
 
-  // Interrupt path: propose a tool call, then snapshot state + messages so the
-  // resumed run can rebuild context, then finish with an interrupt outcome.
+  // The stub wants to call a tool. Propose it, then let the autonomy resolver
+  // decide: an action that needs approval pauses the run (interrupt); an action
+  // the policy auto-approves runs unattended in the same run.
   const toolCallId = `${runId}:tc1`;
-  const interruptId = `${runId}:int1`;
   const proposedArgs = { to: "you@example.com", subject: "Welcome to Archer" };
   events.push({
     type: "tool_call_start",
-    data: { toolCallId, toolCallName: "sendEmail", parentMessageId: messageId },
+    data: { toolCallId, toolCallName: ACTION, parentMessageId: messageId },
   });
   events.push({
     type: "tool_call_args",
     data: { toolCallId, delta: JSON.stringify(proposedArgs) },
   });
   events.push({ type: "tool_call_end", data: { toolCallId } });
+
+  if (!needsApproval(ACTION, policy)) {
+    // Autonomous: execute without a human and finish normally.
+    events.push({
+      type: "tool_call_result",
+      data: { toolCallId, result: { status: "executed", auto: true, args: proposedArgs } },
+    });
+    events.push({ type: "state_snapshot", data: { snapshot: { phase: "completed" } } });
+    events.push({ type: "step_finished", data: { stepName: STEP } });
+    events.push({ type: "run_finished", data: { threadId, runId, outcome: { type: "success" } } });
+    return events;
+  }
+
+  // Needs approval: snapshot state + messages so the resumed run can rebuild
+  // context, then finish with an interrupt outcome carrying the responseSchema.
+  const interruptId = `${runId}:int1`;
   events.push({ type: "state_snapshot", data: { snapshot: { phase: "awaiting_approval" } } });
   events.push({
     type: "messages_snapshot",
@@ -100,6 +135,7 @@ export function runStub({ threadId, runId, input, parentRunId = null }: StubArgs
           {
             id: interruptId,
             reason: "tool_call",
+            action: ACTION,
             message: "Send the welcome email so we can confirm your address?",
             toolCallId,
             responseSchema: {
@@ -121,9 +157,69 @@ export function runStub({ threadId, runId, input, parentRunId = null }: StubArgs
   return events;
 }
 
-/** The terminal run status implied by a run's final event outcome. */
+const RESUME_STEP = "resume";
+
+/**
+ * The scripted continuation a resume run emits. It consumes each resolved
+ * interrupt (the human's approve/reject + any edited args), records the outcome
+ * as a ToolCallResult, then confirms in text and finishes the run successfully.
+ * Pure, so the resume contract is unit-testable independent of the DB.
+ */
+function resumeScript({
+  threadId,
+  runId,
+  parentRunId = null,
+  resolved = [],
+}: StubArgs): AgUiEvent[] {
+  const messageId = `${runId}:m1`;
+  const events: AgUiEvent[] = [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "step_started", data: { stepName: RESUME_STEP } },
+  ];
+  for (const r of resolved) {
+    events.push({
+      type: "tool_call_result",
+      data: {
+        toolCallId: r.toolCallId,
+        interruptId: r.interruptId,
+        result: r.approved
+          ? { status: "executed", args: r.editedArgs ?? null }
+          : { status: "skipped" },
+      },
+    });
+  }
+  const approved = resolved.some((r) => r.approved);
+  const text = approved ? "Done — I've sent it." : "Okay, I won't send it.";
+  events.push({ type: "text_message_start", data: { messageId, role: "assistant" } });
+  events.push({ type: "text_message_content", data: { messageId, delta: text } });
+  events.push({ type: "text_message_end", data: { messageId } });
+  events.push({
+    type: "state_snapshot",
+    data: { snapshot: { phase: approved ? "completed" : "declined" } },
+  });
+  events.push({ type: "step_finished", data: { stepName: RESUME_STEP } });
+  events.push({ type: "run_finished", data: { threadId, runId, outcome: { type: "success" } } });
+  return events;
+}
+
+/** The RunError event pair for a request that violates a contract rule. Bounded
+ *  by run_started so a rejected request is still an auditable, persisted run. */
+export function runError(
+  threadId: string,
+  runId: string,
+  reason: string,
+  parentRunId: string | null = null,
+): AgUiEvent[] {
+  return [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "run_error", data: { threadId, runId, message: reason } },
+  ];
+}
+
+/** The terminal run status implied by a run's final event. */
 export function statusFromEvents(events: AgUiEvent[]): Enums<"run_status"> {
   const last = events.at(-1);
+  if (last?.type === "run_error") return "error";
   const outcome = (last?.data as { outcome?: { type?: string } } | undefined)?.outcome;
   return outcome?.type === "interrupt" ? "interrupted" : "completed";
 }
@@ -132,6 +228,102 @@ export function statusFromEvents(events: AgUiEvent[]): Enums<"run_status"> {
 export function outcomeFromEvents(events: AgUiEvent[]): Json | undefined {
   const last = events.at(-1);
   return (last?.data as { outcome?: Json } | undefined)?.outcome;
+}
+
+/** One interrupt the run proposed (the shape the proposals substrate persists). */
+export interface EmittedInterrupt {
+  id: string;
+  reason?: string;
+  message?: string;
+  toolCallId: string;
+  action?: string;
+}
+
+/** The interrupts carried by a run's terminal interrupt outcome (empty otherwise). */
+export function interruptsFromEvents(events: AgUiEvent[]): EmittedInterrupt[] {
+  const outcome = outcomeFromEvents(events) as
+    | { type?: string; interrupts?: EmittedInterrupt[] }
+    | undefined;
+  return outcome?.type === "interrupt" ? (outcome.interrupts ?? []) : [];
+}
+
+// ── The interrupt/resume contract ───────────────────────────────────────────
+// One run request, four outcomes, decided purely from the thread's interrupt
+// state (which interrupts are still open vs already decided) and the request.
+// Keeping this a pure function makes the contract rules unit-testable without a
+// DB; the route resolves the facts from the proposals substrate and applies it.
+
+/** A resume directive: a decision on one open interrupt. */
+export interface ResumeDirective {
+  interruptId: string;
+  status: "resolved" | "cancelled";
+  payload?: Json;
+}
+
+/** The thread's interrupt state, projected from its proposals. */
+export interface ThreadInterruptState {
+  /** interruptIds still awaiting a decision (proposal status 'submitted'). */
+  open: string[];
+  /** interruptIds already decided on this thread (for idempotent replay). */
+  decided: string[];
+}
+
+/** What the route should do with a run request. */
+export type RunDecision =
+  | { action: "start" }
+  | { action: "resume"; resolves: ResumeDirective[] }
+  | { action: "replay" }
+  | { action: "error"; reason: string };
+
+/**
+ * Classify a run request against the thread's interrupt state. Enforces the four
+ * contract rules:
+ *  - pending-interrupts-block-new-input: a non-resume request while interrupts
+ *    are open is a RunError.
+ *  - same-thread: a resume may only target interrupts known to this thread; an
+ *    unknown interruptId (e.g. another thread's) is a RunError.
+ *  - cover-all-open-interrupts: a resume that resolves any open interrupt must
+ *    resolve ALL of them, or it is a RunError.
+ *  - idempotent replay: a resume that only references already-decided interrupts
+ *    is a no-op replay, not a new run.
+ */
+export function classifyRun({
+  resume,
+  state,
+}: {
+  resume?: ResumeDirective[];
+  state: ThreadInterruptState;
+}): RunDecision {
+  const open = new Set(state.open);
+  const decided = new Set(state.decided);
+
+  if (!resume || resume.length === 0) {
+    if (open.size > 0) {
+      return { action: "error", reason: "pending interrupts must be resolved before new input" };
+    }
+    return { action: "start" };
+  }
+
+  // same-thread: every referenced interrupt must be known to this thread.
+  for (const r of resume) {
+    if (!open.has(r.interruptId) && !decided.has(r.interruptId)) {
+      return { action: "error", reason: `unknown interrupt: ${r.interruptId}` };
+    }
+  }
+
+  const targetsOpen = resume.filter((r) => open.has(r.interruptId));
+  // idempotent replay: nothing still open is being resolved.
+  if (targetsOpen.length === 0) return { action: "replay" };
+
+  // cover-all: resolving any open interrupt requires resolving every one.
+  const provided = new Set(targetsOpen.map((r) => r.interruptId));
+  for (const id of open) {
+    if (!provided.has(id)) {
+      return { action: "error", reason: "resume must cover all open interrupts" };
+    }
+  }
+
+  return { action: "resume", resolves: targetsOpen };
 }
 
 /** A restored message turn — the shape a MessagesSnapshot carries. */

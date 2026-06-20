@@ -372,3 +372,84 @@ export async function finishRun(
     returning *`;
   return rows[0];
 }
+
+// ── interaction: the interrupt → approval substrate (proposals table) ──────
+// A run that pauses for a human emits an interrupt; we durably back each one with
+// a proposals row (kind 'tool_call'). The interrupt's locator lives in plan jsonb
+// — the binding between the AG-UI interrupt and its approval — and the decision is
+// recorded on the same row (status + decided_at + decision_note). No new table:
+// the interaction migration deliberately reuses public.proposals.
+
+export interface InterruptProposalInput {
+  threadId: string;
+  runId: string;
+  interruptId: string;
+  toolCallId: string;
+  action: string;
+  title: string;
+  rationale?: string | null;
+}
+
+/** Open a proposal for one emitted interrupt (status 'submitted' = awaiting a
+ *  decision). The plan carries the locator linking it back to the interrupt. */
+export async function createInterruptProposal(
+  db: Db,
+  p: InterruptProposalInput,
+): Promise<{ id: string }> {
+  const plan = {
+    threadId: p.threadId,
+    runId: p.runId,
+    interruptId: p.interruptId,
+    toolCallId: p.toolCallId,
+    action: p.action,
+  };
+  const rows = await db<{ id: string }[]>`
+    insert into proposals (kind, title, rationale, plan, status, created_by)
+    values ('tool_call', ${p.title}, ${p.rationale ?? null}, ${db.json(plan as never)},
+            'submitted', 'agent')
+    returning id`;
+  return rows[0];
+}
+
+/** One interrupt of a thread, projected from its proposals (the locator + status). */
+export interface ThreadInterrupt {
+  proposalId: string;
+  interruptId: string;
+  runId: string;
+  toolCallId: string;
+  action: string | null;
+  status: Enum<"proposal_status">;
+}
+
+/** Every interrupt ever raised on a thread, oldest first — the route splits these
+ *  into open (status 'submitted') vs decided to enforce the resume contract. */
+export async function loadThreadInterrupts(db: Db, threadId: string): Promise<ThreadInterrupt[]> {
+  return await db<ThreadInterrupt[]>`
+    select id as "proposalId",
+           plan->>'interruptId' as "interruptId",
+           plan->>'runId' as "runId",
+           plan->>'toolCallId' as "toolCallId",
+           plan->>'action' as action,
+           status
+    from proposals
+    where kind = 'tool_call' and plan->>'threadId' = ${threadId}
+    order by created_at asc`;
+}
+
+/** Record a human's decision on an interrupt's proposal. Idempotent: only a
+ *  still-open ('submitted') proposal is decided, so a replayed resume is a no-op.
+ *  Returns the row when this call made the decision, undefined when already decided. */
+export async function decideInterruptProposal(
+  db: Db,
+  proposalId: string,
+  patch: { status: Enum<"proposal_status">; note?: string | null },
+): Promise<{ id: string } | undefined> {
+  const rows = await db<{ id: string }[]>`
+    update proposals set
+      status = ${patch.status}::proposal_status,
+      decided_at = now(),
+      decision_note = coalesce(${patch.note ?? null}, decision_note)
+    where id = ${proposalId} and status = 'submitted'
+    returning id`;
+  return rows[0];
+}
