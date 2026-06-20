@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+  type Db,
   failActivity,
   getBoard,
   insertCandidacy,
@@ -13,6 +14,79 @@ import type { Command } from "commander";
 import { getAdapter } from "../adapters/index.js";
 import { NotIntegratedError, type ScrapedPosting } from "../adapters/types.js";
 import { CliError, type GlobalOpts, output, requireUser, run } from "../context.js";
+
+/** The structured detail a collect run records on its Activity and prints. */
+export interface CollectSummary {
+  board: string;
+  scraped: number;
+  postingsNew: number;
+  candidaciesNew: number;
+  activityId: string;
+}
+
+export interface RunCollectArgs {
+  board: string;
+  userId: string;
+  titles: string[];
+  /** Whether the postings came from a fixture file (recorded on the Activity). */
+  fixture: boolean;
+  /** The browser/fixture boundary: produces the postings to ingest. */
+  gather: () => Promise<ScrapedPosting[]>;
+}
+
+/**
+ * Run one collect as the universal Activity primitive: open an `activities` row,
+ * gather postings (the only place the live-browser/fixture boundary lives), upsert
+ * companies + postings idempotently, fan a candidacy out per user-per-posting, and
+ * record the run as succeeded/failed. A thrown `gather` (e.g. `NotIntegratedError`)
+ * still leaves a `failed` Activity behind — the signal the self-heal Mechanic reacts
+ * to — before the error propagates. Exercised end-to-end via `--fixture`, no browser.
+ */
+export async function runCollect(db: Db, args: RunCollectArgs): Promise<CollectSummary> {
+  const activity = await startActivity(db, {
+    type: "collect",
+    boardSlug: args.board,
+    userId: args.userId,
+    detail: { titles: args.titles, fixture: args.fixture },
+  });
+  try {
+    const scraped = await args.gather();
+    let postingsNew = 0;
+    let candidaciesNew = 0;
+    for (const s of scraped) {
+      const companyId = s.companyName ? await upsertCompany(db, s.companyName) : null;
+      const posting = await upsertPosting(db, {
+        boardSlug: args.board,
+        url: s.url,
+        title: s.title,
+        companyId,
+        companyNameRaw: s.companyName ?? null,
+        externalId: s.externalId ?? null,
+        location: s.location ?? null,
+        workMode: s.workMode,
+        salaryRaw: s.salaryRaw ?? null,
+        description: s.description ?? null,
+        postedOn: s.postedOn ?? null,
+      });
+      if (posting.inserted) postingsNew++;
+      const candidacy = await insertCandidacy(db, args.userId, posting.id);
+      if (candidacy) candidaciesNew++;
+    }
+    const summary = {
+      board: args.board,
+      scraped: scraped.length,
+      postingsNew,
+      candidaciesNew,
+      activityId: activity.id,
+    };
+    await succeedActivity(db, activity.id, summary);
+    return summary;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await failActivity(db, activity.id, msg);
+    throw err;
+  }
+}
 
 interface CollectOpts {
   titles?: string;
@@ -89,52 +163,23 @@ export function registerCollect(program: Command): void {
 
         // Write path: wrap collection in an Activity so failures are recorded
         // (a failed collect is what the self-heal Mechanic reacts to).
-        const activity = await startActivity(ctx.db, {
-          type: "collect",
-          boardSlug: board,
-          userId,
-          detail: { titles, fixture: Boolean(opts.fixture) },
-        });
         try {
-          const scraped = await gather();
-          let postingsNew = 0;
-          let candidaciesNew = 0;
-          for (const s of scraped) {
-            const companyId = s.companyName ? await upsertCompany(ctx.db, s.companyName) : null;
-            const posting = await upsertPosting(ctx.db, {
-              boardSlug: board,
-              url: s.url,
-              title: s.title,
-              companyId,
-              companyNameRaw: s.companyName ?? null,
-              externalId: s.externalId ?? null,
-              location: s.location ?? null,
-              workMode: s.workMode,
-              salaryRaw: s.salaryRaw ?? null,
-              description: s.description ?? null,
-              postedOn: s.postedOn ?? null,
-            });
-            if (posting.inserted) postingsNew++;
-            const candidacy = await insertCandidacy(ctx.db, userId, posting.id);
-            if (candidacy) candidaciesNew++;
-          }
-          const summary = {
+          const summary = await runCollect(ctx.db, {
             board,
-            scraped: scraped.length,
-            postingsNew,
-            candidaciesNew,
-            activityId: activity.id,
-          };
-          await succeedActivity(ctx.db, activity.id, summary);
+            userId,
+            titles,
+            fixture: Boolean(opts.fixture),
+            gather,
+          });
           output(ctx, summary, (s) =>
             console.log(
               `${board}: scraped ${s.scraped}, ${s.postingsNew} new postings, ${s.candidaciesNew} new candidacies`,
             ),
           );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          await failActivity(ctx.db, activity.id, msg);
-          if (err instanceof NotIntegratedError) throw new CliError(msg);
+          // runCollect already recorded the failed Activity; surface NotIntegratedError
+          // as a user-facing CliError (exit 2), anything else as an unexpected crash.
+          if (err instanceof NotIntegratedError) throw new CliError(err.message);
           throw err;
         }
       });
