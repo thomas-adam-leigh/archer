@@ -1,21 +1,27 @@
 import { timingSafeEqual } from "node:crypto";
 import {
+  type AccountDecision,
   appendEvents,
   applyVersionProposal,
   Constants,
+  checkReadiness,
   createInterruptProposal,
   createProfileVersion,
   createRun,
+  decideAccount,
   decideInterruptProposal,
   finishRun,
+  getAccount,
   getLiveProfileVersion,
   getThreadOwner,
   ingestProposedVersion,
   ingestVoicenote,
+  isAccepted,
   type Json,
   loadThreadEvents,
   loadThreadInterrupts,
   setCandidacyStatus,
+  submitAccountForReview,
   submitVersionProposal,
   type VersionDecision,
 } from "@archer/db";
@@ -68,6 +74,10 @@ const app = new Hono()
     if (!BOARD_RE.test(board)) return c.json({ error: "invalid board" }, 400);
     const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
     if (user && !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    // Acceptance gate (ARC-31): collect/match run only for an accepted account.
+    if (user && !(await isAccepted(getDb(), user))) {
+      return c.json({ error: "account not accepted" }, 403);
+    }
     const args = ["collect", board, "--json"];
     if (user) args.push("--user", user);
     const res = await runCli(args);
@@ -341,6 +351,52 @@ const app = new Hono()
       provider,
     });
     return c.json({ threadId, status: "transcribed", transcript, ...result });
+  })
+  // ── Acceptance gate (ARC-31) ────────────────────────────────────────────────
+  // The first human gate: an account lifecycle (onboarding → submitted →
+  // under_review → accepted | rejected). Read a user's gate state + the mechanical
+  // readiness check (1–5 target titles + negative criteria + an approved profile
+  // version) the owner's acceptance requires.
+  .get("/accounts/state", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const db = getDb();
+    const account = await getAccount(db, user);
+    const readiness = await checkReadiness(db, user);
+    return c.json({ user, status: account?.status ?? "onboarding", readiness });
+  })
+  // A user submits their account for review (just-in-time provisions the row).
+  .post("/accounts/submit", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as { userId?: string };
+    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const account = await submitAccountForReview(getDb(), user);
+    return c.json({ user, status: account.status });
+  })
+  // The owner's ≤24h review decision: start review, accept (requires readiness),
+  // or reject with a note. Owner-facing (the service-role path) like the
+  // profile-version decide route; RLS has no client write policy on accounts.
+  .post("/accounts/:userId/decide", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.param("userId");
+    if (!UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      action?: string;
+      note?: string | null;
+    };
+    if (body.action !== "review" && body.action !== "accept" && body.action !== "reject") {
+      return c.json({ error: "'action' must be review, accept, or reject" }, 400);
+    }
+    const decision =
+      body.action === "review"
+        ? ({ action: "review" } as AccountDecision)
+        : ({ action: body.action, note: body.note } as AccountDecision);
+    const result = await decideAccount(getDb(), user, decision);
+    // A refused decision (not ready, or not awaiting review) is a 409 conflict.
+    if (result.error) return c.json({ user, ...result }, 409);
+    return c.json({ user, ...result });
   })
   // Webhook: a redirected (external) application form was inserted.
   .post("/hooks/external-form", async (c) => {

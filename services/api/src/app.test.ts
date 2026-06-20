@@ -142,4 +142,37 @@ describe("archer-api", () => {
     );
     expect(res.status).toBe(401);
   });
+
+  // ── Acceptance gate (ARC-31) ──────────────────────────────────────────────
+  it("rejects account state read with an invalid user", async () => {
+    const res = await app.request("/accounts/state?user=not-a-uuid");
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies account state read with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(`/accounts/state?user=${VALID_UUID}`);
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects account submit with an invalid user", async () => {
+    const res = await app.request("/accounts/submit", post({ userId: "not-a-uuid" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an account decision with an invalid user", async () => {
+    const res = await app.request("/accounts/not-a-uuid/decide", post({ action: "accept" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an account decision with an invalid action", async () => {
+    const res = await app.request(`/accounts/${VALID_UUID}/decide`, post({ action: "nope" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies an account decision with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(`/accounts/${VALID_UUID}/decide`, post({ action: "accept" }));
+    expect(res.status).toBe(401);
+  });
 });

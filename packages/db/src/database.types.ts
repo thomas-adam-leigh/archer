@@ -12,6 +12,44 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      accounts: {
+        Row: {
+          created_at: string
+          review_note: string | null
+          reviewed_at: string | null
+          status: Database["public"]["Enums"]["account_status"]
+          submitted_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          review_note?: string | null
+          reviewed_at?: string | null
+          status?: Database["public"]["Enums"]["account_status"]
+          submitted_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          review_note?: string | null
+          reviewed_at?: string | null
+          status?: Database["public"]["Enums"]["account_status"]
+          submitted_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       activities: {
         Row: {
           board_slug: string | null
@@ -1228,6 +1266,12 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      account_status:
+        | "onboarding"
+        | "submitted"
+        | "under_review"
+        | "accepted"
+        | "rejected"
       activity_status: "queued" | "in_progress" | "succeeded" | "failed"
       activity_type:
         | "collect"
@@ -1435,6 +1479,13 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      account_status: [
+        "onboarding",
+        "submitted",
+        "under_review",
+        "accepted",
+        "rejected",
+      ],
       activity_status: ["queued", "in_progress", "succeeded", "failed"],
       activity_type: [
         "collect",
