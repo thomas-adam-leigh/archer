@@ -14,6 +14,25 @@ Every route except `/` and `/health` is fail-closed. Send the shared secret as
 `x-archer-secret: $ARCHER_API_SECRET`. With no secret configured, routes are
 denied unless `ARCHER_API_DEV_OPEN=1` (non-production only).
 
+## Command triggers — the orchestrating agent's surface
+
+The pipeline stages an external orchestrator (the scheduler/agent) pokes. Each is
+fail-closed (see Auth) and follows the "API runs the CLI" model: the route shells
+out to `@archer/cli` (browser work and the stubbed LinkedIn MCP + Firecrawl tool
+calls stay isolated in the CLI process), parses its `--json`, and returns it. A
+non-zero CLI exit surfaces as `502 { error, code }`.
+
+| Trigger | Stage | Notes |
+| --- | --- | --- |
+| `POST /commands/collect/:board?user=<uuid>` | scrape a board → postings + `new` candidacies | `:board` is `^[a-z][a-z0-9_-]{0,63}$`; gated to an **accepted** account (`403` otherwise) |
+| `POST /commands/match?user=<uuid>` | Matchmaker triages `new` candidacies → shortlisted / alternative_outreach / dismissed | idempotent no-op when nothing is `new`; gated to an accepted account |
+| `POST /commands/enrich/:companyId` | Researcher enriches a shortlisted company → `enriched`, then advances its shortlisted / alternative_outreach candidacies → `awaiting_cover_letter` | `:companyId` is a uuid; **company-scoped, no user gate**; idempotent (an already-`enriched` company is a no-op); refused (`502`) unless a shortlisted candidacy sits behind the company |
+
+`user` defaults to `ARCHER_USER_ID` when omitted. The collect → match → enrich
+slice is locked end-to-end (no live browser/LLM/MCP) by
+`services/cli/src/enrich-e2e.test.ts`, run against a migrated Postgres when
+`TEST_DATABASE_URL` is set.
+
 ## `POST /agui/run` — run lifecycle
 
 One endpoint, four outcomes, decided from the thread's open vs decided interrupts
