@@ -9,6 +9,7 @@
   "scripts": {
     "cli": "pnpm --filter @archer/cli",
     "api": "pnpm --filter @archer/api",
+    "scheduler": "bash services/scheduler/scripts/up.sh",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
