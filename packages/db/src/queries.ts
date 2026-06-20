@@ -499,3 +499,212 @@ export async function decideInterruptProposal(
     returning id`;
   return rows[0];
 }
+
+// ── profile versions: the approvable unit + apply executor ─────────────────
+// A profile_version is the whole-version draft a user approves as a unit (see
+// 20260620150000_archer_profile_spine.sql). The live profile = the spine rows of
+// the one version with status 'approved' (a partial unique index enforces ≤1 per
+// user) + profiles.attributes synced from that version's snapshot. This is the
+// domain-specific apply executor ARC-27 owns: it consumes the Substrate's
+// proposal/resume machinery (a kind 'profile_version' proposal stands in for the
+// submitted draft) and, on approve, atomically flips the live version. It does
+// NOT rebuild the generic interrupt/autonomy primitives.
+export type ProfileVersion = Row<"profile_versions">;
+
+export interface NewProfileVersion {
+  userId: string;
+  label?: string | null;
+  /** Profile-wide jsonb snapshot (ideal_job, ai_fluency, your-story, Otta prompts). */
+  attributes?: Json;
+  details?: Json;
+}
+
+/** Create a fresh draft version. `version_no` is the next per-user ordinal, so
+ *  versions cycle/rollback in a stable order. Spine child rows are attached by
+ *  the caller via the returned `id` (version_id); approval flips this whole unit. */
+export async function createProfileVersion(db: Db, v: NewProfileVersion): Promise<ProfileVersion> {
+  const rows = await db<ProfileVersion[]>`
+    insert into profile_versions (user_id, version_no, status, label, attributes, details)
+    values (
+      ${v.userId},
+      (select coalesce(max(version_no), 0) + 1 from profile_versions where user_id = ${v.userId}),
+      'draft',
+      ${v.label ?? null},
+      ${v.attributes != null ? db.json(v.attributes as never) : db.json({} as never)},
+      ${v.details != null ? db.json(v.details as never) : db.json({} as never)}
+    )
+    returning *`;
+  return rows[0];
+}
+
+/** The user's live (approved) profile version, or undefined before first approval —
+ *  the empty-state signal the onboarding gate keys on. */
+export async function getLiveProfileVersion(
+  db: Db,
+  userId: string,
+): Promise<ProfileVersion | undefined> {
+  const rows = await db<ProfileVersion[]>`
+    select * from profile_versions where user_id = ${userId} and status = 'approved'`;
+  return rows[0];
+}
+
+export interface VersionProposalInput {
+  userId: string;
+  versionId: string;
+  title: string;
+  rationale?: string | null;
+}
+
+/** Submit a draft version for approval: open a kind 'profile_version' proposal
+ *  (provenance — the {userId, versionId} locator — rides on plan jsonb, not an FK)
+ *  and flip the version to 'proposed', atomically. Returns the proposal id. */
+export async function submitVersionProposal(
+  db: Db,
+  p: VersionProposalInput,
+): Promise<{ id: string }> {
+  return await db.begin(async (tx) => {
+    const plan = { kind: "profile_version", userId: p.userId, versionId: p.versionId };
+    const rows = await tx<{ id: string }[]>`
+      insert into proposals (kind, title, rationale, plan, status, created_by)
+      values ('profile_version', ${p.title}, ${p.rationale ?? null},
+              ${tx.json(plan as never)}, 'submitted', 'agent')
+      returning id`;
+    await tx`
+      update profile_versions set status = 'proposed'
+      where id = ${p.versionId} and user_id = ${p.userId} and status = 'draft'`;
+    return rows[0];
+  });
+}
+
+/** A human's decision on a submitted version proposal. `approve` (optionally with
+ *  `edits` = approve-with-edits, a full replacement of the version's profile-wide
+ *  fields) materialises the version as live; `reject` leaves the live profile
+ *  untouched. */
+export type VersionDecision =
+  | {
+      action: "approve";
+      edits?: { attributes?: Json; label?: string | null };
+      note?: string | null;
+    }
+  | { action: "reject"; note?: string | null };
+
+export interface VersionApplyResult {
+  /** Terminal proposal status: 'completed' | 'rejected' | 'failed' (or the prior
+   *  terminal status on an idempotent replay of an already-decided proposal). */
+  proposalStatus: Enum<"proposal_status">;
+  /** The target version's status after the decision, if the version still exists. */
+  versionStatus: Enum<"profile_version_status"> | null;
+  /** Set when the apply failed: the live profile was left untouched. */
+  error?: string;
+}
+
+/**
+ * The profile-version apply executor. Decides a submitted 'profile_version'
+ * proposal:
+ *  - approve / approve-with-edits: in ONE transaction, optionally apply the
+ *    edited payload, supersede the prior live version, flip the target version to
+ *    'approved', and sync profiles.attributes from its snapshot. The proposal
+ *    becomes 'completed'. Any failure rolls the transaction back (the live profile
+ *    is untouched) and the proposal is marked 'failed'.
+ *  - reject: mark the proposal 'rejected' and the version 'rejected'; the live
+ *    profile is untouched.
+ * Idempotent: only a still-'submitted' proposal is acted on, so a replay is a
+ * no-op that returns the proposal's existing terminal state.
+ */
+export async function applyVersionProposal(
+  db: Db,
+  proposalId: string,
+  decision: VersionDecision,
+): Promise<VersionApplyResult> {
+  if (decision.action === "reject") {
+    const claimed = await db<{ plan: { userId: string; versionId: string } }[]>`
+      update proposals set
+        status = 'rejected', decided_at = now(),
+        decision_note = coalesce(${decision.note ?? null}, decision_note)
+      where id = ${proposalId} and kind = 'profile_version' and status = 'submitted'
+      returning plan`;
+    if (!claimed[0]) return await replayedOutcome(db, proposalId);
+    const { userId, versionId } = claimed[0].plan;
+    await db`
+      update profile_versions set status = 'rejected'
+      where id = ${versionId} and user_id = ${userId} and status in ('proposed', 'draft')`;
+    return { proposalStatus: "rejected", versionStatus: await versionStatus(db, versionId) };
+  }
+
+  // approve / approve-with-edits. Claim the proposal to 'in_progress' first
+  // (idempotent on 'submitted'); a concurrent or replayed call sees no row.
+  const claimed = await db<{ plan: { userId: string; versionId: string } }[]>`
+    update proposals set status = 'in_progress', decided_at = now(),
+      decision_note = coalesce(${decision.note ?? null}, decision_note)
+    where id = ${proposalId} and kind = 'profile_version' and status = 'submitted'
+    returning plan`;
+  if (!claimed[0]) return await replayedOutcome(db, proposalId);
+  const { userId, versionId } = claimed[0].plan;
+  const edits = decision.edits;
+
+  try {
+    await db.begin(async (tx) => {
+      if (edits) {
+        await tx`
+          update profile_versions set
+            attributes = coalesce(${edits.attributes != null ? tx.json(edits.attributes as never) : null}::jsonb, attributes),
+            label = coalesce(${edits.label ?? null}, label)
+          where id = ${versionId} and user_id = ${userId}`;
+      }
+      // Supersede the prior live version so the partial unique index never clashes.
+      await tx`
+        update profile_versions set status = 'superseded'
+        where user_id = ${userId} and status = 'approved'`;
+      // Flip the target version live — only a still-proposable version qualifies.
+      const approved = await tx<{ attributes: Json }[]>`
+        update profile_versions set status = 'approved'
+        where id = ${versionId} and user_id = ${userId} and status in ('proposed', 'draft')
+        returning attributes`;
+      if (!approved[0]) {
+        throw new Error(`version ${versionId} is not in a proposable state`);
+      }
+      // Sync the live profile-wide jsonb from the now-live version's snapshot.
+      await tx`
+        insert into profiles (user_id, attributes)
+        values (${userId}, ${tx.json(approved[0].attributes as never)})
+        on conflict (user_id) do update set attributes = excluded.attributes`;
+      await tx`update proposals set status = 'completed' where id = ${proposalId}`;
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db`
+      update proposals set status = 'failed', decision_note = ${message}
+      where id = ${proposalId}`;
+    return {
+      proposalStatus: "failed",
+      versionStatus: await versionStatus(db, versionId),
+      error: message,
+    };
+  }
+
+  return { proposalStatus: "completed", versionStatus: await versionStatus(db, versionId) };
+}
+
+/** The current status of a version, or null if it no longer exists. */
+async function versionStatus(
+  db: Db,
+  versionId: string,
+): Promise<Enum<"profile_version_status"> | null> {
+  const rows = await db<{ status: Enum<"profile_version_status"> }[]>`
+    select status from profile_versions where id = ${versionId}`;
+  return rows[0]?.status ?? null;
+}
+
+/** The outcome of a replay (the proposal was already decided): report its current
+ *  status and the target version's status without mutating anything. */
+async function replayedOutcome(db: Db, proposalId: string): Promise<VersionApplyResult> {
+  const rows = await db<{ status: Enum<"proposal_status">; plan: { versionId?: string } }[]>`
+    select status, plan from proposals where id = ${proposalId}`;
+  const proposal = rows[0];
+  if (!proposal) throw new Error(`proposal ${proposalId} not found`);
+  const vId = proposal.plan?.versionId;
+  return {
+    proposalStatus: proposal.status,
+    versionStatus: vId ? await versionStatus(db, vId) : null,
+  };
+}
