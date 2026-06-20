@@ -11,6 +11,15 @@ export type Board = Row<"boards">;
 export type Activity = Row<"activities">;
 export type TargetTitle = Row<"target_titles">;
 export type Profile = Row<"profiles">;
+export type Thread = Row<"threads">;
+
+// ── threads (the per-user conversation spine) ─────────────────────────────
+/** A user's threads, newest first. The signup trigger bootstraps the first one
+ *  (see 20260620120000_bootstrap_first_thread.sql); later runs may open more. */
+export async function listThreads(db: Db, userId: string): Promise<Thread[]> {
+  return await db<Thread[]>`
+    select * from threads where user_id = ${userId} order by created_at desc`;
+}
 
 // ── boards ────────────────────────────────────────────────────────────────
 export async function listBoards(db: Db): Promise<Board[]> {
