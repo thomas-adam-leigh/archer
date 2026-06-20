@@ -296,6 +296,21 @@ export async function getCompany(db: Db, id: string): Promise<Company | undefine
   return rows[0];
 }
 
+/** The shortlist gate: true when at least one candidacy (across users) pursues a
+ *  posting at this company with a `shortlisted` or `alternative_outreach` decision.
+ *  Enrichment fires only behind a shortlist — no wasted research on dismissed or
+ *  never-matched companies (candidacy → posting → company join). */
+export async function companyHasShortlistedCandidacy(db: Db, companyId: string): Promise<boolean> {
+  const rows = await db<{ ok: boolean }[]>`
+    select exists (
+      select 1 from candidacies c
+      join postings p on p.id = c.posting_id
+      where p.company_id = ${companyId}
+        and c.status in ('shortlisted', 'alternative_outreach')
+    ) as ok`;
+  return rows[0]?.ok ?? false;
+}
+
 /** Move a company through its enrichment lifecycle
  *  (new → researching → enriched | enrichment_failed). Returns the updated row. */
 export async function setCompanyStatus(
