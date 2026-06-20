@@ -23,12 +23,33 @@ every time from those two places before doing anything.
 
 ## 2. Decide the single next step
 
+- **Before creating anything, reuse what exists.** A milestone often already has an
+  issue (possibly in Backlog from earlier planning). Search the project/milestone
+  first and **use the existing issue** (move it to In Progress) rather than creating a
+  near-duplicate. Only create a new issue if the milestone genuinely has none.
 - If a milestone is **not yet broken down into issues**, create the issues needed to
   deliver it: small, independently shippable, vertical slices, each with a clear
   acceptance check. Put them on the correct milestone, ordered by dependency. Creating
   issues can be the whole of a run when that's what's missing.
 - Otherwise pick the **highest-priority unblocked issue** that isn't already done or
   covered by an open PR. Do exactly one issue this run — depth over breadth.
+
+## Keep Linear in sync (the board must reflect reality, every run)
+
+Linear is the source of truth, so it must never drift from `main`. On every run:
+
+- **One issue per milestone, linked.** Every issue you work must be attached to its
+  milestone (that's what drives milestone progress). If you find **duplicate** issues
+  covering the same milestone/work, keep the richest one and mark the others
+  **Duplicate of** it (don't leave stale Backlog twins inflating the count).
+- **Statuses track the code:** Backlog → **In Progress** the moment you start →
+  **Done** the moment its PR merges. Never leave a merged issue un-Done or an
+  in-flight issue in Backlog.
+- **Reconcile before you build:** at orient time, fix any issue whose status disagrees
+  with reality (merged-but-not-Done, shipped-but-still-Backlog, duplicates) — that
+  cleanup alone is a valid use of a run if the board is messy.
+- Keep the project/milestone descriptions honest if scope changed; link each PR back
+  to its issue.
 
 ## 3. Implement on the Linear branch
 
