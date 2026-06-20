@@ -46,16 +46,27 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+      # `db push` connects directly to Postgres, so it needs the linked project
+      # (via `supabase link`) plus the DB password — `--project-ref` is NOT a
+      # `db push` flag. SUPABASE_DB_PASSWORD is read from the env by the CLI.
+      - name: Link to the Supabase project
+        working-directory: packages/db
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase link --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
       - name: Dry-run — list migrations that will be applied
         working-directory: packages/db
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --project-ref ${{ vars.SUPABASE_PROJECT_REF }} --dry-run
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push --dry-run
       - name: Apply migrations to Supabase
         working-directory: packages/db
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push
       - name: Regenerate @archer/db types
         run: bash packages/db/scripts/gen-types.sh
       - name: Commit updated types if regeneration produced a diff
