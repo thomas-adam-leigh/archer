@@ -89,7 +89,6 @@ jobs:
       - name: Drift gate — types must match migrations
         run: bash packages/db/scripts/gen-types.sh --check
       - name: Migration lint (squawk)
-        continue-on-error: true # advisory until the schema grows
         run: bash packages/db/scripts/lint-migrations.sh
 
   # ── Python: dormant until the Archer CLI (Patchwright) lands ─────────────────────────
