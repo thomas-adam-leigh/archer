@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type AgUiEvent, outcomeFromEvents, runStub, statusFromEvents } from "./agui";
+import {
+  type AgUiEvent,
+  outcomeFromEvents,
+  restoreThread,
+  runStub,
+  statusFromEvents,
+} from "./agui";
 
 const THREAD = "11111111-1111-1111-1111-111111111111";
 const RUN = "22222222-2222-2222-2222-222222222222";
@@ -113,5 +119,55 @@ describe("runStub — AG-UI run lifecycle (stubbed agent)", () => {
         .messageId;
     expect(idOf(a)).toBe("run-a:m1");
     expect(idOf(b)).toBe("run-b:m1");
+  });
+});
+
+describe("restoreThread — history restore projection", () => {
+  const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
+
+  it("rebuilds StateSnapshot + MessagesSnapshot from the success event log", () => {
+    const events = success();
+    const { state, messages } = restoreThread(events);
+    expect(state).toEqual({ phase: "greeted" });
+    expect(messages).toEqual([{ id: `${RUN}:m1`, role: "assistant", content: GREETING }]);
+  });
+
+  it("rebuilds the interrupt thread (state at awaiting_approval, snapshot messages)", () => {
+    const events = interrupt();
+    const { state, messages } = restoreThread(events);
+    expect(state).toEqual({ phase: "awaiting_approval" });
+    expect(messages).toEqual([{ id: `${RUN}:m1`, role: "assistant", content: GREETING }]);
+  });
+
+  it("restored == live: the projection depends only on seq order, not fetch order", () => {
+    // What a subscriber saw live (emission order) vs. what a reconnecting client
+    // restores from the persisted log. Shuffle the persisted rows, then replay in
+    // the recorded seq order — restore must match the live view exactly.
+    const live = restoreThread(success());
+    const persisted = success().map((e, seq) => ({ ...e, seq }));
+    const shuffled = [
+      persisted[4],
+      persisted[0],
+      persisted[6],
+      persisted[2],
+      persisted[1],
+      persisted[3],
+      persisted[5],
+      persisted[7],
+    ];
+    const restored = restoreThread([...shuffled].sort((a, b) => a.seq - b.seq));
+    expect(restored).toEqual(live);
+  });
+
+  it("a later state_snapshot wins (last-write replace)", () => {
+    const events: AgUiEvent[] = [
+      { type: "state_snapshot", data: { snapshot: { phase: "a" } } },
+      { type: "state_snapshot", data: { snapshot: { phase: "b" } } },
+    ];
+    expect(restoreThread(events).state).toEqual({ phase: "b" });
+  });
+
+  it("returns empty state and no messages for a thread with no events", () => {
+    expect(restoreThread([])).toEqual({ state: {}, messages: [] });
   });
 });
