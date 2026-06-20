@@ -16,6 +16,7 @@ import type { Command } from "commander";
 import { getAdapter } from "../adapters/index.js";
 import { NotIntegratedError, type ScrapedPosting } from "../adapters/types.js";
 import { CliError, type GlobalOpts, output, requireUser, run } from "../context.js";
+import { pushHeartbeat } from "../heartbeat.js";
 
 /** The structured detail a collect run records on its Activity and prints. */
 export interface CollectSummary {
@@ -210,6 +211,13 @@ export function registerCollect(program: Command): void {
             fixture: Boolean(opts.fixture),
             gather,
           });
+          // Dead-man's-switch (ARC-12): a successful collect pings the Uptime Kuma
+          // Push monitor so its ABSENCE — not its failure — is what alerts. The
+          // helper is best-effort (no-op unless UPTIME_KUMA_PUSH_URL is set, never
+          // throws); a configured-but-failed push is a stderr warning only, so it
+          // can't pollute the --json summary on stdout or fail the run.
+          const hb = await pushHeartbeat({ msg: `collect-ok:${board}` });
+          if (hb.pushed && !hb.ok) console.error(`collect: heartbeat push failed: ${hb.error}`);
           output(ctx, summary, (s) =>
             console.log(
               `${board}: scraped ${s.scraped}, ${s.postingsNew} new postings, ${s.candidaciesNew} new candidacies`,
