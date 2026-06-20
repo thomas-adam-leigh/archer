@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   type AgUiEvent,
+  classifyRun,
+  interruptsFromEvents,
   outcomeFromEvents,
   restoreThread,
+  runError,
   runStub,
   statusFromEvents,
 } from "./agui";
@@ -169,5 +172,146 @@ describe("restoreThread — history restore projection", () => {
 
   it("returns empty state and no messages for a thread with no events", () => {
     expect(restoreThread([])).toEqual({ state: {}, messages: [] });
+  });
+});
+
+describe("runStub — autonomy gates the proposed tool call", () => {
+  const base = { threadId: THREAD, runId: RUN };
+
+  it("interrupts when the action needs approval (default fail-closed policy)", () => {
+    const events = runStub({
+      ...base,
+      input: { threadId: THREAD, forwardedProps: { outcome: "interrupt" } },
+    });
+    expect(statusFromEvents(events)).toBe("interrupted");
+    const int = interruptsFromEvents(events)[0];
+    expect(int.action).toBe("sendEmail");
+    expect(int.toolCallId).toBe(`${RUN}:tc1`);
+  });
+
+  it("auto-executes in the same run when the policy grants autonomy", () => {
+    const events = runStub({
+      ...base,
+      input: { threadId: THREAD, forwardedProps: { outcome: "interrupt" } },
+      policy: { sendEmail: "auto" },
+    });
+    expect(statusFromEvents(events)).toBe("completed");
+    expect(events.some((e) => e.type === "messages_snapshot")).toBe(false);
+    const result = events.find((e) => e.type === "tool_call_result")?.data as {
+      result: { status: string; auto?: boolean };
+    };
+    expect(result.result).toMatchObject({ status: "executed", auto: true });
+    expect(outcomeFromEvents(events)).toEqual({ type: "success" });
+  });
+});
+
+describe("runStub — resume continuation (the human's decision)", () => {
+  const resumeInput = {
+    threadId: THREAD,
+    resume: [
+      { interruptId: `${RUN}:int1`, status: "resolved" as const, payload: { approved: true } },
+    ],
+  };
+
+  it("consumes an approval: emits a ToolCallResult(executed) and finishes success", () => {
+    const events = runStub({
+      threadId: THREAD,
+      runId: "child-run",
+      parentRunId: RUN,
+      input: resumeInput,
+      resolved: [
+        {
+          interruptId: `${RUN}:int1`,
+          toolCallId: `${RUN}:tc1`,
+          approved: true,
+          editedArgs: { to: "a@b.c" },
+        },
+      ],
+    });
+    expect(events[0].type).toBe("run_started");
+    expect((events[0].data as { parentRunId: string }).parentRunId).toBe(RUN);
+    const result = events.find((e) => e.type === "tool_call_result")?.data as {
+      toolCallId: string;
+      result: { status: string; args: unknown };
+    };
+    expect(result.toolCallId).toBe(`${RUN}:tc1`);
+    expect(result.result).toEqual({ status: "executed", args: { to: "a@b.c" } });
+    expect(statusFromEvents(events)).toBe("completed");
+    expect(restoreThread(events).state).toEqual({ phase: "completed" });
+  });
+
+  it("consumes a rejection: skips the tool and declines", () => {
+    const events = runStub({
+      threadId: THREAD,
+      runId: "child-run",
+      parentRunId: RUN,
+      input: { threadId: THREAD, resume: [{ interruptId: `${RUN}:int1`, status: "cancelled" }] },
+      resolved: [{ interruptId: `${RUN}:int1`, toolCallId: `${RUN}:tc1`, approved: false }],
+    });
+    const result = events.find((e) => e.type === "tool_call_result")?.data as {
+      result: { status: string };
+    };
+    expect(result.result).toEqual({ status: "skipped" });
+    expect(statusFromEvents(events)).toBe("completed");
+    expect(restoreThread(events).state).toEqual({ phase: "declined" });
+  });
+});
+
+describe("runError — a bounded, persisted RunError run", () => {
+  it("emits run_started then run_error and reports status 'error'", () => {
+    const events = runError(THREAD, RUN, "pending interrupts must be resolved before new input");
+    expect(events.map((e) => e.type)).toEqual(["run_started", "run_error"]);
+    expect((events[1].data as { message: string }).message).toContain("pending interrupts");
+    expect(statusFromEvents(events)).toBe("error");
+  });
+});
+
+describe("classifyRun — the interrupt/resume contract", () => {
+  it("start: no resume, no open interrupts → a fresh run", () => {
+    expect(classifyRun({ state: { open: [], decided: [] } })).toEqual({ action: "start" });
+  });
+
+  it("pending-interrupts-block-new-input: a non-resume request while open → RunError", () => {
+    const d = classifyRun({ state: { open: ["i1"], decided: [] } });
+    expect(d).toMatchObject({ action: "error" });
+    expect((d as { reason: string }).reason).toContain("pending interrupts");
+  });
+
+  it("same-thread: a resume targeting an unknown interrupt → RunError", () => {
+    // "other:int" belongs to another thread, so it is in neither open nor decided.
+    const d = classifyRun({
+      resume: [{ interruptId: "other:int", status: "resolved" }],
+      state: { open: ["i1"], decided: [] },
+    });
+    expect(d).toMatchObject({ action: "error" });
+    expect((d as { reason: string }).reason).toContain("unknown interrupt");
+  });
+
+  it("cover-all-open-interrupts: resolving some but not all open → RunError", () => {
+    const d = classifyRun({
+      resume: [{ interruptId: "i1", status: "resolved" }],
+      state: { open: ["i1", "i2"], decided: [] },
+    });
+    expect(d).toMatchObject({ action: "error" });
+    expect((d as { reason: string }).reason).toContain("cover all open interrupts");
+  });
+
+  it("resume: a request covering every open interrupt → resume", () => {
+    const resume = [
+      { interruptId: "i1", status: "resolved" as const },
+      { interruptId: "i2", status: "cancelled" as const },
+    ];
+    expect(classifyRun({ resume, state: { open: ["i1", "i2"], decided: [] } })).toEqual({
+      action: "resume",
+      resolves: resume,
+    });
+  });
+
+  it("idempotent replay: a resume referencing only already-decided interrupts → replay", () => {
+    const d = classifyRun({
+      resume: [{ interruptId: "i1", status: "resolved" }],
+      state: { open: [], decided: ["i1"] },
+    });
+    expect(d).toEqual({ action: "replay" });
   });
 });
