@@ -126,6 +126,28 @@ export async function removeTargetTitle(db: Db, id: string): Promise<void> {
   await db`delete from target_titles where id = ${id}`;
 }
 
+// ── negative criteria (the deal-breakers readiness/match key on) ───────────
+export type NegativeCriterion = Row<"negative_criteria">;
+
+export async function listNegativeCriteria(db: Db, userId: string): Promise<NegativeCriterion[]> {
+  return await db<NegativeCriterion[]>`
+    select * from negative_criteria where user_id = ${userId} order by created_at`;
+}
+
+export async function addNegativeCriterion(
+  db: Db,
+  userId: string,
+  text: string,
+): Promise<NegativeCriterion> {
+  const rows = await db<NegativeCriterion[]>`
+    insert into negative_criteria (user_id, text) values (${userId}, ${text}) returning *`;
+  return rows[0];
+}
+
+export async function removeNegativeCriterion(db: Db, id: string): Promise<void> {
+  await db`delete from negative_criteria where id = ${id}`;
+}
+
 // ── profile ───────────────────────────────────────────────────────────────
 export async function getProfile(db: Db, userId: string): Promise<Profile | undefined> {
   const rows = await db<Profile[]>`select * from profiles where user_id = ${userId}`;
@@ -713,6 +735,75 @@ export async function applyVersionProposal(
   }
 
   return { proposalStatus: "completed", versionStatus: await versionStatus(db, versionId) };
+}
+
+// ── version read + cycle/rollback ──────────────────────────────────────────
+/** The user's whole version history in stable ordinal order (draft → live →
+ *  superseded), so a client can render the timeline and pick a target to cycle to. */
+export async function listProfileVersions(db: Db, userId: string): Promise<ProfileVersion[]> {
+  return await db<ProfileVersion[]>`
+    select * from profile_versions where user_id = ${userId} order by version_no`;
+}
+
+/** A single version of the user's, or undefined (scoped to user_id so one user can
+ *  never read another's version even on the service-role path). */
+export async function getProfileVersion(
+  db: Db,
+  userId: string,
+  versionId: string,
+): Promise<ProfileVersion | undefined> {
+  const rows = await db<ProfileVersion[]>`
+    select * from profile_versions where id = ${versionId} and user_id = ${userId}`;
+  return rows[0];
+}
+
+export interface RollbackResult {
+  versionId: string;
+  /** The target version's status after the rollback, or null if it didn't exist. */
+  versionStatus: Enum<"profile_version_status"> | null;
+  /** Set when the rollback was refused; the live profile was left untouched. */
+  error?: string;
+}
+
+/**
+ * Cycle/rollback the live profile to an earlier version: in ONE transaction,
+ * supersede the current live version and re-approve the target, then re-sync
+ * profiles.attributes from the target's snapshot. Only an already-materialised
+ * version ('approved' or 'superseded') is a valid target — you can't skip the
+ * proposal path to make a never-approved draft live. Rolling back to the version
+ * that is already live is an idempotent no-op.
+ */
+export async function rollbackToVersion(
+  db: Db,
+  userId: string,
+  versionId: string,
+): Promise<RollbackResult> {
+  return await db.begin<RollbackResult>(async (tx) => {
+    const target = await tx<{ status: Enum<"profile_version_status">; attributes: Json }[]>`
+      select status, attributes from profile_versions
+      where id = ${versionId} and user_id = ${userId}`;
+    if (!target[0]) return { versionId, versionStatus: null, error: "version not found" };
+    if (target[0].status !== "approved" && target[0].status !== "superseded") {
+      return {
+        versionId,
+        versionStatus: target[0].status,
+        error: `cannot roll back to a ${target[0].status} version`,
+      };
+    }
+    // Supersede the current live version (if any other) so the partial unique
+    // index on 'approved' never clashes, then re-approve the target.
+    await tx`
+      update profile_versions set status = 'superseded'
+      where user_id = ${userId} and status = 'approved' and id <> ${versionId}`;
+    await tx`
+      update profile_versions set status = 'approved'
+      where id = ${versionId} and user_id = ${userId}`;
+    await tx`
+      insert into profiles (user_id, attributes)
+      values (${userId}, ${tx.json(target[0].attributes as never)})
+      on conflict (user_id) do update set attributes = excluded.attributes`;
+    return { versionId, versionStatus: "approved" };
+  });
 }
 
 // ── resume / portfolio ingest → proposed version ──────────────────────────
