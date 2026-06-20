@@ -2,7 +2,7 @@
 // the rest of the tool layer never embeds SQL. Grows one helper at a time as the
 // CLI / API need it. All functions take a `Db` from createDb().
 import type { Db } from "./client.js";
-import type { Database } from "./database.types.js";
+import type { Database, Json } from "./database.types.js";
 
 type Row<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
 type Enum<T extends keyof Database["public"]["Enums"]> = Database["public"]["Enums"][T];
@@ -280,4 +280,75 @@ export async function insertCandidacy(
     on conflict (user_id, posting_id) do nothing
     returning id`;
   return rows[0] ?? null;
+}
+
+// ── interaction: runs + events (the AG-UI run log) ─────────────────────────
+// The durable spine for the AG-UI run lifecycle (see services/api/src/agui.ts):
+// open a run, append its ordered event log, then close it with a terminal status.
+export type Run = Row<"runs">;
+export type InteractionEvent = Row<"events">;
+
+export interface CreateRunInput {
+  threadId: string;
+  parentRunId?: string | null;
+  input?: Json | null;
+}
+
+/** Open a new AG-UI run on a thread (status defaults to 'running'). */
+export async function createRun(db: Db, run: CreateRunInput): Promise<Run> {
+  const rows = await db<Run[]>`
+    insert into runs (thread_id, parent_run_id, input)
+    values (${run.threadId}, ${run.parentRunId ?? null},
+            ${run.input != null ? db.json(run.input as never) : null})
+    returning *`;
+  return rows[0];
+}
+
+export interface NewEvent {
+  type: Enum<"event_type">;
+  data?: Json | null;
+}
+
+/** Append events to a run in emission order; `seq` is the per-run 0-based ordinal
+ *  (the (run_id, seq) unique index makes replay and ordering deterministic). */
+export async function appendEvents(
+  db: Db,
+  threadId: string,
+  runId: string,
+  events: NewEvent[],
+): Promise<InteractionEvent[]> {
+  const out: InteractionEvent[] = [];
+  for (let seq = 0; seq < events.length; seq++) {
+    const e = events[seq];
+    const rows = await db<InteractionEvent[]>`
+      insert into events (run_id, thread_id, seq, type, data)
+      values (${runId}, ${threadId}, ${seq}, ${e.type}::event_type,
+              ${e.data != null ? db.json(e.data as never) : null})
+      returning *`;
+    out.push(rows[0]);
+  }
+  return out;
+}
+
+export interface FinishRunPatch {
+  status: Enum<"run_status">;
+  outcome?: Json | null;
+  error?: string | null;
+}
+
+/** Close a run with its terminal status + outcome (or error). */
+export async function finishRun(
+  db: Db,
+  id: string,
+  patch: FinishRunPatch,
+): Promise<Run | undefined> {
+  const rows = await db<Run[]>`
+    update runs set
+      status = ${patch.status}::run_status,
+      outcome = coalesce(${patch.outcome != null ? db.json(patch.outcome as never) : null}::jsonb, outcome),
+      error = coalesce(${patch.error ?? null}, error),
+      finished_at = now()
+    where id = ${id}
+    returning *`;
+  return rows[0];
 }
