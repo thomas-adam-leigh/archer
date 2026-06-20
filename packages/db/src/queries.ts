@@ -694,6 +694,77 @@ export async function applyVersionProposal(
   return { proposalStatus: "completed", versionStatus: await versionStatus(db, versionId) };
 }
 
+// ── resume / portfolio ingest → proposed version ──────────────────────────
+// A resume/portfolio upload must never touch the live profile: its extracted
+// content becomes a PROPOSED version that flows through the exact same proposals
+// / apply-executor path onboarding uses (createProfileVersion → submitVersionProposal
+// → applyVersionProposal). This owns the orchestration + provenance only; the
+// file→content extraction is the stubbed CLI boundary upstream (services/api/src/ingest.ts).
+
+export interface IngestVersionInput {
+  userId: string;
+  /** What was uploaded ('resume' | 'portfolio') — logged on the activity + version. */
+  source: string;
+  /** Reference to the raw uploaded file (storage path/URL), recorded for provenance. */
+  storageRef: string;
+  filename?: string | null;
+  /** The extractor's profile-wide attributes snapshot for the proposed version. */
+  attributes: Json;
+  /** The extractor's provenance/details for the proposed version. */
+  details?: Json;
+  /** Proposal title shown to the human reviewer (defaults to a sensible prompt). */
+  title?: string;
+}
+
+export interface IngestVersionResult {
+  activityId: string;
+  versionId: string;
+  proposalId: string;
+}
+
+/**
+ * Ingest extracted file content into a PROPOSED profile version (never the live
+ * profile). Logs a `proposal_exec` activity carrying the raw-file storage reference,
+ * creates a draft version from the extracted attributes, and submits it through the
+ * same proposals path the onboarding flow uses — so the resulting proposal is decided
+ * by the existing apply executor (applyVersionProposal). The version is left
+ * 'proposed': only an explicit approval makes it live. Returns the created ids.
+ */
+export async function ingestProposedVersion(
+  db: Db,
+  input: IngestVersionInput,
+): Promise<IngestVersionResult> {
+  // The raw-file provenance, carried through both writes (succeedActivity REPLACES
+  // detail, so the success update must re-include the storage reference, not drop it).
+  const provenance = {
+    source: input.source,
+    storageRef: input.storageRef,
+    filename: input.filename ?? null,
+  };
+  const activity = await startActivity(db, {
+    type: "proposal_exec",
+    userId: input.userId,
+    detail: provenance,
+  });
+  const version = await createProfileVersion(db, {
+    userId: input.userId,
+    label: input.source === "portfolio" ? "portfolio import" : "resume import",
+    attributes: input.attributes,
+    details: input.details,
+  });
+  const proposal = await submitVersionProposal(db, {
+    userId: input.userId,
+    versionId: version.id,
+    title: input.title ?? "Approve your imported profile",
+  });
+  await succeedActivity(db, activity.id, {
+    ...provenance,
+    versionId: version.id,
+    proposalId: proposal.id,
+  });
+  return { activityId: activity.id, versionId: version.id, proposalId: proposal.id };
+}
+
 /** The current status of a version, or null if it no longer exists. */
 async function versionStatus(
   db: Db,

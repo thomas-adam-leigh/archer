@@ -10,6 +10,7 @@ import {
   finishRun,
   getLiveProfileVersion,
   getThreadOwner,
+  ingestProposedVersion,
   type Json,
   loadThreadEvents,
   loadThreadInterrupts,
@@ -34,6 +35,7 @@ import {
 } from "./agui.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
+import { stubResumeExtractor } from "./ingest.js";
 
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
 // Validate path/query values before they reach the CLI argv or the DB.
@@ -266,6 +268,42 @@ const app = new Hono()
         : { action: "reject", note: body.note };
     const result = await applyVersionProposal(getDb(), proposalId, decision);
     return c.json({ proposalId, ...result });
+  })
+  // Resume / portfolio ingest (ARC-29): an uploaded file is extracted into a
+  // PROPOSED profile version — never the live profile. The file→content extraction
+  // is the stubbed CLI boundary (./ingest.ts); this records a proposal_exec activity
+  // with the raw-file storage reference, then submits the extracted content through
+  // the same proposals/apply-executor path onboarding uses. The caller then approves
+  // it via /onboarding/proposals/:id/decide, exactly like a shared-state draft.
+  .post("/onboarding/resume", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      userId?: string;
+      storageRef?: string;
+      filename?: string;
+      kind?: string;
+    };
+    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const storageRef = body.storageRef;
+    if (typeof storageRef !== "string" || storageRef.length === 0 || storageRef.length > 1024) {
+      return c.json({ error: "storageRef must be a non-empty string (≤1024 chars)" }, 400);
+    }
+    // Inferred as the literal union "resume" | "portfolio" (not the named IngestKind
+    // alias) so the response type stays portable across the hc<AppType> CLI client.
+    const kind = body.kind === "portfolio" ? "portfolio" : "resume";
+    const filename = typeof body.filename === "string" ? body.filename : undefined;
+    // Stubbed CLI boundary: file → structured profile content (deterministic stub).
+    const extraction = stubResumeExtractor({ kind, storageRef, filename });
+    const result = await ingestProposedVersion(getDb(), {
+      userId: user,
+      source: kind,
+      storageRef,
+      filename,
+      attributes: extraction.attributes as Json,
+      details: extraction.details as Json,
+    });
+    return c.json({ user, kind, status: "proposed", ...result });
   })
   // Webhook: a redirected (external) application form was inserted.
   .post("/hooks/external-form", async (c) => {
