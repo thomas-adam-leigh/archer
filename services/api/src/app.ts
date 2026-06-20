@@ -116,6 +116,20 @@ const app = new Hono()
     }
     return c.json(JSON.parse(res.stdout));
   })
+  // Trigger a company enrichment by invoking the CLI (the Researcher's LinkedIn MCP +
+  // Firecrawl calls stay in the CLI process, stubbed for now). Same "API runs the CLI"
+  // model as collect/match — the run is real, the tools are faked. Company-scoped (no
+  // user gate): enrichment fires for shortlisted companies, not per requesting user.
+  .post("/commands/enrich/:companyId", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const companyId = c.req.param("companyId");
+    if (!UUID_RE.test(companyId)) return c.json({ error: "invalid company id" }, 400);
+    const res = await runCli(["enrich", companyId, "--json"]);
+    if (res.code !== 0) {
+      return c.json({ error: res.stderr.trim() || "enrich failed", code: res.code }, 502);
+    }
+    return c.json(JSON.parse(res.stdout));
+  })
   // Jobs feed (ARC-11): a user's candidacies joined to their posting/company —
   // title, board, company, status, triage decision, match score — optionally
   // filtered by status. RLS own-rows-only (scoped on user_id); the thin clients

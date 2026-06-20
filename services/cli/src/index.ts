@@ -4,6 +4,7 @@ import { api, apiBaseUrl } from "./api.js";
 import { registerBoards } from "./commands/boards.js";
 import { registerCollect } from "./commands/collect.js";
 import { registerCriteria } from "./commands/criteria.js";
+import { registerEnrich } from "./commands/enrich.js";
 import { registerJobs } from "./commands/jobs.js";
 import { registerMatch } from "./commands/match.js";
 import { registerProfile } from "./commands/profile.js";
@@ -26,6 +27,7 @@ registerCriteria(program);
 registerProfile(program);
 registerJobs(program);
 registerMatch(program);
+registerEnrich(program);
 
 program
   .command("health")

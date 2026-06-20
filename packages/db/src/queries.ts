@@ -282,6 +282,72 @@ export async function upsertCompany(db: Db, name: string): Promise<string> {
   return rows[0].id;
 }
 
+// ── enrich: the Researcher write surface ───────────────────────────────────
+// A shortlisted company is enriched (LinkedIn MCP + Firecrawl, stubbed) into the
+// already-live companies schema: the columns the schema promotes (website /
+// recruitment email / description / linkedin / domain) plus the full tool blob in
+// the `enrichment` jsonb, with status walking new → researching → enriched |
+// enrichment_failed. The orchestration lives in the CLI (services/cli enrich).
+export type Company = Row<"companies">;
+
+/** One company by id, or undefined. */
+export async function getCompany(db: Db, id: string): Promise<Company | undefined> {
+  const rows = await db<Company[]>`select * from companies where id = ${id}`;
+  return rows[0];
+}
+
+/** Move a company through its enrichment lifecycle
+ *  (new → researching → enriched | enrichment_failed). Returns the updated row. */
+export async function setCompanyStatus(
+  db: Db,
+  id: string,
+  status: Enum<"company_status">,
+): Promise<Company | undefined> {
+  const rows = await db<Company[]>`
+    update companies set status = ${status}::company_status where id = ${id} returning *`;
+  return rows[0];
+}
+
+export interface CompanyEnrichment {
+  websiteUrl?: string | null;
+  recruitmentEmail?: string | null;
+  description?: string | null;
+  linkedinUrl?: string | null;
+  domain?: string | null;
+  /** The whole (stubbed) tool output, stored verbatim in companies.enrichment. */
+  detail: Record<string, unknown>;
+}
+
+/** Write an enrichment payload onto a company: the promoted columns (each filled
+ *  only when the result carries it, via coalesce) plus the full blob in the
+ *  `enrichment` jsonb. Does NOT change `status` (the caller flips it to 'enriched');
+ *  set_updated_at bumps updated_at. Idempotent — re-applying overwrites in place. */
+export async function saveCompanyEnrichment(
+  db: Db,
+  id: string,
+  e: CompanyEnrichment,
+): Promise<void> {
+  await db`
+    update companies set
+      website_url = coalesce(${e.websiteUrl ?? null}, website_url),
+      recruitment_email = coalesce(${e.recruitmentEmail ?? null}, recruitment_email),
+      description = coalesce(${e.description ?? null}, description),
+      linkedin_url = coalesce(${e.linkedinUrl ?? null}, linkedin_url),
+      domain = coalesce(${e.domain ?? null}, domain),
+      enrichment = ${db.json(e.detail as never)}
+    where id = ${id}`;
+}
+
+/** Mark a company's enrichment as failed, recording the reason in the `enrichment`
+ *  jsonb so it's queryable on the company (the Activity carries the error too). */
+export async function failCompanyEnrichment(db: Db, id: string, reason: string): Promise<void> {
+  await db`
+    update companies set
+      status = 'enrichment_failed',
+      enrichment = ${db.json({ error: reason } as never)}
+    where id = ${id}`;
+}
+
 export interface UpsertPostingInput {
   boardSlug: string;
   url: string;
