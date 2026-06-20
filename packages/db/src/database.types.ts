@@ -282,6 +282,105 @@ export type Database = {
           },
         ]
       }
+      events: {
+        Row: {
+          created_at: string
+          data: Json | null
+          id: string
+          run_id: string
+          seq: number
+          thread_id: string
+          type: Database["public"]["Enums"]["event_type"]
+        }
+        Insert: {
+          created_at?: string
+          data?: Json | null
+          id?: string
+          run_id: string
+          seq: number
+          thread_id: string
+          type: Database["public"]["Enums"]["event_type"]
+        }
+        Update: {
+          created_at?: string
+          data?: Json | null
+          id?: string
+          run_id?: string
+          seq?: number
+          thread_id?: string
+          type?: Database["public"]["Enums"]["event_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "events_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string | null
+          created_at: string
+          id: string
+          name: string | null
+          role: Database["public"]["Enums"]["message_role"]
+          run_id: string | null
+          thread_id: string
+          tool_call_id: string | null
+          tool_calls: Json | null
+          updated_at: string
+        }
+        Insert: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          name?: string | null
+          role: Database["public"]["Enums"]["message_role"]
+          run_id?: string | null
+          thread_id: string
+          tool_call_id?: string | null
+          tool_calls?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          name?: string | null
+          role?: Database["public"]["Enums"]["message_role"]
+          run_id?: string | null
+          thread_id?: string
+          tool_call_id?: string | null
+          tool_calls?: Json | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       negative_criteria: {
         Row: {
           created_at: string
@@ -549,6 +648,63 @@ export type Database = {
           },
         ]
       }
+      runs: {
+        Row: {
+          created_at: string
+          error: string | null
+          finished_at: string | null
+          id: string
+          input: Json | null
+          outcome: Json | null
+          parent_run_id: string | null
+          started_at: string
+          status: Database["public"]["Enums"]["run_status"]
+          thread_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input?: Json | null
+          outcome?: Json | null
+          parent_run_id?: string | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["run_status"]
+          thread_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input?: Json | null
+          outcome?: Json | null
+          parent_run_id?: string | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["run_status"]
+          thread_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "runs_parent_run_id_fkey"
+            columns: ["parent_run_id"]
+            isOneToOne: false
+            referencedRelation: "runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "runs_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       target_titles: {
         Row: {
           created_at: string
@@ -574,6 +730,67 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "target_titles_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      thread_state: {
+        Row: {
+          created_at: string
+          state: Json
+          thread_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          state?: Json
+          thread_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          state?: Json
+          thread_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "thread_state_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: true
+            referencedRelation: "threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      threads: {
+        Row: {
+          created_at: string
+          id: string
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "threads_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "users"
@@ -635,11 +852,44 @@ export type Database = {
         | "external_pending"
         | "application_failed"
       company_status: "new" | "researching" | "enriched" | "enrichment_failed"
+      event_type:
+        | "run_started"
+        | "run_finished"
+        | "run_error"
+        | "step_started"
+        | "step_finished"
+        | "text_message_start"
+        | "text_message_content"
+        | "text_message_end"
+        | "text_message_chunk"
+        | "tool_call_start"
+        | "tool_call_args"
+        | "tool_call_end"
+        | "tool_call_chunk"
+        | "tool_call_result"
+        | "state_snapshot"
+        | "state_delta"
+        | "messages_snapshot"
+        | "activity_snapshot"
+        | "activity_delta"
+        | "reasoning_start"
+        | "reasoning_message"
+        | "reasoning_end"
+        | "raw"
+        | "custom"
       integration_status:
         | "not_integrated"
         | "in_progress"
         | "integrated"
         | "broken"
+      message_role:
+        | "user"
+        | "assistant"
+        | "system"
+        | "developer"
+        | "tool"
+        | "reasoning"
+        | "activity"
       proposal_status:
         | "submitted"
         | "approved"
@@ -647,6 +897,7 @@ export type Database = {
         | "in_progress"
         | "completed"
         | "failed"
+      run_status: "running" | "completed" | "interrupted" | "error"
       triage_decision: "shortlisted" | "alternative_outreach" | "dismissed"
       work_mode: "remote" | "hybrid" | "office" | "unknown"
     }
@@ -803,11 +1054,46 @@ export const Constants = {
         "application_failed",
       ],
       company_status: ["new", "researching", "enriched", "enrichment_failed"],
+      event_type: [
+        "run_started",
+        "run_finished",
+        "run_error",
+        "step_started",
+        "step_finished",
+        "text_message_start",
+        "text_message_content",
+        "text_message_end",
+        "text_message_chunk",
+        "tool_call_start",
+        "tool_call_args",
+        "tool_call_end",
+        "tool_call_chunk",
+        "tool_call_result",
+        "state_snapshot",
+        "state_delta",
+        "messages_snapshot",
+        "activity_snapshot",
+        "activity_delta",
+        "reasoning_start",
+        "reasoning_message",
+        "reasoning_end",
+        "raw",
+        "custom",
+      ],
       integration_status: [
         "not_integrated",
         "in_progress",
         "integrated",
         "broken",
+      ],
+      message_role: [
+        "user",
+        "assistant",
+        "system",
+        "developer",
+        "tool",
+        "reasoning",
+        "activity",
       ],
       proposal_status: [
         "submitted",
@@ -817,6 +1103,7 @@ export const Constants = {
         "completed",
         "failed",
       ],
+      run_status: ["running", "completed", "interrupted", "error"],
       triage_decision: ["shortlisted", "alternative_outreach", "dismissed"],
       work_mode: ["remote", "hybrid", "office", "unknown"],
     },

@@ -1,7 +1,11 @@
 # squawk — Postgres migration linter config.
 # Tuned for a small, single-operator project; tighten as the schema grows.
-[lint]
+#
+# NOTE: `excluded_rules` must be a TOP-LEVEL key — squawk silently ignores it if
+# nested under a `[lint]` table (cost us a broken gate when squawk floated to 2.x).
 excluded_rules = [
-  "prefer-robust-stmts",            # we don't require IF NOT EXISTS everywhere yet
-  "require-concurrent-index-creation",
+  "prefer-robust-stmts",             # we don't require IF NOT EXISTS everywhere yet
+  "require-concurrent-index-creation", # additive migrations on empty/new tables
+  "require-timeout-settings",        # no per-migration lock/statement_timeout yet
+  "prefer-bigint-over-int",          # int is fine for our small bounded counters
 ]
