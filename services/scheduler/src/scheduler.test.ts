@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSchedulerDb, DEFAULT_INTERVAL_MINUTES, type SchedulerDb } from "./db.js";
-import { nextDelayMs, Scheduler, tick } from "./scheduler.js";
+import { msUntilAlignedBoundary, Scheduler, tick } from "./scheduler.js";
 
 let db: SchedulerDb;
 
@@ -12,17 +12,29 @@ afterEach(() => {
   db.close();
 });
 
-describe("nextDelayMs", () => {
-  it("converts minutes to milliseconds", () => {
-    expect(nextDelayMs(30)).toBe(30 * 60_000);
-    expect(nextDelayMs(1)).toBe(60_000);
+describe("msUntilAlignedBoundary", () => {
+  it("aligns a 30-minute interval to the next :00/:30", () => {
+    // 11:06:49 → next boundary 11:30:00 (24 min 11 s away)
+    expect(msUntilAlignedBoundary(30, new Date(2026, 5, 20, 11, 6, 49))).toBe(
+      ((30 - 6) * 60 - 49) * 1000,
+    );
+    // 11:36:00 → next boundary 12:00:00 (24 min away)
+    expect(msUntilAlignedBoundary(30, new Date(2026, 5, 20, 11, 36, 0))).toBe(24 * 60_000);
   });
 
-  it("falls back to the default for non-positive or invalid values", () => {
-    const fallback = DEFAULT_INTERVAL_MINUTES * 60_000;
-    expect(nextDelayMs(0)).toBe(fallback);
-    expect(nextDelayMs(-5)).toBe(fallback);
-    expect(nextDelayMs(Number.NaN)).toBe(fallback);
+  it("returns a full step when exactly on a boundary (never 0)", () => {
+    expect(msUntilAlignedBoundary(30, new Date(2026, 5, 20, 11, 0, 0))).toBe(30 * 60_000);
+  });
+
+  it("aligns a 15-minute interval to quarter hours", () => {
+    // 11:05 → next 11:15 (10 min away)
+    expect(msUntilAlignedBoundary(15, new Date(2026, 5, 20, 11, 5, 0))).toBe(10 * 60_000);
+  });
+
+  it("falls back to the default interval for invalid values", () => {
+    const now = new Date(2026, 5, 20, 11, 0, 0);
+    expect(msUntilAlignedBoundary(0, now)).toBe(DEFAULT_INTERVAL_MINUTES * 60_000);
+    expect(msUntilAlignedBoundary(Number.NaN, now)).toBe(DEFAULT_INTERVAL_MINUTES * 60_000);
   });
 });
 
@@ -54,16 +66,23 @@ describe("tick", () => {
 });
 
 describe("Scheduler loop", () => {
-  it("schedules the first tick using the configured interval", () => {
-    db.setSchedule({ intervalMinutes: 7 });
+  it("schedules the first tick at the next aligned wall-clock boundary", () => {
+    db.setSchedule({ intervalMinutes: 30 });
+    const now = new Date(2026, 5, 20, 11, 6, 49);
     const setTimer = vi.fn().mockReturnValue(1 as unknown as ReturnType<typeof setTimeout>);
     const runCommand = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" });
 
-    const scheduler = new Scheduler({ db, runCommand, setTimer, clearTimer: vi.fn() });
+    const scheduler = new Scheduler({
+      db,
+      runCommand,
+      setTimer,
+      clearTimer: vi.fn(),
+      now: () => now,
+    });
     scheduler.start();
 
     expect(setTimer).toHaveBeenCalledTimes(1);
-    expect(setTimer.mock.calls[0]?.[1]).toBe(7 * 60_000);
+    expect(setTimer.mock.calls[0]?.[1]).toBe(msUntilAlignedBoundary(30, now)); // → 11:30:00
   });
 
   it("runs the command when its timer fires, then reschedules", async () => {

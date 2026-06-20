@@ -1,12 +1,23 @@
 import { DEFAULT_INTERVAL_MINUTES, type RunResult, type SchedulerDb } from "./db.js";
 
-/** Convert a configured interval (minutes) to a timer delay (ms), guarding bad values. */
-export function nextDelayMs(intervalMinutes: number): number {
+/**
+ * Milliseconds from `now` until the next wall-clock boundary aligned to the
+ * interval — a 30-minute interval fires at :00 and :30, a 15-minute one at
+ * :00/:15/:30/:45. Boundaries are measured from local midnight, so ticks land on
+ * the clock instead of drifting by each run's duration. Always strictly > 0
+ * (the *next* boundary, never 0). Guards bad intervals.
+ */
+export function msUntilAlignedBoundary(intervalMinutes: number, now: Date = new Date()): number {
   const minutes =
     Number.isFinite(intervalMinutes) && intervalMinutes > 0
       ? intervalMinutes
       : DEFAULT_INTERVAL_MINUTES;
-  return minutes * 60_000;
+  const step = minutes * 60_000;
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const sinceMidnight = now.getTime() - midnight.getTime();
+  const nextFromMidnight = (Math.floor(sinceMidnight / step) + 1) * step;
+  return midnight.getTime() + nextFromMidnight - now.getTime();
 }
 
 /**
@@ -39,6 +50,8 @@ export interface SchedulerDeps {
   /** Injectable timer (defaults to setTimeout) so the loop is testable. */
   setTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimer?: (t: ReturnType<typeof setTimeout>) => void;
+  /** Injectable clock (defaults to () => new Date()) so alignment is testable. */
+  now?: () => Date;
   log?: (msg: string) => void;
 }
 
@@ -52,15 +65,17 @@ export class Scheduler {
   private stopped = false;
   private readonly setTimer: NonNullable<SchedulerDeps["setTimer"]>;
   private readonly clearTimer: NonNullable<SchedulerDeps["clearTimer"]>;
+  private readonly now: () => Date;
   private readonly log: (msg: string) => void;
 
   constructor(private readonly deps: SchedulerDeps) {
     this.setTimer = deps.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
     this.clearTimer = deps.clearTimer ?? ((t) => clearTimeout(t));
+    this.now = deps.now ?? (() => new Date());
     this.log = deps.log ?? (() => {});
   }
 
-  /** Begin the loop. The first tick fires after one interval, not immediately. */
+  /** Begin the loop. The first tick fires at the next aligned boundary (e.g. :00/:30). */
   start(): void {
     this.stopped = false;
     this.scheduleNext();
@@ -74,7 +89,7 @@ export class Scheduler {
 
   private scheduleNext(): void {
     if (this.stopped) return;
-    const delay = nextDelayMs(this.deps.db.getSchedule().intervalMinutes);
+    const delay = msUntilAlignedBoundary(this.deps.db.getSchedule().intervalMinutes, this.now());
     this.timer = this.setTimer(() => {
       void this.runAndReschedule();
     }, delay);
