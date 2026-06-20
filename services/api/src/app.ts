@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import {
   type AccountDecision,
+  addNegativeCriterion,
+  addTargetTitle,
   appendEvents,
   applyVersionProposal,
   Constants,
@@ -13,13 +15,21 @@ import {
   finishRun,
   getAccount,
   getLiveProfileVersion,
+  getProfile,
+  getProfileVersion,
   getThreadOwner,
   ingestProposedVersion,
   ingestVoicenote,
   isAccepted,
   type Json,
+  listNegativeCriteria,
+  listProfileVersions,
+  listTargetTitles,
   loadThreadEvents,
   loadThreadInterrupts,
+  removeNegativeCriterion,
+  removeTargetTitle,
+  rollbackToVersion,
   setCandidacyStatus,
   submitAccountForReview,
   submitVersionProposal,
@@ -397,6 +407,140 @@ const app = new Hono()
     // A refused decision (not ready, or not awaiting review) is a 409 conflict.
     if (result.error) return c.json({ user, ...result }, 409);
     return c.json({ user, ...result });
+  })
+  // ── Profile / version surface (ARC-32) ──────────────────────────────────────
+  // Round out the thin read / draft / submit / cycle surface over the profile
+  // spine the onboarding + ingest flows already write to. approve/reject/edit
+  // stays on the existing apply-executor route (/onboarding/proposals/:id/decide)
+  // — reused, not duplicated. Same fail-closed auth; tables are RLS own-rows-only.
+  .get("/profile", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const profile = await getProfile(getDb(), user);
+    return c.json({ user, profile: profile ?? null });
+  })
+  // The whole version history (timeline) + which one is live.
+  .get("/profile/versions", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const versions = await listProfileVersions(getDb(), user);
+    const live = versions.find((v) => v.status === "approved");
+    return c.json({ user, versions, liveVersionId: live?.id ?? null });
+  })
+  // Draft a new version directly (the non-conversational path; onboarding/run is
+  // the conversational one). Left 'draft' until explicitly submitted + approved.
+  .post("/profile/versions", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      userId?: string;
+      attributes?: Json;
+      label?: string | null;
+    };
+    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const version = await createProfileVersion(getDb(), {
+      userId: user,
+      attributes: body.attributes,
+      label: body.label,
+    });
+    return c.json({ user, versionId: version.id, status: version.status, version });
+  })
+  // Read a single version (scoped to the user so it can't read another's).
+  .get("/profile/versions/:id", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const id = c.req.param("id");
+    if (!UUID_RE.test(id)) return c.json({ error: "invalid version id" }, 400);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const version = await getProfileVersion(getDb(), user, id);
+    if (!version) return c.json({ error: "unknown version" }, 404);
+    return c.json({ user, version });
+  })
+  // Submit a draft version for approval (opens a profile_version proposal). The
+  // caller then decides it via /onboarding/proposals/:id/decide.
+  .post("/profile/versions/:id/submit", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const id = c.req.param("id");
+    if (!UUID_RE.test(id)) return c.json({ error: "invalid version id" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { userId?: string; title?: string };
+    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const proposal = await submitVersionProposal(getDb(), {
+      userId: user,
+      versionId: id,
+      title: body.title ?? "Approve your profile",
+    });
+    return c.json({ user, versionId: id, proposalId: proposal.id });
+  })
+  // Cycle/rollback: re-make an earlier ('approved'|'superseded') version live.
+  .post("/profile/versions/:id/rollback", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const id = c.req.param("id");
+    if (!UUID_RE.test(id)) return c.json({ error: "invalid version id" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { userId?: string };
+    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const result = await rollbackToVersion(getDb(), user, id);
+    if (result.error) return c.json({ user, ...result }, 409);
+    return c.json({ user, ...result });
+  })
+  // ── Target titles (the collect search keys) ─────────────────────────────────
+  .get("/titles", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const titles = await listTargetTitles(getDb(), user, {
+      activeOnly: c.req.query("all") !== "1",
+    });
+    return c.json({ user, titles });
+  })
+  .post("/titles", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as { userId?: string; title?: string };
+    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    if (!title || title.length > 256) {
+      return c.json({ error: "title must be a non-empty string (≤256 chars)" }, 400);
+    }
+    const created = await addTargetTitle(getDb(), user, title);
+    return c.json({ user, title: created });
+  })
+  .delete("/titles/:id", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const id = c.req.param("id");
+    if (!UUID_RE.test(id)) return c.json({ error: "invalid title id" }, 400);
+    await removeTargetTitle(getDb(), id);
+    return c.json({ removed: id });
+  })
+  // ── Negative criteria (the deal-breakers) ───────────────────────────────────
+  .get("/criteria", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const criteria = await listNegativeCriteria(getDb(), user);
+    return c.json({ user, criteria });
+  })
+  .post("/criteria", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as { userId?: string; text?: string };
+    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text || text.length > 512) {
+      return c.json({ error: "text must be a non-empty string (≤512 chars)" }, 400);
+    }
+    const created = await addNegativeCriterion(getDb(), user, text);
+    return c.json({ user, criterion: created });
+  })
+  .delete("/criteria/:id", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const id = c.req.param("id");
+    if (!UUID_RE.test(id)) return c.json({ error: "invalid criterion id" }, 400);
+    await removeNegativeCriterion(getDb(), id);
+    return c.json({ removed: id });
   })
   // Webhook: a redirected (external) application form was inserted.
   .post("/hooks/external-form", async (c) => {

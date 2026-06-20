@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { api, apiBaseUrl } from "./api.js";
 import { registerBoards } from "./commands/boards.js";
 import { registerCollect } from "./commands/collect.js";
+import { registerCriteria } from "./commands/criteria.js";
 import { registerJobs } from "./commands/jobs.js";
 import { registerProfile } from "./commands/profile.js";
 import { registerTitles } from "./commands/titles.js";
@@ -20,6 +21,7 @@ program
 registerCollect(program);
 registerBoards(program);
 registerTitles(program);
+registerCriteria(program);
 registerProfile(program);
 registerJobs(program);
 
