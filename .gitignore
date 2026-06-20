@@ -13,6 +13,11 @@ build/
 .next/
 .turbo/
 
+# Local SQLite (scheduler state) — runtime data, never committed
+*.db
+*.db-shm
+*.db-wal
+
 # Supabase
 **/supabase/.branches
 **/supabase/.temp
