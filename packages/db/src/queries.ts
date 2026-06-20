@@ -21,6 +21,15 @@ export async function listThreads(db: Db, userId: string): Promise<Thread[]> {
     select * from threads where user_id = ${userId} order by created_at desc`;
 }
 
+/** The user who owns a thread, or undefined if it doesn't exist. The onboarding
+ *  route resolves the profile-version owner from the thread (single source of
+ *  truth) rather than trusting a caller-supplied id. */
+export async function getThreadOwner(db: Db, threadId: string): Promise<string | undefined> {
+  const rows = await db<{ user_id: string }[]>`
+    select user_id from threads where id = ${threadId}`;
+  return rows[0]?.user_id;
+}
+
 // ── boards ────────────────────────────────────────────────────────────────
 export async function listBoards(db: Db): Promise<Board[]> {
   return await db<Board[]>`select * from boards order by slug`;
