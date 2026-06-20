@@ -233,17 +233,43 @@ export async function setCandidacyStatus(
   db: Db,
   id: string,
   status: Enum<"candidacy_status">,
-  opts: { reason?: string; triageDecision?: Enum<"triage_decision"> } = {},
+  opts: { reason?: string; triageDecision?: Enum<"triage_decision">; score?: number } = {},
 ): Promise<Candidacy | undefined> {
   const rows = await db<Candidacy[]>`
     update candidacies set
       status = ${status}::candidacy_status,
       status_changed_at = now(),
       triage_decision = coalesce(${opts.triageDecision ?? null}::triage_decision, triage_decision),
-      triage_reason = coalesce(${opts.reason ?? null}, triage_reason)
+      triage_reason = coalesce(${opts.reason ?? null}, triage_reason),
+      match_score = coalesce(${opts.score ?? null}::int, match_score)
     where id = ${id}
     returning *`;
   return rows[0];
+}
+
+/** One `new` candidacy with the posting context the Matchmaker judges it against
+ *  (title/company/location/work mode/description). Returned oldest first so a run
+ *  triages in arrival order. Only status `new` rows are returned, which is what
+ *  makes a re-run idempotent — already-decided candidacies are never re-triaged. */
+export interface NewCandidacy {
+  id: string;
+  posting_title: string;
+  company_name: string | null;
+  board_slug: string;
+  location: string | null;
+  work_mode: Enum<"work_mode">;
+  description: string | null;
+}
+
+export async function listNewCandidacies(db: Db, userId: string): Promise<NewCandidacy[]> {
+  return await db<NewCandidacy[]>`
+    select c.id, p.title as posting_title, co.name as company_name,
+           p.board_slug, p.location, p.work_mode, p.description
+    from candidacies c
+    join postings p on p.id = c.posting_id
+    left join companies co on co.id = p.company_id
+    where c.user_id = ${userId} and c.status = 'new'::candidacy_status
+    order by c.created_at`;
 }
 
 // ── collect: idempotent upserts ───────────────────────────────────────────

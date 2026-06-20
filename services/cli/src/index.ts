@@ -5,6 +5,7 @@ import { registerBoards } from "./commands/boards.js";
 import { registerCollect } from "./commands/collect.js";
 import { registerCriteria } from "./commands/criteria.js";
 import { registerJobs } from "./commands/jobs.js";
+import { registerMatch } from "./commands/match.js";
 import { registerProfile } from "./commands/profile.js";
 import { registerTitles } from "./commands/titles.js";
 import { CliError } from "./context.js";
@@ -24,6 +25,7 @@ registerTitles(program);
 registerCriteria(program);
 registerProfile(program);
 registerJobs(program);
+registerMatch(program);
 
 program
   .command("health")
