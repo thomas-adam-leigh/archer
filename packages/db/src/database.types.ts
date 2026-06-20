@@ -1239,6 +1239,7 @@ export type Database = {
         | "proposal_exec"
         | "cli_repair"
         | "deploy"
+        | "transcribe"
       candidacy_status:
         | "new"
         | "dismissed"
@@ -1445,6 +1446,7 @@ export const Constants = {
         "proposal_exec",
         "cli_repair",
         "deploy",
+        "transcribe",
       ],
       candidacy_status: [
         "new",
