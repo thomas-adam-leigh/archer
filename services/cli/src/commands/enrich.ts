@@ -10,6 +10,7 @@ import {
   setCompanyStatus,
   startActivity,
   succeedActivity,
+  upsertContacts,
 } from "@archer/db";
 import type { Command } from "commander";
 import { CliError, type GlobalOpts, output, run } from "../context.js";
@@ -163,10 +164,12 @@ export async function runEnrich(
       linkedinUrl: result.linkedinUrl ?? null,
       domain: result.domain ?? null,
       // The whole tool output (incl. the contacts it found) lands in the enrichment
-      // jsonb for provenance; promoting contacts into the contacts table is a later
-      // milestone (Contacts + companies.enrichment write surface).
+      // jsonb for provenance.
       detail: { ...result.source, contacts: result.contacts },
     });
+    // Promote the found people into the dedicated contacts table (idempotent: a
+    // re-enriched company adds no duplicate rows). The jsonb above keeps provenance.
+    await upsertContacts(db, company.id, result.contacts);
     await setCompanyStatus(db, company.id, "enriched");
     await succeedActivity(db, activity.id, {
       company: company.name,
