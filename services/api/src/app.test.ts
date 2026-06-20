@@ -65,6 +65,17 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects history restore for an invalid threadId", async () => {
+    const res = await app.request("/agui/threads/not-a-uuid/history");
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies history restore with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(`/agui/threads/${VALID_UUID}/history`);
+    expect(res.status).toBe(401);
+  });
+
   it("fails closed: denies commands with no secret and no dev opt-in", async () => {
     delete process.env.ARCHER_API_DEV_OPEN;
     const res = await app.request("/hooks/activity-failed", post({}));

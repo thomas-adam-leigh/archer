@@ -133,3 +133,73 @@ export function outcomeFromEvents(events: AgUiEvent[]): Json | undefined {
   const last = events.at(-1);
   return (last?.data as { outcome?: Json } | undefined)?.outcome;
 }
+
+/** A restored message turn — the shape a MessagesSnapshot carries. */
+export interface RestoredMessage {
+  id: string;
+  role: string;
+  content: string;
+}
+
+/** The history-restore projection: a thread's current shared state + message log. */
+export interface ThreadSnapshot {
+  /** The StateSnapshot — the thread's shared state object. */
+  state: Json;
+  /** The MessagesSnapshot — the conversation, in turn order. */
+  messages: RestoredMessage[];
+}
+
+/** One persisted event as the projection consumes it (data may be null in the DB). */
+export type RestoreEvent = { type: EventType; data: Json | null };
+
+/**
+ * Fold an ordered AG-UI event log into a StateSnapshot + MessagesSnapshot — the
+ * history a reconnecting or brand-new client uses to rebuild the conversation.
+ * The event log is the source of truth (docs/docs/ag-ui/concepts/02-events.md);
+ * this is its projection, so a restored view is identical to the live one a
+ * subscriber accumulated. Pure (no DB/IO) and order-only, so it is unit-testable
+ * and independent of how the rows were fetched.
+ *
+ * - state_snapshot replaces the state object (last one wins).
+ * - messages_snapshot authoritatively replaces the message list.
+ * - text_message_start/content materialize and grow a streamed message.
+ * (state_delta layering arrives with the run loop that emits deltas.)
+ */
+export function restoreThread(events: RestoreEvent[]): ThreadSnapshot {
+  let state: Json = {};
+  const byId = new Map<string, RestoredMessage>();
+  let order: string[] = [];
+
+  for (const e of events) {
+    const data = (e.data ?? {}) as Record<string, unknown>;
+    switch (e.type) {
+      case "state_snapshot":
+        state = (data.snapshot ?? {}) as Json;
+        break;
+      case "messages_snapshot": {
+        const msgs = (data.messages ?? []) as RestoredMessage[];
+        byId.clear();
+        order = [];
+        for (const m of msgs) {
+          byId.set(m.id, { id: m.id, role: m.role, content: m.content ?? "" });
+          order.push(m.id);
+        }
+        break;
+      }
+      case "text_message_start": {
+        const id = data.messageId as string;
+        if (!byId.has(id)) order.push(id);
+        byId.set(id, { id, role: (data.role as string) ?? "assistant", content: "" });
+        break;
+      }
+      case "text_message_content": {
+        const m = byId.get(data.messageId as string);
+        if (m) m.content += (data.delta as string) ?? "";
+        break;
+      }
+      // text_message_end and lifecycle/tool events don't change the projection.
+    }
+  }
+
+  return { state, messages: order.map((id) => byId.get(id) as RestoredMessage) };
+}

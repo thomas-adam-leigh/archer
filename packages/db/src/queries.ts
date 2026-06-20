@@ -330,6 +330,26 @@ export async function appendEvents(
   return out;
 }
 
+/** One event as the history-restore projection consumes it, in replay order. */
+export interface ThreadEvent {
+  type: Enum<"event_type">;
+  data: Json | null;
+  seq: number;
+  run_id: string;
+}
+
+/** The full ordered event log for a thread (across all its runs), oldest first —
+ *  the replayable source a client folds into a StateSnapshot + MessagesSnapshot.
+ *  Ordered by run start then per-run seq, so multi-run threads replay in order. */
+export async function loadThreadEvents(db: Db, threadId: string): Promise<ThreadEvent[]> {
+  return await db<ThreadEvent[]>`
+    select e.type, e.data, e.seq::int as seq, e.run_id
+    from events e
+    join runs r on r.id = e.run_id
+    where e.thread_id = ${threadId}
+    order by r.started_at asc, e.seq asc`;
+}
+
 export interface FinishRunPatch {
   status: Enum<"run_status">;
   outcome?: Json | null;

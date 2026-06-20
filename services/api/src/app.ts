@@ -5,11 +5,18 @@ import {
   createRun,
   finishRun,
   type Json,
+  loadThreadEvents,
   setCandidacyStatus,
 } from "@archer/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { outcomeFromEvents, type RunAgentInput, runStub, statusFromEvents } from "./agui.js";
+import {
+  outcomeFromEvents,
+  type RunAgentInput,
+  restoreThread,
+  runStub,
+  statusFromEvents,
+} from "./agui.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 
@@ -80,6 +87,19 @@ const app = new Hono()
     const status = statusFromEvents(events);
     await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
     return c.json({ threadId, runId: run.id, status, events });
+  })
+  // History restore: fold the thread's persisted event log into a StateSnapshot +
+  // MessagesSnapshot (+ the replayable log) so a reconnecting or brand-new client
+  // rebuilds the conversation identically to what a live subscriber accumulated.
+  // Live fan-out itself rides Supabase Realtime on the events table (RLS-scoped
+  // per user) — see 20260620130000_realtime_fanout.sql.
+  .get("/agui/threads/:threadId/history", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const threadId = c.req.param("threadId");
+    if (!UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
+    const events = await loadThreadEvents(getDb(), threadId);
+    const { state, messages } = restoreThread(events);
+    return c.json({ threadId, state, messages, events });
   })
   // Webhook: a redirected (external) application form was inserted.
   .post("/hooks/external-form", async (c) => {
