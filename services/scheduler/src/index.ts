@@ -1,13 +1,15 @@
 import { createSchedulerDb } from "./db.js";
 import { runCommand } from "./runner.js";
-import { Scheduler } from "./scheduler.js";
+import { msUntilAlignedBoundary, Scheduler } from "./scheduler.js";
 
 const log = (msg: string) => console.log(`[scheduler] ${msg}`);
 
 const db = createSchedulerDb();
 const schedule = db.getSchedule();
+const nextAt = new Date(Date.now() + msUntilAlignedBoundary(schedule.intervalMinutes));
 log(
-  `starting — every ${schedule.intervalMinutes} min, ` +
+  `starting — every ${schedule.intervalMinutes} min aligned to the wall clock ` +
+    `(next tick ${nextAt.toLocaleTimeString()}), ` +
     `${schedule.enabled ? "enabled" : "disabled"}: ${schedule.command}`,
 );
 

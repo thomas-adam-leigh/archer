@@ -53,9 +53,11 @@ are stale** — keeping TypeScript (and, later, Python) honest to the schema.
 `@archer/scheduler` is a long-running process that, on a configurable interval
 (default **30 minutes**), runs a configurable shell command — by default
 `claude -p "@./services/scheduler/prompt.md"`, feeding the tracked prompt file to
-Claude. Config and run history live in a local SQLite DB (`SCHEDULER_DB_PATH`,
-default `services/scheduler/scheduler.db`). Each tick re-reads the config, so
-changes take effect on the next cycle without a restart.
+Claude. Ticks are **aligned to the wall clock** (a 30-minute interval fires at
+:00 and :30, measured from local midnight), so they land on the clock instead of
+drifting by each run's duration. Config and run history live in a local SQLite DB
+(`SCHEDULER_DB_PATH`, default `services/scheduler/scheduler.db`). Each tick
+re-reads the config, so changes take effect on the next cycle without a restart.
 
 ```sh
 pnpm --filter @archer/scheduler build
