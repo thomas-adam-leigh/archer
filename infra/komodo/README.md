@@ -36,6 +36,12 @@ a wipe becomes a routine restore test rather than data loss.
 - Komodo Secret `ARCHER_ALERT_WEBHOOK` — Slack/Discord/ntfy/n8n webhook for the alerter
 - Komodo Variable `ARCHER_API_HEALTH_URL` — e.g. `http://host.docker.internal:9125/health`
 
+**In Supabase Vault** (the event engine reads these — `20260620180000_event_engine.sql`):
+- `archer_api_base_url` — public base URL the DB webhooks/cron POST to, e.g. `https://archer-api.<host>` (no trailing slash)
+- `archer_api_secret` — the `x-archer-secret` shared secret (must equal the API's `ARCHER_API_SECRET`)
+
+Set once per project: `select vault.create_secret('<value>', 'archer_api_base_url');` (same for `archer_api_secret`). Until set, the engine logs a warning and skips the POST — it never breaks the firing DML.
+
 **In GitHub** (repo → Settings → Secrets and variables → Actions):
 - Secrets: `KOMODO_URL`, `KOMODO_API_KEY`, `KOMODO_API_SECRET`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`
 - Variables: `KOMODO_PROCEDURE` = `archer-deploy`, `ARCHER_API_HEALTH_URL` (for the canary)

@@ -1263,7 +1263,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      archer_cron_collect: { Args: never; Returns: undefined }
+      archer_cron_match: { Args: never; Returns: undefined }
+      archer_event_post: {
+        Args: { path: string; payload?: Json }
+        Returns: number
+      }
     }
     Enums: {
       account_status:
