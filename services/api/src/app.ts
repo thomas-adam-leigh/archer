@@ -1,7 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
-import { Constants, setCandidacyStatus } from "@archer/db";
+import {
+  appendEvents,
+  Constants,
+  createRun,
+  finishRun,
+  type Json,
+  setCandidacyStatus,
+} from "@archer/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { outcomeFromEvents, type RunAgentInput, runStub, statusFromEvents } from "./agui.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 
@@ -56,6 +64,22 @@ const app = new Hono()
     const updated = await setCandidacyStatus(getDb(), id, to as never, { reason });
     if (!updated) return c.json({ error: "unknown candidacy" }, 404);
     return c.json({ id: updated.id, status: updated.status });
+  })
+  // AG-UI run lifecycle: open a run, drive the stubbed agent, persist its ordered
+  // event log, then close the run with its terminal status/outcome. The agent is a
+  // deterministic stub (see ./agui.ts) — the run loop is real, the brain is stubbed.
+  .post("/agui/run", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const input = (await c.req.json().catch(() => ({}))) as RunAgentInput;
+    const threadId = input.threadId;
+    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
+    const db = getDb();
+    const run = await createRun(db, { threadId, input: input as unknown as Json });
+    const events = runStub({ threadId, runId: run.id, input });
+    await appendEvents(db, threadId, run.id, events);
+    const status = statusFromEvents(events);
+    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+    return c.json({ threadId, runId: run.id, status, events });
   })
   // Webhook: a redirected (external) application form was inserted.
   .post("/hooks/external-form", async (c) => {
