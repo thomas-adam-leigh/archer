@@ -1,4 +1,12 @@
-import { createDb, type Db, getCompany, upsertCompany } from "@archer/db";
+import {
+  createDb,
+  type Db,
+  getCompany,
+  insertCandidacy,
+  setCandidacyStatus,
+  upsertCompany,
+  upsertPosting,
+} from "@archer/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NotIntegratedError } from "./adapters/types.js";
 import { type Enricher, runEnrich, stubEnricher } from "./commands/enrich.js";
@@ -8,6 +16,8 @@ import { type Enricher, runEnrich, stubEnricher } from "./commands/enrich.js";
 // new → researching → enriched | enrichment_failed; the (stubbed) LinkedIn/Firecrawl
 // tools are a swappable seam; an already-enriched company is an idempotent no-op (no
 // Activity); and a thrown tool leaves a failed Activity + enrichment_failed behind.
+// ARC-33 adds the shortlist gate: enrichment is refused unless a shortlisted /
+// alternative_outreach candidacy sits behind the company.
 //
 // The deterministic `stubEnricher` is pure, so its tests run in the default no-DB CI
 // vitest pass. The end-to-end run is DB-backed: point TEST_DATABASE_URL at a migrated
@@ -39,6 +49,8 @@ describe("stubEnricher — deterministic Researcher stand-in", () => {
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 const COMPANY = "Enrich Test Co Arc13";
+// A fixed user whose shortlisted candidacies satisfy the ARC-33 enrichment gate.
+const USER = "dddddddd-0000-4000-8000-000000000033";
 
 describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stubbed)", () => {
   let sql: Db;
@@ -53,19 +65,66 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
     await db`delete from public.companies where name = ${name}`;
   };
 
+  // Tear down the seeded shortlist scaffolding (candidacies → postings → user).
+  const purgeSeed = async (db: Db) => {
+    await db`delete from public.candidacies where user_id = ${USER}`;
+    await db`delete from public.postings where url like 'https://cj.test/arc33/%'`;
+    await db`delete from public.users where id = ${USER}`;
+    await db`delete from auth.users where id = ${USER}`;
+  };
+
+  // Put a company behind a shortlisted candidacy so the enrichment gate opens.
+  // Idempotent: the posting url is keyed on the company id and re-runs upsert.
+  const shortlist = async (db: Db, companyId: string): Promise<void> => {
+    const { id: postingId } = await upsertPosting(db, {
+      boardSlug: "careerjunction",
+      url: `https://cj.test/arc33/${companyId}`,
+      title: "Seed Posting Arc33",
+      companyId,
+    });
+    const created = await insertCandidacy(db, USER, postingId);
+    let candidacyId = created?.id;
+    if (!candidacyId) {
+      const [row] = await db<{ id: string }[]>`
+        select id from public.candidacies where user_id = ${USER} and posting_id = ${postingId}`;
+      candidacyId = row.id;
+    }
+    await setCandidacyStatus(db, candidacyId, "shortlisted");
+  };
+
   beforeAll(async () => {
     sql = createDb({ DATABASE_URL: TEST_DB_URL });
-    for (const n of [COMPANY, "Enrich Fail Co Arc13", "Enrich Seam Co Arc13"]) await purge(sql, n);
+    for (const n of [
+      COMPANY,
+      "Enrich Fail Co Arc13",
+      "Enrich Seam Co Arc13",
+      "Enrich Ungated Co Arc33",
+    ])
+      await purge(sql, n);
+    await purgeSeed(sql);
+    // Signup fires on_auth_user_created → public.users (the candidacy FK target).
+    await sql`
+      insert into auth.users (id, email, raw_user_meta_data)
+      values (${USER}, 'arc33@example.com', ${sql.json({ full_name: "Arc33" })})
+      on conflict (id) do nothing`;
   });
 
   afterAll(async () => {
     if (!sql) return;
-    for (const n of [COMPANY, "Enrich Fail Co Arc13", "Enrich Seam Co Arc13"]) await purge(sql, n);
+    for (const n of [
+      COMPANY,
+      "Enrich Fail Co Arc13",
+      "Enrich Seam Co Arc13",
+      "Enrich Ungated Co Arc33",
+    ])
+      await purge(sql, n);
+    await purgeSeed(sql);
     await sql.end();
   });
 
   it("wraps enrich in a succeeded Activity and writes enrichment + status", async () => {
     const id = await upsertCompany(sql, COMPANY);
+    await shortlist(sql, id);
     const summary = await runEnrich(sql, { companyId: id });
     expect(summary.skipped).toBe(false);
     expect(summary.status).toBe("enriched");
@@ -109,6 +168,7 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
 
   it("records a failed Activity + enrichment_failed and rethrows when the tools throw", async () => {
     const id = await upsertCompany(sql, "Enrich Fail Co Arc13");
+    await shortlist(sql, id);
     const boom: Enricher = () => {
       throw new NotIntegratedError("linkedin mcp not integrated");
     };
@@ -129,6 +189,7 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
 
   it("uses an injected enricher — the tool calls are a mockable seam", async () => {
     const id = await upsertCompany(sql, "Enrich Seam Co Arc13");
+    await shortlist(sql, id);
     const mock: Enricher = () => ({
       websiteUrl: "https://mock.example",
       recruitmentEmail: "jobs@mock.example",
@@ -143,6 +204,20 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
 
     const company = await getCompany(sql, id);
     expect(company?.recruitment_email).toBe("jobs@mock.example");
+  });
+
+  it("refuses a company with no shortlisted candidacy and opens no Activity (gate)", async () => {
+    const id = await upsertCompany(sql, "Enrich Ungated Co Arc33");
+    await expect(runEnrich(sql, { companyId: id })).rejects.toThrow(
+      /gated to shortlisted companies/,
+    );
+
+    // Fail-closed precondition: status untouched and no Activity opened.
+    const company = await getCompany(sql, id);
+    expect(company?.status).toBe("new");
+    const [{ n }] = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.activities where company_id = ${id} and type = 'enrich'`;
+    expect(n).toBe(0);
   });
 
   it("throws for an unknown company", async () => {

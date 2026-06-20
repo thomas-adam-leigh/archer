@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+  companyHasShortlistedCandidacy,
   type Db,
   type Enums,
   failActivity,
@@ -103,8 +104,11 @@ export interface EnrichSummary {
  * succeeded/failed). The company moves new|… → researching while the run is open,
  * then → enriched on success or → enrichment_failed (with the reason) on failure.
  * Idempotent: an already-`enriched` company is a no-op that opens NO Activity, unless
- * `force` is set. The LinkedIn MCP + Firecrawl calls are a mockable seam — pass your
- * own `enrich` to swap the stub for a real provider.
+ * `force` is set. Gated to the shortlist: a company with no `shortlisted`/
+ * `alternative_outreach` candidacy behind it is refused (fail-closed precondition,
+ * no Activity opened) so enrichment never runs on dismissed or never-matched
+ * companies. The LinkedIn MCP + Firecrawl calls are a mockable seam — pass your own
+ * `enrich` to swap the stub for a real provider.
  */
 export async function runEnrich(
   db: Db,
@@ -124,6 +128,15 @@ export async function runEnrich(
       contactsFound: 0,
       activityId: null,
     };
+  }
+
+  // Shortlist gate: only research companies a candidacy actually shortlisted. A
+  // precondition guard like the unknown-company check — refused before any status
+  // change or Activity, so no wasted enrichment of dismissed/never-matched companies.
+  if (!(await companyHasShortlistedCandidacy(db, company.id))) {
+    throw new CliError(
+      `enrichment is gated to shortlisted companies: ${company.name} has no shortlisted candidacy`,
+    );
   }
 
   await setCompanyStatus(db, company.id, "researching");
