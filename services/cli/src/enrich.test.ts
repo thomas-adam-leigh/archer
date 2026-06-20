@@ -1,6 +1,7 @@
 import {
   createDb,
   type Db,
+  getCandidacy,
   getCompany,
   insertCandidacy,
   setCandidacyStatus,
@@ -265,5 +266,122 @@ describe.skipIf(!TEST_DB_URL)("ARC-13 — enrich-as-Activity orchestration (stub
     await expect(
       runEnrich(sql, { companyId: "00000000-0000-4000-8000-000000000000" }),
     ).rejects.toThrow(/unknown company/);
+  });
+});
+
+// ARC-35: the candidacy gate. On successful enrichment the company's shortlisted /
+// alternative_outreach candidacies advance to awaiting_cover_letter (the hand-off into
+// Applications & Cover Letters), each owner is notified, the transition fires exactly
+// once per candidacy (a forced re-enrich advances none), and a company whose
+// enrichment FAILS advances nothing. DB-backed, so it runs only against a migrated
+// TEST_DATABASE_URL (skipped otherwise); the wiring is still typechecked in CI.
+const GATE_USER = "dddddddd-0000-4000-8000-000000000035";
+const GATE_COMPANY = "Gate Co Arc35";
+const GATE_FAIL_COMPANY = "Gate Fail Co Arc35";
+
+describe.skipIf(!TEST_DB_URL)("ARC-35 — candidacy gate → awaiting_cover_letter on enriched", () => {
+  let sql: Db;
+
+  const purge = async (db: Db, names: string[]) => {
+    for (const name of names) {
+      await db`
+        delete from public.activities
+        where company_id in (select id from public.companies where name = ${name})`;
+      await db`
+        delete from public.contacts
+        where company_id in (select id from public.companies where name = ${name})`;
+    }
+    await db`delete from public.notifications where user_id = ${GATE_USER}`;
+    await db`delete from public.candidacies where user_id = ${GATE_USER}`;
+    await db`delete from public.postings where url like 'https://cj.test/arc35/%'`;
+    for (const name of names) await db`delete from public.companies where name = ${name}`;
+  };
+
+  // Put a candidacy at `status` behind a company; returns its id. Posting url is keyed
+  // on the company id so re-runs upsert rather than duplicate.
+  const shortlist = async (
+    db: Db,
+    companyId: string,
+    status: "shortlisted" | "alternative_outreach" = "shortlisted",
+  ): Promise<string> => {
+    const { id: postingId } = await upsertPosting(db, {
+      boardSlug: "careerjunction",
+      url: `https://cj.test/arc35/${companyId}`,
+      title: "Gate Posting Arc35",
+      companyId,
+    });
+    const created = await insertCandidacy(db, GATE_USER, postingId);
+    let candidacyId = created?.id;
+    if (!candidacyId) {
+      const [row] = await db<{ id: string }[]>`
+        select id from public.candidacies where user_id = ${GATE_USER} and posting_id = ${postingId}`;
+      candidacyId = row.id;
+    }
+    await setCandidacyStatus(db, candidacyId, status);
+    return candidacyId;
+  };
+
+  beforeAll(async () => {
+    sql = createDb({ DATABASE_URL: TEST_DB_URL });
+    await purge(sql, [GATE_COMPANY, GATE_FAIL_COMPANY]);
+    await sql`delete from public.users where id = ${GATE_USER}`;
+    await sql`delete from auth.users where id = ${GATE_USER}`;
+    await sql`
+      insert into auth.users (id, email, raw_user_meta_data)
+      values (${GATE_USER}, 'arc35@example.com', ${sql.json({ full_name: "Arc35" })})
+      on conflict (id) do nothing`;
+  });
+
+  afterAll(async () => {
+    if (!sql) return;
+    await purge(sql, [GATE_COMPANY, GATE_FAIL_COMPANY]);
+    await sql`delete from public.users where id = ${GATE_USER}`;
+    await sql`delete from auth.users where id = ${GATE_USER}`;
+    await sql.end();
+  });
+
+  it("advances a shortlisted candidacy to awaiting_cover_letter and notifies the owner", async () => {
+    const id = await upsertCompany(sql, GATE_COMPANY);
+    const candidacyId = await shortlist(sql, id);
+
+    const summary = await runEnrich(sql, { companyId: id });
+    expect(summary.status).toBe("enriched");
+    expect(summary.candidaciesAdvanced).toBe(1);
+
+    const candidacy = await getCandidacy(sql, candidacyId);
+    expect(candidacy?.status).toBe("awaiting_cover_letter");
+
+    const [{ n }] = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+      where user_id = ${GATE_USER} and ref->>'candidacyId' = ${candidacyId}`;
+    expect(n).toBe(1);
+  });
+
+  it("fires exactly once per candidacy — a forced re-enrich advances none", async () => {
+    const id = await upsertCompany(sql, GATE_COMPANY);
+    const summary = await runEnrich(sql, { companyId: id, force: true });
+    expect(summary.status).toBe("enriched");
+    expect(summary.candidaciesAdvanced).toBe(0);
+
+    // No second notification: the candidacy is already awaiting_cover_letter.
+    const [{ n }] = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications where user_id = ${GATE_USER}`;
+    expect(n).toBe(1);
+  });
+
+  it("does not advance candidacies when enrichment fails (un-enriched company)", async () => {
+    const id = await upsertCompany(sql, GATE_FAIL_COMPANY);
+    const candidacyId = await shortlist(sql, id);
+    const boom: Enricher = () => {
+      throw new NotIntegratedError("firecrawl not integrated");
+    };
+    await expect(runEnrich(sql, { companyId: id, enrich: boom })).rejects.toBeInstanceOf(
+      NotIntegratedError,
+    );
+
+    const company = await getCompany(sql, id);
+    expect(company?.status).toBe("enrichment_failed");
+    const candidacy = await getCandidacy(sql, candidacyId);
+    expect(candidacy?.status).toBe("shortlisted");
   });
 });

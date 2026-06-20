@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import {
+  advanceCandidaciesToCoverLetter,
   companyHasShortlistedCandidacy,
+  createNotification,
   type Db,
   type Enums,
   failActivity,
@@ -95,6 +97,9 @@ export interface EnrichSummary {
   /** true when the company was already enriched and the run was a no-op (no Activity). */
   skipped: boolean;
   contactsFound: number;
+  /** Candidacies advanced shortlisted/alternative_outreach → awaiting_cover_letter
+   *  by the enrichment gate (ARC-35) — the hand-off into Applications & Cover Letters. */
+  candidaciesAdvanced: number;
   /** The enrich Activity's id, or null when the run was a skipped no-op. */
   activityId: string | null;
 }
@@ -127,6 +132,7 @@ export async function runEnrich(
       status: company.status,
       skipped: true,
       contactsFound: 0,
+      candidaciesAdvanced: 0,
       activityId: null,
     };
   }
@@ -171,9 +177,25 @@ export async function runEnrich(
     // re-enriched company adds no duplicate rows). The jsonb above keeps provenance.
     await upsertContacts(db, company.id, result.contacts);
     await setCompanyStatus(db, company.id, "enriched");
+    // Candidacy gate (ARC-35): the company is now enriched, so advance every
+    // shortlisted / alternative_outreach candidacy behind it to awaiting_cover_letter
+    // and push each owner a notification — the hand-off that unblocks Applications &
+    // Cover Letters. Idempotent: only those two statuses move, so a forced re-enrich
+    // (whose candidacies are already advanced) advances none.
+    const advanced = await advanceCandidaciesToCoverLetter(db, company.id);
+    for (const c of advanced) {
+      await createNotification(db, {
+        userId: c.user_id,
+        kind: "candidacy",
+        title: "A role is ready for your cover letter",
+        body: `${company.name} is researched — "${c.posting_title}" is awaiting a cover letter.`,
+        ref: { candidacyId: c.id, companyId: company.id, status: "awaiting_cover_letter" },
+      });
+    }
     await succeedActivity(db, activity.id, {
       company: company.name,
       contactsFound: result.contacts.length,
+      candidaciesAdvanced: advanced.length,
     });
     return {
       companyId: company.id,
@@ -181,6 +203,7 @@ export async function runEnrich(
       status: "enriched",
       skipped: false,
       contactsFound: result.contacts.length,
+      candidaciesAdvanced: advanced.length,
       activityId: activity.id,
     };
   } catch (err) {
@@ -225,7 +248,7 @@ export function registerEnrich(program: Command): void {
           console.log(
             s.skipped
               ? `enrich: ${s.company} already enriched (no-op)`
-              : `enrich: ${s.company} → ${s.status}, ${s.contactsFound} contact(s)`,
+              : `enrich: ${s.company} → ${s.status}, ${s.contactsFound} contact(s), ${s.candidaciesAdvanced} candidacy(ies) → awaiting_cover_letter`,
           ),
         );
       });
