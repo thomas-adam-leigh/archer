@@ -52,6 +52,24 @@ describe("archer-api", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /jobs rejects a missing or invalid user", async () => {
+    const missing = await app.request("/jobs");
+    expect(missing.status).toBe(400);
+    const bad = await app.request("/jobs?user=not-a-uuid");
+    expect(bad.status).toBe(400);
+  });
+
+  it("GET /jobs rejects an invalid status filter", async () => {
+    const res = await app.request(`/jobs?user=${VALID_UUID}&status=nope`);
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies GET /jobs with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(`/jobs?user=${VALID_UUID}`);
+    expect(res.status).toBe(401);
+  });
+
   it("rejects an agui run with a missing or invalid threadId", async () => {
     const missing = await app.request("/agui/run", post({}));
     expect(missing.status).toBe(400);

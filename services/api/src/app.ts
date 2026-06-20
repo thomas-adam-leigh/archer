@@ -22,6 +22,7 @@ import {
   ingestVoicenote,
   isAccepted,
   type Json,
+  listCandidacies,
   listNegativeCriteria,
   listProfileVersions,
   listTargetTitles,
@@ -95,6 +96,22 @@ const app = new Hono()
       return c.json({ error: res.stderr.trim() || "collect failed", code: res.code }, 502);
     }
     return c.json(JSON.parse(res.stdout));
+  })
+  // Jobs feed (ARC-11): a user's candidacies joined to their posting/company —
+  // title, board, company, status, triage decision, match score — optionally
+  // filtered by status. RLS own-rows-only (scoped on user_id); the thin clients
+  // poll this for the kanban and write via the transition command below. Live
+  // fan-out itself rides the Substrate's Realtime transport on the events table.
+  .get("/jobs", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const status = c.req.query("status");
+    if (status && !CANDIDACY_STATUSES.includes(status)) {
+      return c.json({ error: `'status' must be one of ${CANDIDACY_STATUSES.join(", ")}` }, 400);
+    }
+    const jobs = await listCandidacies(getDb(), user, { status: status as never });
+    return c.json({ user, jobs });
   })
   // DB-only command: move a candidacy through the kanban (in-process, no CLI).
   .post("/commands/candidacies/:id/transition", async (c) => {

@@ -193,6 +193,7 @@ export interface CandidacyListItem {
   id: string;
   status: Enum<"candidacy_status">;
   triage_decision: Enum<"triage_decision"> | null;
+  match_score: number | null;
   posting_title: string;
   board_slug: string;
   company_name: string | null;
@@ -206,7 +207,7 @@ export async function listCandidacies(
 ): Promise<CandidacyListItem[]> {
   if (opts.status) {
     return await db<CandidacyListItem[]>`
-      select c.id, c.status, c.triage_decision, p.title as posting_title,
+      select c.id, c.status, c.triage_decision, c.match_score, p.title as posting_title,
              p.board_slug, co.name as company_name, c.created_at
       from candidacies c
       join postings p on p.id = c.posting_id
@@ -215,7 +216,7 @@ export async function listCandidacies(
       order by c.created_at desc`;
   }
   return await db<CandidacyListItem[]>`
-    select c.id, c.status, c.triage_decision, p.title as posting_title,
+    select c.id, c.status, c.triage_decision, c.match_score, p.title as posting_title,
            p.board_slug, co.name as company_name, c.created_at
     from candidacies c
     join postings p on p.id = c.posting_id

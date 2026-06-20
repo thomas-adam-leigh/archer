@@ -38,8 +38,9 @@ export function registerJobs(program: Command): void {
         output(ctx, rows, (cs) => {
           for (const c of cs) {
             const at = c.company_name ? `  @ ${c.company_name}` : "";
+            const score = c.match_score == null ? "    " : `${c.match_score}`.padStart(3) + " ";
             console.log(
-              `${c.id}  ${c.status.padEnd(20)} ${c.board_slug.padEnd(14)} ${c.posting_title}${at}`,
+              `${c.id}  ${score} ${c.status.padEnd(20)} ${c.board_slug.padEnd(14)} ${c.posting_title}${at}`,
             );
           }
         });
