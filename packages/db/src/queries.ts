@@ -297,16 +297,20 @@ export async function getCompany(db: Db, id: string): Promise<Company | undefine
 }
 
 /** The shortlist gate: true when at least one candidacy (across users) pursues a
- *  posting at this company with a `shortlisted` or `alternative_outreach` decision.
- *  Enrichment fires only behind a shortlist — no wasted research on dismissed or
- *  never-matched companies (candidacy → posting → company join). */
+ *  posting at this company and has been triaged INTO pursuit — i.e. any status other
+ *  than the untriaged `new` or the `dismissed` rejects. This covers a freshly
+ *  `shortlisted`/`alternative_outreach` candidacy AND one that has since progressed
+ *  past it (e.g. `awaiting_cover_letter` after the enrichment gate ran), so a forced
+ *  re-enrich of an already-advanced company is still allowed. Enrichment fires only
+ *  behind a shortlist — no wasted research on dismissed or never-matched companies
+ *  (candidacy → posting → company join). */
 export async function companyHasShortlistedCandidacy(db: Db, companyId: string): Promise<boolean> {
   const rows = await db<{ ok: boolean }[]>`
     select exists (
       select 1 from candidacies c
       join postings p on p.id = c.posting_id
       where p.company_id = ${companyId}
-        and c.status in ('shortlisted', 'alternative_outreach')
+        and c.status not in ('new', 'dismissed')
     ) as ok`;
   return rows[0]?.ok ?? false;
 }
@@ -400,6 +404,52 @@ export async function upsertContacts(
     if (rows[0]) inserted++;
   }
   return inserted;
+}
+
+// ── candidacy gate: enriched → awaiting_cover_letter (ARC-35) ──────────────
+/** A candidacy advanced by the enrichment gate, with the context to notify its owner. */
+export interface AdvancedCandidacy {
+  id: string;
+  user_id: string;
+  posting_title: string;
+}
+
+/** The hand-off that unblocks Applications & Cover Letters: when a company reaches
+ *  `enriched`, advance every candidacy behind it that is `shortlisted` /
+ *  `alternative_outreach` to `awaiting_cover_letter`. One atomic UPDATE across all
+ *  users' candidacies at the company; idempotent by construction — only those two
+ *  statuses match, so a re-run (or an already-advanced candidacy) advances nothing.
+ *  Returns the rows it moved so the caller can notify each owner. */
+export async function advanceCandidaciesToCoverLetter(
+  db: Db,
+  companyId: string,
+): Promise<AdvancedCandidacy[]> {
+  return await db<AdvancedCandidacy[]>`
+    update candidacies c set
+      status = 'awaiting_cover_letter'::candidacy_status,
+      status_changed_at = now()
+    from postings p
+    where c.posting_id = p.id
+      and p.company_id = ${companyId}
+      and c.status in ('shortlisted', 'alternative_outreach')
+    returning c.id, c.user_id, p.title as posting_title`;
+}
+
+// ── notifications (per-user pushes) ────────────────────────────────────────
+export interface NewNotification {
+  userId: string;
+  kind?: string;
+  title: string;
+  body?: string | null;
+  ref?: Record<string, unknown> | null;
+}
+
+/** Push a notification to a user (cover-letter ready, proposal decided, …). */
+export async function createNotification(db: Db, n: NewNotification): Promise<void> {
+  await db`
+    insert into notifications (user_id, kind, title, body, ref)
+    values (${n.userId}, ${n.kind ?? "info"}, ${n.title}, ${n.body ?? null},
+            ${n.ref ? db.json(n.ref as never) : null})`;
 }
 
 export interface UpsertPostingInput {
