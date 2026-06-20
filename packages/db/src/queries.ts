@@ -373,6 +373,52 @@ export async function finishRun(
   return rows[0];
 }
 
+// ── interaction: tier-2 message corpus search (full-text) ──────────────────
+// The messages table is the deep tier-2 memory (chat turns incl. activity +
+// reasoning). This is its retrieval surface: full-text now (an `english`
+// to_tsvector GIN index + websearch_to_tsquery, see
+// 20260620140000_message_search.sql), embeddings-ready later. Downstream
+// consumers (profile distillation, cover-letter drafting) read past conversation
+// through here instead of re-querying messages directly.
+export type Message = Row<"messages">;
+
+/** One full-text hit, with its relevance rank (higher = better match). */
+export interface MessageSearchHit {
+  id: string;
+  thread_id: string;
+  run_id: string | null;
+  role: Enum<"message_role">;
+  content: string | null;
+  created_at: string;
+  rank: number;
+}
+
+/** Search a user's own messages by keyword, best match first. Scoped own-rows-only
+ *  through the owning thread (mirroring the messages RLS), optionally to one thread.
+ *  `query` is parsed with websearch_to_tsquery, so "quoted phrases" and -negation
+ *  work and malformed input yields no matches rather than an error. */
+export async function searchMessages(
+  db: Db,
+  userId: string,
+  query: string,
+  opts: { threadId?: string | null; limit?: number } = {},
+): Promise<MessageSearchHit[]> {
+  const limit = opts.limit ?? 20;
+  const threadId = opts.threadId ?? null;
+  return await db<MessageSearchHit[]>`
+    select m.id, m.thread_id, m.run_id, m.role, m.content, m.created_at,
+           ts_rank(to_tsvector('english', coalesce(m.content, '')),
+                   websearch_to_tsquery('english', ${query})) as rank
+    from messages m
+    join threads t on t.id = m.thread_id
+    where t.user_id = ${userId}
+      and (${threadId}::uuid is null or m.thread_id = ${threadId}::uuid)
+      and to_tsvector('english', coalesce(m.content, ''))
+          @@ websearch_to_tsquery('english', ${query})
+    order by rank desc, m.created_at desc
+    limit ${limit}`;
+}
+
 // ── interaction: the interrupt → approval substrate (proposals table) ──────
 // A run that pauses for a human emits an interrupt; we durably back each one with
 // a proposals row (kind 'tool_call'). The interrupt's locator lives in plan jsonb
