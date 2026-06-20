@@ -32,15 +32,14 @@ jobs:
       - name: DB contract drift gate
         run: bash packages/db/scripts/gen-types.sh --check
 
-  # Apply pending migrations to Supabase, then regenerate and commit types.
-  # Runs after verify (which already confirmed types match migrations via the
-  # ephemeral-postgres drift gate — that's the dry-run). The explicit --dry-run
-  # flag here shows what will be applied before actually touching the database.
+  # Apply pending migrations to Supabase. Runs after verify, whose drift gate
+  # (gen-types.sh --check on an ephemeral postgres) already proved the committed
+  # @archer/db types match the migrations — so there is nothing to regenerate
+  # here; after `db push` the remote DB matches those same migrations. The
+  # explicit --dry-run shows what will be applied before touching the database.
   migrate:
     needs: verify
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
@@ -67,16 +66,6 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase db push
-      - name: Regenerate @archer/db types
-        run: bash packages/db/scripts/gen-types.sh
-      - name: Commit updated types if regeneration produced a diff
-        run: |
-          git diff --quiet packages/db/src/database.types.ts && exit 0
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/db/src/database.types.ts
-          git commit -m "chore(db): regenerate @archer/db types after migration [skip ci]"
-          git push
 
   # Build, SBOM, provenance, sign, push. One job per service image.
   release:
