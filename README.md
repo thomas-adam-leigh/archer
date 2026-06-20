@@ -12,7 +12,8 @@ archer/
 │  └─ agent/             # Obsidian vault — Archer's system prompts & memory (front-ends to come)
 ├─ services/
 │  ├─ api/               # @archer/api — Hono API (deployable)
-│  └─ cli/               # @archer/cli — Archer's CLI (deployable; → Python/Patchwright)
+│  ├─ cli/               # @archer/cli — Archer's CLI (deployable; → Python/Patchwright)
+│  └─ scheduler/         # @archer/scheduler — SQLite-backed tick: runs `claude -p` on an interval
 ├─ packages/
 │  └─ db/                # @archer/db — Supabase migrations + generated types (the contract)
 ├─ infra/
@@ -46,6 +47,30 @@ pnpm db:gen             # apply migrations to an ephemeral Postgres, regenerate 
 
 CI runs `pnpm --filter @archer/db db:gen:check` and **fails if the committed types
 are stale** — keeping TypeScript (and, later, Python) honest to the schema.
+
+## Scheduler (the tick)
+
+`@archer/scheduler` is a long-running process that, on a configurable interval
+(default **30 minutes**), runs a configurable shell command — by default
+`claude -p "@./services/scheduler/prompt.md"`, feeding the tracked prompt file to
+Claude. Config and run history live in a local SQLite DB (`SCHEDULER_DB_PATH`,
+default `services/scheduler/scheduler.db`). Each tick re-reads the config, so
+changes take effect on the next cycle without a restart.
+
+```sh
+pnpm --filter @archer/scheduler build
+pnpm --filter @archer/scheduler start          # run the daemon
+
+# Configure it (writes to the SQLite DB):
+node services/scheduler/dist/cli.js status
+node services/scheduler/dist/cli.js set-interval 30
+node services/scheduler/dist/cli.js set-command 'claude -p "@./services/scheduler/prompt.md"'
+node services/scheduler/dist/cli.js disable     # / enable
+node services/scheduler/dist/cli.js runs        # recent run history
+```
+
+Edit `services/scheduler/prompt.md` to change what Archer does each tick. Design:
+[`docs/superpowers/specs/2026-06-20-scheduler-design.md`](./docs/superpowers/specs/2026-06-20-scheduler-design.md).
 
 ## CI/CD
 
