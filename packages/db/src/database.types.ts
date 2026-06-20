@@ -193,6 +193,66 @@ export type Database = {
           },
         ]
       }
+      certifications: {
+        Row: {
+          created_at: string
+          credential_id: string | null
+          details: Json
+          expires_on: string | null
+          id: string
+          issued_on: string | null
+          issuer: string | null
+          name: string
+          updated_at: string
+          url: string | null
+          user_id: string
+          version_id: string
+        }
+        Insert: {
+          created_at?: string
+          credential_id?: string | null
+          details?: Json
+          expires_on?: string | null
+          id?: string
+          issued_on?: string | null
+          issuer?: string | null
+          name: string
+          updated_at?: string
+          url?: string | null
+          user_id: string
+          version_id: string
+        }
+        Update: {
+          created_at?: string
+          credential_id?: string | null
+          details?: Json
+          expires_on?: string | null
+          id?: string
+          issued_on?: string | null
+          issuer?: string | null
+          name?: string
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+          version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "certifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "certifications_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "profile_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           created_at: string
@@ -278,6 +338,120 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      courses: {
+        Row: {
+          completed_on: string | null
+          created_at: string
+          details: Json
+          id: string
+          name: string
+          provider: string | null
+          updated_at: string
+          url: string | null
+          user_id: string
+          version_id: string
+        }
+        Insert: {
+          completed_on?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          name: string
+          provider?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id: string
+          version_id: string
+        }
+        Update: {
+          completed_on?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          name?: string
+          provider?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+          version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "courses_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "courses_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "profile_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      education: {
+        Row: {
+          created_at: string
+          degree: string | null
+          details: Json
+          end_date: string | null
+          field_of_study: string | null
+          grade: string | null
+          id: string
+          institution: string
+          start_date: string | null
+          updated_at: string
+          user_id: string
+          version_id: string
+        }
+        Insert: {
+          created_at?: string
+          degree?: string | null
+          details?: Json
+          end_date?: string | null
+          field_of_study?: string | null
+          grade?: string | null
+          id?: string
+          institution: string
+          start_date?: string | null
+          updated_at?: string
+          user_id: string
+          version_id: string
+        }
+        Update: {
+          created_at?: string
+          degree?: string | null
+          details?: Json
+          end_date?: string | null
+          field_of_study?: string | null
+          grade?: string | null
+          id?: string
+          institution?: string
+          start_date?: string | null
+          updated_at?: string
+          user_id?: string
+          version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "education_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "education_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "profile_versions"
             referencedColumns: ["id"]
           },
         ]
@@ -523,9 +697,54 @@ export type Database = {
           },
         ]
       }
+      profile_versions: {
+        Row: {
+          attributes: Json
+          created_at: string
+          details: Json
+          id: string
+          label: string | null
+          status: Database["public"]["Enums"]["profile_version_status"]
+          updated_at: string
+          user_id: string
+          version_no: number
+        }
+        Insert: {
+          attributes?: Json
+          created_at?: string
+          details?: Json
+          id?: string
+          label?: string | null
+          status?: Database["public"]["Enums"]["profile_version_status"]
+          updated_at?: string
+          user_id: string
+          version_no: number
+        }
+        Update: {
+          attributes?: Json
+          created_at?: string
+          details?: Json
+          id?: string
+          label?: string | null
+          status?: Database["public"]["Enums"]["profile_version_status"]
+          updated_at?: string
+          user_id?: string
+          version_no?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_versions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           about: string | null
+          attributes: Json
           created_at: string
           current_salary: string | null
           linkedin_url: string | null
@@ -543,6 +762,7 @@ export type Database = {
         }
         Insert: {
           about?: string | null
+          attributes?: Json
           created_at?: string
           current_salary?: string | null
           linkedin_url?: string | null
@@ -560,6 +780,7 @@ export type Database = {
         }
         Update: {
           about?: string | null
+          attributes?: Json
           created_at?: string
           current_salary?: string | null
           linkedin_url?: string | null
@@ -581,6 +802,66 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: true
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          created_at: string
+          description: string | null
+          details: Json
+          end_date: string | null
+          id: string
+          name: string
+          role: string | null
+          start_date: string | null
+          updated_at: string
+          url: string | null
+          user_id: string
+          version_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          details?: Json
+          end_date?: string | null
+          id?: string
+          name: string
+          role?: string | null
+          start_date?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id: string
+          version_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          details?: Json
+          end_date?: string | null
+          id?: string
+          name?: string
+          role?: string | null
+          start_date?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+          version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "projects_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "profile_versions"
             referencedColumns: ["id"]
           },
         ]
@@ -705,6 +986,60 @@ export type Database = {
           },
         ]
       }
+      skills: {
+        Row: {
+          category: string | null
+          created_at: string
+          details: Json
+          id: string
+          name: string
+          proficiency: string | null
+          updated_at: string
+          user_id: string
+          version_id: string
+          years_experience: number | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          name: string
+          proficiency?: string | null
+          updated_at?: string
+          user_id: string
+          version_id: string
+          years_experience?: number | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          details?: Json
+          id?: string
+          name?: string
+          proficiency?: string | null
+          updated_at?: string
+          user_id?: string
+          version_id?: string
+          years_experience?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "skills_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "skills_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "profile_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       target_titles: {
         Row: {
           created_at: string
@@ -819,6 +1154,72 @@ export type Database = {
         }
         Relationships: []
       }
+      work_experiences: {
+        Row: {
+          created_at: string
+          description: string | null
+          details: Json
+          employment_type: string | null
+          end_date: string | null
+          id: string
+          is_current: boolean
+          location: string | null
+          organization: string | null
+          start_date: string | null
+          title: string
+          updated_at: string
+          user_id: string
+          version_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          details?: Json
+          employment_type?: string | null
+          end_date?: string | null
+          id?: string
+          is_current?: boolean
+          location?: string | null
+          organization?: string | null
+          start_date?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+          version_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          details?: Json
+          employment_type?: string | null
+          end_date?: string | null
+          id?: string
+          is_current?: boolean
+          location?: string | null
+          organization?: string | null
+          start_date?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+          version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_experiences_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_experiences_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "profile_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -890,6 +1291,12 @@ export type Database = {
         | "tool"
         | "reasoning"
         | "activity"
+      profile_version_status:
+        | "draft"
+        | "proposed"
+        | "approved"
+        | "rejected"
+        | "superseded"
       proposal_status:
         | "submitted"
         | "approved"
@@ -1094,6 +1501,13 @@ export const Constants = {
         "tool",
         "reasoning",
         "activity",
+      ],
+      profile_version_status: [
+        "draft",
+        "proposed",
+        "approved",
+        "rejected",
+        "superseded",
       ],
       proposal_status: [
         "submitted",
