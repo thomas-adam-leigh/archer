@@ -1,21 +1,29 @@
 import { timingSafeEqual } from "node:crypto";
 import {
   appendEvents,
+  applyVersionProposal,
   Constants,
   createInterruptProposal,
+  createProfileVersion,
   createRun,
   decideInterruptProposal,
   finishRun,
+  getLiveProfileVersion,
+  getThreadOwner,
   type Json,
   loadThreadEvents,
   loadThreadInterrupts,
   setCandidacyStatus,
+  submitVersionProposal,
+  type VersionDecision,
 } from "@archer/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import {
   classifyRun,
+  draftAttributes,
   interruptsFromEvents,
+  onboardingRun,
   outcomeFromEvents,
   type ResolvedInterrupt,
   type RunAgentInput,
@@ -182,6 +190,82 @@ const app = new Hono()
     const events = await loadThreadEvents(getDb(), threadId);
     const { state, messages } = restoreThread(events);
     return c.json({ threadId, state, messages, events });
+  })
+  // ── Candidate onboarding (ARC-28) ──────────────────────────────────────────
+  // Empty-state gate: a user with no live (approved) profile version is in
+  // onboarding mode. The thin clients key their empty-state on this.
+  .get("/onboarding/state", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const live = await getLiveProfileVersion(getDb(), user);
+    return c.json({ user, onboarding: !live, liveVersionId: live?.id ?? null });
+  })
+  // Drive one onboarding run: the scripted Guide assembles a profile draft in
+  // AG-UI shared state (StateSnapshot + JSON-Patch deltas), then the assembled
+  // draft is submitted as a proposed profile VERSION through the apply executor.
+  // The version owner is resolved from the thread, not trusted from the caller.
+  .post("/onboarding/run", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      threadId?: string;
+      draft?: Record<string, Json>;
+    };
+    const threadId = body.threadId;
+    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
+    const db = getDb();
+    const userId = await getThreadOwner(db, threadId);
+    if (!userId) return c.json({ error: "unknown thread" }, 404);
+
+    const run = await createRun(db, { threadId, input: body as unknown as Json });
+    const events = onboardingRun({ threadId, runId: run.id, draft: body.draft });
+    await appendEvents(db, threadId, run.id, events);
+    const status = statusFromEvents(events);
+    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+
+    // Fold the run's shared state and submit the assembled draft as a version.
+    const attributes = draftAttributes(restoreThread(events).state);
+    const version = await createProfileVersion(db, {
+      userId,
+      label: "onboarding draft",
+      attributes,
+    });
+    const proposal = await submitVersionProposal(db, {
+      userId,
+      versionId: version.id,
+      title: "Approve your profile",
+    });
+    return c.json({
+      threadId,
+      runId: run.id,
+      status,
+      versionId: version.id,
+      proposalId: proposal.id,
+      attributes,
+      events,
+    });
+  })
+  // Decide a submitted profile-version proposal: approve (optionally with edits)
+  // materialises it as the live profile via the apply executor; reject leaves the
+  // live profile untouched. Closes the onboarding round trip to an approved version.
+  .post("/onboarding/proposals/:proposalId/decide", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const proposalId = c.req.param("proposalId");
+    if (!UUID_RE.test(proposalId)) return c.json({ error: "invalid proposal id" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      action?: string;
+      edits?: { attributes?: Json; label?: string | null };
+      note?: string | null;
+    };
+    if (body.action !== "approve" && body.action !== "reject") {
+      return c.json({ error: "'action' must be approve or reject" }, 400);
+    }
+    const decision: VersionDecision =
+      body.action === "approve"
+        ? { action: "approve", edits: body.edits, note: body.note }
+        : { action: "reject", note: body.note };
+    const result = await applyVersionProposal(getDb(), proposalId, decision);
+    return c.json({ proposalId, ...result });
   })
   // Webhook: a redirected (external) application form was inserted.
   .post("/hooks/external-form", async (c) => {

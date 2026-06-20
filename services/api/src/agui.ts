@@ -202,6 +202,97 @@ function resumeScript({
   return events;
 }
 
+// ── The onboarding run: shared-state draft assembly via JSON-Patch deltas ────
+// The Guide's onboarding conversation accretes the candidate profile (ARC-28).
+// It opens an empty draft in shared state (StateSnapshot), then accretes it field
+// by field with StateDelta JSON-Patch (RFC-6902) deltas — the bandwidth-efficient
+// snapshot→delta model AG-UI prescribes (docs/docs/ag-ui/concepts/02-events.md).
+// The run finishes with the assembled draft in shared state; the route folds it
+// (restoreThread) and submits it as a proposed profile VERSION through the apply
+// executor. Deterministic + pure, like runStub: the run loop is real, brain stubbed.
+
+const ONBOARD_STEP = "onboard";
+const ONBOARD_GREETING = "Let's build your profile. Tell me about your work and what you're after.";
+const ONBOARD_CLOSING = "Here's your draft profile — review and approve it to go live.";
+
+/** The profile-wide attributes the scripted Guide assembles, when the caller
+ *  doesn't supply any (e.g. a bare onboarding run with no answers yet). */
+const DEFAULT_DRAFT: Record<string, Json> = {
+  ideal_job: "A role where I ship product end to end.",
+  why: "I do my best work close to users, owning outcomes.",
+  ai_fluency: "Comfortable building with LLMs and agentic tools day to day.",
+};
+
+export interface OnboardingArgs {
+  threadId: string;
+  runId: string;
+  parentRunId?: string | null;
+  /** Profile-wide attributes to assemble into the draft (defaults to a canned set
+   *  so a no-answer onboarding run still produces a reviewable draft). */
+  draft?: Record<string, Json>;
+}
+
+/** Escape a JSON Pointer reference token (RFC-6901 §3): `~`→`~0`, `/`→`~1`. */
+function escapePointer(token: string): string {
+  return token.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+/**
+ * Produce the ordered event log for one onboarding run. Greets, opens an empty
+ * draft in shared state, then emits one StateDelta per profile field (so the
+ * draft is assembled incrementally, not snapshotted whole), flips the phase to
+ * `draft_ready`, confirms in text, and finishes successfully. The final folded
+ * shared state is `{ phase: "draft_ready", draft: { attributes: {…} } }`.
+ */
+export function onboardingRun({
+  threadId,
+  runId,
+  parentRunId = null,
+  draft,
+}: OnboardingArgs): AgUiEvent[] {
+  const attributes = draft && Object.keys(draft).length > 0 ? draft : DEFAULT_DRAFT;
+  const open = `${runId}:m1`;
+  const close = `${runId}:m2`;
+  const events: AgUiEvent[] = [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "step_started", data: { stepName: ONBOARD_STEP } },
+    { type: "text_message_start", data: { messageId: open, role: "assistant" } },
+    { type: "text_message_content", data: { messageId: open, delta: ONBOARD_GREETING } },
+    { type: "text_message_end", data: { messageId: open } },
+    {
+      type: "state_snapshot",
+      data: { snapshot: { phase: "onboarding", draft: { attributes: {} } } },
+    },
+  ];
+  // Accrete the draft field by field — each delta is a JSON-Patch op array.
+  for (const [key, value] of Object.entries(attributes)) {
+    events.push({
+      type: "state_delta",
+      data: { delta: [{ op: "add", path: `/draft/attributes/${escapePointer(key)}`, value }] },
+    });
+  }
+  events.push({
+    type: "state_delta",
+    data: { delta: [{ op: "replace", path: "/phase", value: "draft_ready" }] },
+  });
+  events.push({ type: "text_message_start", data: { messageId: close, role: "assistant" } });
+  events.push({ type: "text_message_content", data: { messageId: close, delta: ONBOARD_CLOSING } });
+  events.push({ type: "text_message_end", data: { messageId: close } });
+  events.push({ type: "step_finished", data: { stepName: ONBOARD_STEP } });
+  events.push({
+    type: "run_finished",
+    data: { threadId, runId, outcome: { type: "success", phase: "draft_ready" } },
+  });
+  return events;
+}
+
+/** The Guide's assembled profile-wide attributes, read out of folded shared state
+ *  (`state.draft.attributes`). The shape the route submits as a profile version. */
+export function draftAttributes(state: Json): Json {
+  const draft = (state as { draft?: { attributes?: Json } } | null)?.draft;
+  return draft?.attributes ?? {};
+}
+
 /** The RunError event pair for a request that violates a contract rule. Bounded
  *  by run_started so a rejected request is still an auditable, persisted run. */
 export function runError(
@@ -344,6 +435,60 @@ export interface ThreadSnapshot {
 /** One persisted event as the projection consumes it (data may be null in the DB). */
 export type RestoreEvent = { type: EventType; data: Json | null };
 
+/** One RFC-6902 JSON Patch operation (the subset the state transport emits). */
+export interface StatePatchOp {
+  op: "add" | "replace" | "remove";
+  path: string;
+  value?: Json;
+}
+
+/** Parse a JSON Pointer (RFC-6901) into its unescaped reference tokens. */
+function pointerTokens(path: string): string[] {
+  if (path === "") return [];
+  return path
+    .split("/")
+    .slice(1)
+    .map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+/**
+ * Apply a sequence of JSON-Patch ops to a state object, returning a NEW state
+ * (the input is cloned, never mutated — so folding can't corrupt the source
+ * events). Supports the add/replace/remove subset AG-UI StateDelta events use,
+ * over object and array containers. Lenient by design (it's a projection, not a
+ * validator): missing intermediate objects are created so a delta never throws.
+ */
+export function applyStatePatch(state: Json, ops: StatePatchOp[]): Json {
+  const root = structuredClone(state ?? {}) as Json;
+  for (const op of ops) {
+    const tokens = pointerTokens(op.path);
+    if (tokens.length === 0) {
+      if (op.op !== "remove") return structuredClone(op.value ?? {}) as Json;
+      continue;
+    }
+    let node = root as Record<string, unknown> | unknown[];
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const key = tokens[i];
+      const next = (node as Record<string, unknown>)[key];
+      if (next == null || typeof next !== "object") {
+        (node as Record<string, unknown>)[key] = {};
+      }
+      node = (node as Record<string, unknown>)[key] as Record<string, unknown> | unknown[];
+    }
+    const last = tokens[tokens.length - 1];
+    if (Array.isArray(node)) {
+      const idx = last === "-" ? node.length : Number(last);
+      if (op.op === "remove") node.splice(idx, 1);
+      else node.splice(idx, op.op === "replace" ? 1 : 0, op.value);
+    } else if (op.op === "remove") {
+      delete (node as Record<string, unknown>)[last];
+    } else {
+      (node as Record<string, unknown>)[last] = op.value;
+    }
+  }
+  return root;
+}
+
 /**
  * Fold an ordered AG-UI event log into a StateSnapshot + MessagesSnapshot — the
  * history a reconnecting or brand-new client uses to rebuild the conversation.
@@ -353,9 +498,9 @@ export type RestoreEvent = { type: EventType; data: Json | null };
  * and independent of how the rows were fetched.
  *
  * - state_snapshot replaces the state object (last one wins).
+ * - state_delta layers JSON-Patch (RFC-6902) ops onto the current state.
  * - messages_snapshot authoritatively replaces the message list.
  * - text_message_start/content materialize and grow a streamed message.
- * (state_delta layering arrives with the run loop that emits deltas.)
  */
 export function restoreThread(events: RestoreEvent[]): ThreadSnapshot {
   let state: Json = {};
@@ -367,6 +512,9 @@ export function restoreThread(events: RestoreEvent[]): ThreadSnapshot {
     switch (e.type) {
       case "state_snapshot":
         state = (data.snapshot ?? {}) as Json;
+        break;
+      case "state_delta":
+        state = applyStatePatch(state, (data.delta ?? []) as StatePatchOp[]);
         break;
       case "messages_snapshot": {
         const msgs = (data.messages ?? []) as RestoredMessage[];

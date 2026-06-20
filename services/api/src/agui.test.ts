@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   type AgUiEvent,
+  applyStatePatch,
   classifyRun,
+  draftAttributes,
   interruptsFromEvents,
+  onboardingRun,
   outcomeFromEvents,
   restoreThread,
   runError,
@@ -313,5 +316,69 @@ describe("classifyRun — the interrupt/resume contract", () => {
       state: { open: [], decided: ["i1"] },
     });
     expect(d).toEqual({ action: "replay" });
+  });
+});
+
+describe("applyStatePatch — JSON-Patch (RFC-6902) state deltas", () => {
+  it("adds, replaces, and removes object members without mutating the input", () => {
+    const before = { a: 1, nested: { keep: true } };
+    const after = applyStatePatch(before as never, [
+      { op: "add", path: "/b", value: 2 },
+      { op: "replace", path: "/a", value: 9 },
+      { op: "remove", path: "/nested/keep" },
+    ]);
+    expect(after).toEqual({ a: 9, b: 2, nested: {} });
+    // The source object is cloned, never mutated — folding can't corrupt events.
+    expect(before).toEqual({ a: 1, nested: { keep: true } });
+  });
+
+  it("creates missing intermediate objects (lenient projection, never throws)", () => {
+    expect(
+      applyStatePatch({} as never, [{ op: "add", path: "/draft/attributes/x", value: 1 }]),
+    ).toEqual({ draft: { attributes: { x: 1 } } });
+  });
+
+  it("unescapes JSON Pointer tokens (~1 → /, ~0 → ~)", () => {
+    const out = applyStatePatch({} as never, [{ op: "add", path: "/a~1b", value: "v" }]);
+    expect(out).toEqual({ "a/b": "v" });
+  });
+
+  it("supports array append (-) and indexed insert", () => {
+    const out = applyStatePatch({ list: ["a"] } as never, [
+      { op: "add", path: "/list/-", value: "c" },
+      { op: "add", path: "/list/1", value: "b" },
+    ]);
+    expect(out).toEqual({ list: ["a", "b", "c"] });
+  });
+});
+
+describe("onboardingRun — shared-state draft assembly → version proposal", () => {
+  const args = { threadId: THREAD, runId: RUN };
+
+  it("opens an empty draft snapshot then accretes it with one delta per field", () => {
+    const events = onboardingRun({ ...args, draft: { ideal_job: "staff eng", why: "impact" } });
+    const seq = types(events);
+    expect(seq[0]).toBe("run_started");
+    expect(seq.at(-1)).toBe("run_finished");
+    // A single StateSnapshot opens the draft; deltas (not snapshots) accrete it.
+    expect(seq.filter((t) => t === "state_snapshot")).toHaveLength(1);
+    // one delta per field + one phase flip
+    expect(seq.filter((t) => t === "state_delta")).toHaveLength(3);
+    expect(statusFromEvents(events)).toBe("completed");
+  });
+
+  it("folds to the assembled draft in shared state (draft_ready)", () => {
+    const draft = { ideal_job: "staff eng", ai_fluency: "high" };
+    const events = onboardingRun({ ...args, draft });
+    const restore = events.map((e) => ({ type: e.type, data: e.data }));
+    const { state } = restoreThread(restore);
+    expect((state as { phase: string }).phase).toBe("draft_ready");
+    expect(draftAttributes(state)).toEqual(draft);
+  });
+
+  it("uses a default draft when the caller supplies none", () => {
+    const events = onboardingRun(args);
+    const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
+    expect(Object.keys(draftAttributes(state) as object).length).toBeGreaterThan(0);
   });
 });
