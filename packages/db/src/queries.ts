@@ -843,6 +843,169 @@ export async function ingestVoicenote(
   return { activityId: activity.id, messageId: message.id };
 }
 
+// ── acceptance gate: account lifecycle + readiness + ≤24h owner review ──────
+// The first human gate (ARC-31). A user onboards, then SUBMITS for review; an
+// owner (service role) ACCEPTS or REJECTS with a note. Acceptance additionally
+// requires a mechanical readiness check — 1–5 target titles + ≥1 negative
+// criterion + a complete-enough profile (an approved profile version). The
+// account row is provisioned just-in-time on first submit (defaulting to
+// 'onboarding' for any user without one). collect/match is gated on 'accepted'.
+export type Account = Row<"accounts">;
+export type AccountStatus = Enum<"account_status">;
+
+/** A user's account row, or undefined before first submit (= still 'onboarding'). */
+export async function getAccount(db: Db, userId: string): Promise<Account | undefined> {
+  const rows = await db<Account[]>`select * from accounts where user_id = ${userId}`;
+  return rows[0];
+}
+
+/** Whether a user is accepted — the enforceable gate for collect/match. */
+export async function isAccepted(db: Db, userId: string): Promise<boolean> {
+  const rows = await db<{ ok: boolean }[]>`
+    select exists (
+      select 1 from accounts where user_id = ${userId} and status = 'accepted'
+    ) as ok`;
+  return rows[0]?.ok ?? false;
+}
+
+/** The mechanical readiness check acceptance requires: 1–5 target titles + ≥1
+ *  negative criterion + a complete-enough profile (an approved profile version).
+ *  `reasons` lists every unmet criterion (empty when ready). */
+export interface Readiness {
+  ready: boolean;
+  targetTitles: number;
+  negativeCriteria: number;
+  hasLiveProfile: boolean;
+  reasons: string[];
+}
+
+/** Pure: turn the three readiness counts into the verdict + unmet reasons. */
+function readinessFromCounts(titles: number, criteria: number, live: boolean): Readiness {
+  const reasons: string[] = [];
+  if (titles < 1) reasons.push("needs 1–5 active target titles (has 0)");
+  else if (titles > 5) reasons.push(`at most 5 active target titles (has ${titles})`);
+  if (criteria < 1) reasons.push("needs at least one negative criterion");
+  if (!live) reasons.push("needs a complete profile (no approved version yet)");
+  return {
+    ready: reasons.length === 0,
+    targetTitles: titles,
+    negativeCriteria: criteria,
+    hasLiveProfile: live,
+    reasons,
+  };
+}
+
+export async function checkReadiness(db: Db, userId: string): Promise<Readiness> {
+  const rows = await db<{ titles: number; criteria: number; live: boolean }[]>`
+    select
+      (select count(*)::int from target_titles where user_id = ${userId} and is_active) as titles,
+      (select count(*)::int from negative_criteria where user_id = ${userId}) as criteria,
+      exists (select 1 from profile_versions where user_id = ${userId} and status = 'approved') as live`;
+  const { titles, criteria, live } = rows[0];
+  return readinessFromCounts(titles, criteria, live);
+}
+
+/** Submit the account for review. Provisions the row just-in-time and moves it to
+ *  'submitted' from 'onboarding' or 'rejected' (a rejected user may resubmit);
+ *  idempotent / a no-op for an already submitted/under_review/accepted account. */
+export async function submitAccountForReview(db: Db, userId: string): Promise<Account> {
+  const rows = await db<Account[]>`
+    insert into accounts (user_id, status, submitted_at)
+    values (${userId}, 'submitted', now())
+    on conflict (user_id) do update set
+      status = case
+        when accounts.status in ('onboarding', 'rejected') then 'submitted'::account_status
+        else accounts.status end,
+      submitted_at = case
+        when accounts.status in ('onboarding', 'rejected') then now()
+        else accounts.submitted_at end
+    returning *`;
+  return rows[0];
+}
+
+/** An owner's decision on a submitted account:
+ *   - 'review': move submitted → under_review (the owner starts the ≤24h review).
+ *   - 'accept': REQUIRES the readiness check; moves submitted|under_review →
+ *     accepted (atomically re-checking readiness in the same transaction). Blocked
+ *     with the unmet `readiness` reasons and the status left unchanged otherwise.
+ *   - 'reject': move submitted|under_review → rejected, recording the note.
+ *  Owner-only in practice (service-role path); RLS has no client write policy. */
+export type AccountDecision =
+  | { action: "review" }
+  | { action: "accept"; note?: string | null }
+  | { action: "reject"; note?: string | null };
+
+export interface AccountDecisionResult {
+  /** The account status after the decision, or null if the account doesn't exist. */
+  status: AccountStatus | null;
+  /** Included for an 'accept' attempt — why it was (or wasn't) allowed. */
+  readiness?: Readiness;
+  /** Set when the decision was refused (not ready, or not awaiting review). */
+  error?: string;
+}
+
+export async function decideAccount(
+  db: Db,
+  userId: string,
+  decision: AccountDecision,
+): Promise<AccountDecisionResult> {
+  if (decision.action === "review") {
+    const rows = await db<{ status: AccountStatus }[]>`
+      update accounts set status = 'under_review'
+      where user_id = ${userId} and status = 'submitted'
+      returning status`;
+    if (rows[0]) return { status: rows[0].status };
+    return {
+      status: (await getAccount(db, userId))?.status ?? null,
+      error: "account not submitted",
+    };
+  }
+
+  if (decision.action === "reject") {
+    const rows = await db<{ status: AccountStatus }[]>`
+      update accounts set
+        status = 'rejected', reviewed_at = now(),
+        review_note = coalesce(${decision.note ?? null}, review_note)
+      where user_id = ${userId} and status in ('submitted', 'under_review')
+      returning status`;
+    if (rows[0]) return { status: rows[0].status };
+    return {
+      status: (await getAccount(db, userId))?.status ?? null,
+      error: "account not awaiting review",
+    };
+  }
+
+  // accept — the readiness gate. Re-check inside the transaction so a concurrent
+  // profile/title change can't slip an unready account through (TOCTOU-safe).
+  const note = decision.note ?? null;
+  return await db.begin<AccountDecisionResult>(async (tx) => {
+    const counts = await tx<{ titles: number; criteria: number; live: boolean }[]>`
+      select
+        (select count(*)::int from target_titles where user_id = ${userId} and is_active) as titles,
+        (select count(*)::int from negative_criteria where user_id = ${userId}) as criteria,
+        exists (select 1 from profile_versions where user_id = ${userId} and status = 'approved') as live`;
+    const { titles, criteria, live } = counts[0];
+    const readiness = readinessFromCounts(titles, criteria, live);
+    const current = await tx<{ status: AccountStatus }[]>`
+      select status from accounts where user_id = ${userId}`;
+    if (!readiness.ready) {
+      return {
+        status: current[0]?.status ?? null,
+        readiness,
+        error: `readiness check failed: ${readiness.reasons.join("; ")}`,
+      };
+    }
+    const rows = await tx<{ status: AccountStatus }[]>`
+      update accounts set
+        status = 'accepted', reviewed_at = now(),
+        review_note = coalesce(${note}, review_note)
+      where user_id = ${userId} and status in ('submitted', 'under_review')
+      returning status`;
+    if (rows[0]) return { status: rows[0].status, readiness };
+    return { status: current[0]?.status ?? null, readiness, error: "account not awaiting review" };
+  });
+}
+
 /** The current status of a version, or null if it no longer exists. */
 async function versionStatus(
   db: Db,
