@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@archer/db": src("./packages/db/src/index.ts"),
+      "@archer/llm": src("./packages/llm/src/index.ts"),
       "@archer/api": src("./services/api/src/app.ts"),
     },
   },
