@@ -63,6 +63,17 @@ Every user-owned table has RLS enabled with an "own rows only" read policy keyed
 
 > ⚠️ **API auth today is a shared secret, not the user's JWT.** Every API route calls `authorized(c)` (`app.ts:93-97`), which checks a constant `x-archer-secret` header against `ARCHER_API_SECRET` (or, in non-prod with `ARCHER_API_DEV_OPEN=1`, allows open). The API does **not** verify the Supabase JWT, and it trusts a `user`/`userId` parameter from the caller to scope user data. This is an internal/trusted-caller posture: the API is currently designed to sit behind a trusted gateway (or be driven by the CLI / cron), **not** to be called directly by an untrusted mobile client. A real client deployment needs a JWT-verifying layer in front that maps `auth.uid()` to the `user` parameter. See §10.
 
+### Résumé upload → the `resumes` Storage bucket
+
+The onboarding résumé path uploads the file to a **private** Supabase Storage bucket before kicking off ingestion (`20260620220000_resumes_storage_bucket.sql`):
+
+- **Bucket:** `resumes` — private (not publicly readable).
+- **Path convention:** `resumes/{auth.uid()}/{filename}` — the first path segment **must** be the user's own `auth.uid()`. Owner-only RLS on `storage.objects` (`(storage.foldername(name))[1] = auth.uid()`) lets each user read/write/delete only under their own folder, never another user's.
+- **Allowed types / size:** `application/pdf` and `.docx` (`application/vnd.openxmlformats-officedocument.wordprocessingml.document`), **≤10 MiB** — enforced by the bucket (`allowed_mime_types` / `file_size_limit`) on top of client-side pre-upload validation.
+- **Hand-off:** the uploaded object path is passed to `POST /onboarding/resume` as `storageRef`; the ingest run reads the bytes server-side via the service role (file bytes never transit the API from the client). Per the seams table, extraction is currently `stubResumeExtractor`; real PDF/DOCX extraction lands in ARC-63→65.
+
+A client uploads with the user's JWT (supabase-js `storage.from('resumes').upload(path, file)` or the Storage REST endpoint); RLS authorizes the write against the owner-folder policy.
+
 ---
 
 ## 2. Backend tables reference
