@@ -16,7 +16,9 @@ export default defineConfig({
   },
   test: {
     include: [
-      "{apps,services,packages}/**/src/**/*.test.ts",
+      // apps/* (the Lynx mobile app) run their own test runner standalone and
+      // are excluded from the root workspace — keep root vitest to the backend.
+      "{services,packages}/**/src/**/*.test.ts",
       // The STT edge function (ARC-53) lives outside src/ (Supabase deploys the
       // functions dir); its provider-call core is tested here with fetch mocked.
       "packages/db/supabase/functions/**/*.test.ts",

@@ -2,3 +2,7 @@ packages:
   - "apps/*"
   - "services/*"
   - "packages/*"
+  # The Lynx mobile app builds standalone (Rspeedy + its own lockfile via
+  # `pnpm install --ignore-workspace`); excluded so root `pnpm install
+  # --frozen-lockfile` / `pnpm -r build` never try to resolve its deps.
+  - "!apps/mobile"
