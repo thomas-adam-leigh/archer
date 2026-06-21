@@ -1317,3 +1317,99 @@ async function replayedOutcome(db: Db, proposalId: string): Promise<VersionApply
     versionStatus: vId ? await versionStatus(db, vId) : null,
   };
 }
+
+// ── cover-letter versions (whole-version history per candidacy) ───────────────
+// Schema: 20260620190000_cover_letter_versions.sql. Mirrors the profile version
+// model — one approvable row per draft, one 'approved' (active) version per
+// candidacy. The proposal-driven approve/edit/reject loop lands later (it
+// consumes these helpers); ARC-14 is the schema + create/list/get/setActive.
+export type CoverLetterVersion = Row<"cover_letter_versions">;
+
+export interface NewCoverLetterVersion {
+  candidacyId: string;
+  userId: string;
+  label?: string | null;
+  /** The assembled letter text (the Scribe fills this; empty until then). */
+  content?: string;
+  details?: Json;
+}
+
+/** Create a fresh draft cover-letter version for a candidacy. `version_no` is the
+ *  next per-candidacy ordinal, so versions cycle/roll back in a stable order. */
+export async function createCoverLetterVersion(
+  db: Db,
+  v: NewCoverLetterVersion,
+): Promise<CoverLetterVersion> {
+  const rows = await db<CoverLetterVersion[]>`
+    insert into cover_letter_versions (candidacy_id, user_id, version_no, status, label, content, details)
+    values (
+      ${v.candidacyId},
+      ${v.userId},
+      (select coalesce(max(version_no), 0) + 1 from cover_letter_versions
+         where candidacy_id = ${v.candidacyId}),
+      'draft',
+      ${v.label ?? null},
+      ${v.content ?? ""},
+      ${v.details != null ? db.json(v.details as never) : db.json({} as never)}
+    )
+    returning *`;
+  return rows[0];
+}
+
+/** All versions for a candidacy, oldest first (version_no order) — the history
+ *  the client renders for review and rollback. */
+export async function listCoverLetterVersions(
+  db: Db,
+  candidacyId: string,
+): Promise<CoverLetterVersion[]> {
+  return await db<CoverLetterVersion[]>`
+    select * from cover_letter_versions
+    where candidacy_id = ${candidacyId}
+    order by version_no asc`;
+}
+
+/** A single cover-letter version by id, or undefined if it does not exist. */
+export async function getCoverLetterVersion(
+  db: Db,
+  id: string,
+): Promise<CoverLetterVersion | undefined> {
+  const rows = await db<CoverLetterVersion[]>`
+    select * from cover_letter_versions where id = ${id}`;
+  return rows[0];
+}
+
+/** The candidacy's active (approved) cover-letter version, or undefined before
+ *  the first approval — the empty-state signal the apply gate keys on. */
+export async function getActiveCoverLetterVersion(
+  db: Db,
+  candidacyId: string,
+): Promise<CoverLetterVersion | undefined> {
+  const rows = await db<CoverLetterVersion[]>`
+    select * from cover_letter_versions
+    where candidacy_id = ${candidacyId} and status = 'approved'`;
+  return rows[0];
+}
+
+/** Make `versionId` the candidacy's one active version: supersede the prior
+ *  active row (if any) and flip the target to 'approved', atomically. The partial
+ *  unique index guarantees at most one active version per candidacy. Throws if
+ *  the version does not belong to the candidacy. */
+export async function setActiveCoverLetterVersion(
+  db: Db,
+  candidacyId: string,
+  versionId: string,
+): Promise<CoverLetterVersion> {
+  return await db.begin(async (tx) => {
+    await tx`
+      update cover_letter_versions set status = 'superseded'
+      where candidacy_id = ${candidacyId} and status = 'approved' and id <> ${versionId}`;
+    const rows = await tx<CoverLetterVersion[]>`
+      update cover_letter_versions set status = 'approved'
+      where id = ${versionId} and candidacy_id = ${candidacyId}
+      returning *`;
+    if (!rows[0]) {
+      throw new Error(`cover-letter version ${versionId} not found for candidacy ${candidacyId}`);
+    }
+    return rows[0];
+  });
+}

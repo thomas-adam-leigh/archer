@@ -434,6 +434,60 @@ export type Database = {
           },
         ]
       }
+      cover_letter_versions: {
+        Row: {
+          candidacy_id: string
+          content: string
+          created_at: string
+          details: Json
+          id: string
+          label: string | null
+          status: Database["public"]["Enums"]["cover_letter_version_status"]
+          updated_at: string
+          user_id: string
+          version_no: number
+        }
+        Insert: {
+          candidacy_id: string
+          content?: string
+          created_at?: string
+          details?: Json
+          id?: string
+          label?: string | null
+          status?: Database["public"]["Enums"]["cover_letter_version_status"]
+          updated_at?: string
+          user_id: string
+          version_no: number
+        }
+        Update: {
+          candidacy_id?: string
+          content?: string
+          created_at?: string
+          details?: Json
+          id?: string
+          label?: string | null
+          status?: Database["public"]["Enums"]["cover_letter_version_status"]
+          updated_at?: string
+          user_id?: string
+          version_no?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cover_letter_versions_candidacy_id_fkey"
+            columns: ["candidacy_id"]
+            isOneToOne: false
+            referencedRelation: "candidacies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cover_letter_versions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       education: {
         Row: {
           created_at: string
@@ -1303,6 +1357,12 @@ export type Database = {
         | "external_pending"
         | "application_failed"
       company_status: "new" | "researching" | "enriched" | "enrichment_failed"
+      cover_letter_version_status:
+        | "draft"
+        | "proposed"
+        | "approved"
+        | "rejected"
+        | "superseded"
       event_type:
         | "run_started"
         | "run_finished"
@@ -1519,6 +1579,13 @@ export const Constants = {
         "application_failed",
       ],
       company_status: ["new", "researching", "enriched", "enrichment_failed"],
+      cover_letter_version_status: [
+        "draft",
+        "proposed",
+        "approved",
+        "rejected",
+        "superseded",
+      ],
       event_type: [
         "run_started",
         "run_finished",
