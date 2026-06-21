@@ -648,24 +648,28 @@ export interface NewEvent {
 }
 
 /** Append events to a run in emission order; `seq` is the per-run 0-based ordinal
- *  (the (run_id, seq) unique index makes replay and ordering deterministic). */
+ *  (the (run_id, seq) unique index makes replay and ordering deterministic).
+ *  The base `seq` is derived from the run's existing rows, so a second batch on
+ *  the same run continues the sequence rather than restarting at 0 (which would
+ *  collide on the unique(run_id, seq) index). One multi-row insert keeps the
+ *  offset and per-row ordinal assignment atomic within the statement. */
 export async function appendEvents(
   db: Db,
   threadId: string,
   runId: string,
   events: NewEvent[],
 ): Promise<InteractionEvent[]> {
-  const out: InteractionEvent[] = [];
-  for (let seq = 0; seq < events.length; seq++) {
-    const e = events[seq];
-    const rows = await db<InteractionEvent[]>`
-      insert into events (run_id, thread_id, seq, type, data)
-      values (${runId}, ${threadId}, ${seq}, ${e.type}::event_type,
-              ${e.data != null ? db.json(e.data as never) : null})
-      returning *`;
-    out.push(rows[0]);
-  }
-  return out;
+  if (events.length === 0) return [];
+  const types = events.map((e) => e.type);
+  const data = events.map((e) => (e.data != null ? JSON.stringify(e.data) : null));
+  return await db<InteractionEvent[]>`
+    insert into events (run_id, thread_id, seq, type, data)
+    select ${runId}, ${threadId},
+           coalesce((select max(seq) from events where run_id = ${runId}), -1) + ev.ord,
+           ev.type::event_type, ev.data::jsonb
+    from unnest(${types}::text[], ${data}::text[]) with ordinality as ev(type, data, ord)
+    order by ev.ord
+    returning *`;
 }
 
 /** One event as the history-restore projection consumes it, in replay order. */
