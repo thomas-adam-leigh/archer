@@ -96,6 +96,19 @@ function authorized(c: Context): boolean {
   return process.env.NODE_ENV !== "production" && process.env.ARCHER_API_DEV_OPEN === "1";
 }
 
+// Owner/admin gate for the human-decision routes — account acceptance and the
+// profile/cover-letter version approvals (ARC-51). These resolve a human gate, so
+// they require a SEPARATE owner credential (ARCHER_API_ADMIN_SECRET via the
+// `x-archer-admin-secret` header), not the general service secret: a caller
+// holding only the service secret must not be able to accept accounts or approve
+// versions. Mirrors `authorized`'s fail-closed shape — require the owner secret
+// when set, else allow only the explicit non-prod dev opt-in.
+function ownerAuthorized(c: Context): boolean {
+  const adminSecret = process.env.ARCHER_API_ADMIN_SECRET;
+  if (adminSecret) return safeEqual(c.req.header("x-archer-admin-secret") ?? "", adminSecret);
+  return process.env.NODE_ENV !== "production" && process.env.ARCHER_API_DEV_OPEN === "1";
+}
+
 const app = new Hono()
   .get("/", (c) => c.json({ name: "archer-api", status: "ok" }))
   .get("/health", (c) => c.json({ status: "ok" }))
@@ -391,7 +404,7 @@ const app = new Hono()
   // materialises it as the live profile via the apply executor; reject leaves the
   // live profile untouched. Closes the onboarding round trip to an approved version.
   .post("/onboarding/proposals/:proposalId/decide", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
     const proposalId = c.req.param("proposalId");
     if (!UUID_RE.test(proposalId)) return c.json({ error: "invalid proposal id" }, 400);
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -567,7 +580,7 @@ const app = new Hono()
   // edits) makes the version the candidacy's active letter and advances it to
   // approved; reject returns it to drafting with the feedback captured. Idempotent.
   .post("/cover-letters/proposals/:proposalId/decide", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
     const proposalId = c.req.param("proposalId");
     if (!UUID_RE.test(proposalId)) return c.json({ error: "invalid proposal id" }, 400);
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -732,7 +745,7 @@ const app = new Hono()
   // or reject with a note. Owner-facing (the service-role path) like the
   // profile-version decide route; RLS has no client write policy on accounts.
   .post("/accounts/:userId/decide", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
     const user = c.req.param("userId");
     if (!UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
     const body = (await c.req.json().catch(() => ({}))) as {

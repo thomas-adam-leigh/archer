@@ -337,4 +337,44 @@ describe("archer-api", () => {
     const res = await app.request(`/accounts/${VALID_UUID}/decide`, post({ action: "accept" }));
     expect(res.status).toBe(401);
   });
+
+  // ── Owner/admin gate (ARC-51) ──────────────────────────────────────────────
+  // The human-decision routes (account acceptance + the profile/cover-letter
+  // version approvals) require a SEPARATE owner credential, not the general
+  // service secret: a caller holding only the service secret is rejected.
+  describe("owner/admin gate", () => {
+    const OWNER_ROUTES = [
+      `/accounts/${VALID_UUID}/decide`,
+      `/onboarding/proposals/${VALID_UUID}/decide`,
+      `/cover-letters/proposals/${VALID_UUID}/decide`,
+    ];
+    beforeEach(() => {
+      delete process.env.ARCHER_API_DEV_OPEN;
+      process.env.ARCHER_API_SECRET = "s3cret";
+      process.env.ARCHER_API_ADMIN_SECRET = "0wner";
+    });
+    afterEach(() => {
+      delete process.env.ARCHER_API_ADMIN_SECRET;
+    });
+
+    for (const route of OWNER_ROUTES) {
+      it(`rejects a non-owner holding only the service secret: ${route}`, async () => {
+        const res = await app.request(
+          route,
+          post({ action: "review" }, { "x-archer-secret": "s3cret" }),
+        );
+        expect(res.status).toBe(401);
+      });
+
+      it(`admits the owner holding the admin secret: ${route}`, async () => {
+        // Past auth an invalid action is a 400 — proving the owner cleared the
+        // gate (a non-owner is rejected at 401 before any validation).
+        const res = await app.request(
+          route,
+          post({ action: "nope" }, { "x-archer-admin-secret": "0wner" }),
+        );
+        expect(res.status).toBe(400);
+      });
+    }
+  });
 });
