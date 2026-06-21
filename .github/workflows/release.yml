@@ -66,6 +66,15 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase db push
+      # Deploy edge functions on merge, mirroring migrations-on-merge: the real
+      # STT function (ARC-53). Deploy only uploads code, so it needs the access
+      # token + project ref but not the runtime ELEVENLABS_API_KEY (provisioned
+      # separately as a Supabase secret).
+      - name: Deploy edge functions to Supabase
+        working-directory: packages/db
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy transcribe --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
 
   # Build, SBOM, provenance, sign, push. One job per service image.
   release:
