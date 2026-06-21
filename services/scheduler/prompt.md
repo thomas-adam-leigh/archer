@@ -39,6 +39,14 @@ discipline).
   *only* created issues if there is time to ship the first one.
 - **Otherwise**, pick the **highest-priority unblocked issue** that isn't already Done
   or covered by an open PR, and do **exactly one** this run — depth over breadth.
+- **Never idle while unblocked work exists anywhere.** If the current project has no
+  unblocked issue left (only human-gated/blocked ones — missing secrets, decisions,
+  external provisioning), do **not** stop — move to the **next `build_now` project that
+  has an unblocked issue** and work that. Project order is a tie-breaker, not a gate:
+  an **Urgent**-priority unblocked issue (e.g. a correctness hole like a re-opened
+  review bug) takes precedence **across all projects**, regardless of which project it
+  sits in. Only idle (per "When you're out of planned work") when **no** `build_now`
+  project anywhere has an unblocked issue.
 
 ## Keep Linear in sync (the board must reflect reality, every run)
 
