@@ -135,6 +135,32 @@ export async function listActivities(
     limit ${limit}`;
 }
 
+/** An operator/admin activity row — `listActivities` plus the `user_id` so the
+ *  operator can tell whose run it is (and spot system-level rows, user_id null). */
+export interface AdminActivityListItem extends ActivityListItem {
+  user_id: string | null;
+}
+
+/** The operator/admin read surface (ARC-44): recent activities across ALL users
+ *  *and* system-level rows (user_id null, e.g. `deploy`), newest first, optionally
+ *  filtered by type/status. This is the deliberate counterpart to listActivities'
+ *  own-rows-only scoping — it is gated at the API layer by the owner/admin secret
+ *  (ARC-51), never exposed on the per-user surface. */
+export async function listAllActivities(
+  db: Db,
+  opts: { type?: Enum<"activity_type">; status?: Enum<"activity_status">; limit?: number } = {},
+): Promise<AdminActivityListItem[]> {
+  const limit = opts.limit ?? 50;
+  return await db<AdminActivityListItem[]>`
+    select id, user_id, type, status, detail, error, started_at, finished_at, created_at
+    from activities
+    where (${opts.type ?? null}::activity_type is null or type = ${opts.type ?? null}::activity_type)
+      and (${opts.status ?? null}::activity_status is null
+           or status = ${opts.status ?? null}::activity_status)
+    order by created_at desc
+    limit ${limit}`;
+}
+
 // ── target titles (the collect search keys) ───────────────────────────────
 export async function listTargetTitles(
   db: Db,

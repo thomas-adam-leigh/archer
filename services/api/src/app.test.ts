@@ -126,6 +126,16 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("GET /admin/activities rejects an invalid type filter", async () => {
+    const res = await app.request("/admin/activities?type=nope");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /admin/activities rejects an invalid status filter", async () => {
+    const res = await app.request("/admin/activities?status=nope");
+    expect(res.status).toBe(400);
+  });
+
   it("rejects an agui run with a missing or invalid threadId", async () => {
     const missing = await app.request("/agui/run", post({}));
     expect(missing.status).toBe(400);
@@ -378,6 +388,32 @@ describe("archer-api", () => {
     }
   });
 
+  // ── Operator/admin activity view gate (ARC-44) ─────────────────────────────
+  // The system-level activity feed is owner-gated like the decide routes: a caller
+  // holding only the general service secret is rejected before any DB read.
+  describe("operator/admin activities gate", () => {
+    beforeEach(() => {
+      delete process.env.ARCHER_API_DEV_OPEN;
+      process.env.ARCHER_API_SECRET = "s3cret";
+      process.env.ARCHER_API_ADMIN_SECRET = "0wner";
+    });
+    afterEach(() => {
+      delete process.env.ARCHER_API_ADMIN_SECRET;
+    });
+
+    it("rejects a non-owner holding only the service secret", async () => {
+      const res = await app.request("/admin/activities", {
+        headers: { "x-archer-secret": "s3cret" },
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("rejects a caller with no credentials", async () => {
+      const res = await app.request("/admin/activities");
+      expect(res.status).toBe(401);
+    });
+  });
+
   // ── OpenAPI document + Scalar reference (ARC-52) ───────────────────────────
   describe("OpenAPI surface", () => {
     it("serves a valid OpenAPI document at /openapi.json", async () => {
@@ -397,6 +433,10 @@ describe("archer-api", () => {
       expect(Object.keys(doc.components?.securitySchemes ?? {})).toEqual(
         expect.arrayContaining(["serviceSecret", "ownerSecret"]),
       );
+      // The operator activity view (ARC-44) is documented and owner-secured.
+      const adminGet = (doc.paths["/admin/activities"] as { get?: { security?: unknown[] } })?.get;
+      expect(adminGet).toBeDefined();
+      expect(adminGet?.security).toEqual([{ ownerSecret: [] }]);
     });
 
     it("renders the Scalar reference at /reference", async () => {
