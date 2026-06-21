@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
   createNotification,
   type Db,
@@ -13,7 +12,7 @@ import {
 } from "@archer/db";
 import type { Command } from "commander";
 import { type ArcherMcp, createArcherMcp } from "../archer-mcp.js";
-import { CliError, type GlobalOpts, output, run } from "../context.js";
+import { CliError, type GlobalOpts, output, readJsonFixture, run } from "../context.js";
 
 /** The role/company the fill targets, the external form's URL, and the Archer MCP
  *  surface the agent reads the candidate from + writes the form's status to. */
@@ -141,7 +140,10 @@ export async function runExternalFill(
   }
 
   const owner = args.userId ?? candidacy.user_id;
-  await setExternalApplicationFormStatus(db, form.id, "in_progress");
+  // Open the Activity FIRST, then move the form in-flight INSIDE the try (ARC-58 M4):
+  // a throw from startActivity leaves the form `pending` (nothing stranded), and any
+  // later throw lands in the catch that fails the form + Activity. The candidacy stays
+  // external_pending until the outcome, so the catch's revert is always a legal move.
   const activity = await startActivity(db, {
     type: "external_fill",
     userId: args.userId ?? candidacy.user_id,
@@ -155,6 +157,7 @@ export async function runExternalFill(
     formId: form.id,
   });
   try {
+    await setExternalApplicationFormStatus(db, form.id, "in_progress");
     const outcome = await fill({
       candidacy: {
         id: candidacy.id,
@@ -275,7 +278,7 @@ export function registerExternalFill(program: Command): void {
         let fill: Filler | undefined;
         if (opts.fixture) {
           const path = opts.fixture;
-          fill = () => JSON.parse(readFileSync(path, "utf8")) as ExternalFillOutcome;
+          fill = () => readJsonFixture<ExternalFillOutcome>(path, "--fixture");
         }
         const summary = await runExternalFill(ctx.db, {
           candidacyId,

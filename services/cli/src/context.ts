@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createDb, type Db } from "@archer/db";
 
 export interface GlobalOpts {
@@ -33,6 +34,24 @@ export function requireUser(ctx: CliContext): string {
     throw new CliError("no user: pass --user <uuid> or set ARCHER_USER_ID");
   }
   return ctx.userId;
+}
+
+/** Read and JSON-parse a file named by a CLI flag (e.g. `--fixture`), turning a
+ *  missing/unreadable file or malformed JSON into a clean CliError (exit 2) instead
+ *  of a raw ENOENT/SyntaxError crash. Mirrors `parseJsonFlag`'s fail-closed contract;
+ *  the caller still owns the shape it casts the parsed value to. */
+export function readJsonFixture<T>(path: string, flag: string): T {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    throw new CliError(`${flag} file is missing or unreadable: ${path}`);
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new CliError(`${flag} must be a valid JSON file: ${path}`);
+  }
 }
 
 /** Print JSON when --json is set, otherwise render a human view. */

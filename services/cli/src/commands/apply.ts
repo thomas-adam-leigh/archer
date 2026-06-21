@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
   createNotification,
   type Db,
@@ -12,7 +11,7 @@ import {
   transitionCandidacy,
 } from "@archer/db";
 import type { Command } from "commander";
-import { CliError, type GlobalOpts, output, run } from "../context.js";
+import { CliError, type GlobalOpts, output, readJsonFixture, run } from "../context.js";
 
 /** The role/company/board the apply targets, plus the approved letter it submits. */
 export interface ApplyContext {
@@ -125,14 +124,21 @@ export async function runApply(
   }
 
   const owner = args.userId ?? candidacy.user_id;
-  await transitionCandidacy(db, candidacy.id, "applying");
+  // Open the Activity FIRST, then move the candidacy in-flight INSIDE the try (ARC-58
+  // M4): a throw from startActivity leaves the candidacy `approved` (recoverable, not
+  // stranded), and a throw at the `applying` write still lands in the catch. `applying`
+  // records whether the move actually happened, so the catch only reverts to
+  // application_failed when it did — approved → application_failed is not a legal move.
   const activity = await startActivity(db, {
     type: "apply",
     userId: args.userId ?? candidacy.user_id,
     candidacyId: candidacy.id,
     detail: { role: candidacy.posting_title, company: candidacy.company_name },
   });
+  let applying = false;
   try {
+    await transitionCandidacy(db, candidacy.id, "applying");
+    applying = true;
     const outcome = await apply({
       candidacy: {
         id: candidacy.id,
@@ -209,10 +215,14 @@ export async function runApply(
     }
     return { ...base, status, outcome: outcome.kind, skipped: false, activityId: activity.id };
   } catch (err) {
-    // An unexpected crash (not a structured failure outcome): fail the Activity and
-    // land the candidacy on application_failed, then rethrow so the CLI exits non-zero.
+    // An unexpected crash (not a structured failure outcome): fail the Activity and,
+    // if the candidacy actually reached `applying`, land it on application_failed — a
+    // throw before that leaves it `approved` (already recoverable). Then rethrow so the
+    // CLI exits non-zero.
     const msg = err instanceof Error ? err.message : String(err);
-    await transitionCandidacy(db, candidacy.id, "application_failed", { reason: msg });
+    if (applying) {
+      await transitionCandidacy(db, candidacy.id, "application_failed", { reason: msg });
+    }
     await failActivity(db, activity.id, msg, { board: candidacy.board_slug });
     await notifyApply(db, owner, candidacy, {
       title: `Application to ${candidacy.posting_title} failed`,
@@ -261,7 +271,7 @@ export function registerApply(program: Command): void {
         let apply: Applier | undefined;
         if (opts.fixture) {
           const path = opts.fixture;
-          apply = () => JSON.parse(readFileSync(path, "utf8")) as ApplyOutcome;
+          apply = () => readJsonFixture<ApplyOutcome>(path, "--fixture");
         }
         const summary = await runApply(ctx.db, {
           candidacyId,
