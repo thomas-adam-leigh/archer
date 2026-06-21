@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { api, apiBaseUrl } from "./api.js";
+import { registerApply } from "./commands/apply.js";
 import { registerBoards } from "./commands/boards.js";
 import { registerCollect } from "./commands/collect.js";
 import { registerCriteria } from "./commands/criteria.js";
@@ -28,6 +29,7 @@ registerProfile(program);
 registerJobs(program);
 registerMatch(program);
 registerEnrich(program);
+registerApply(program);
 
 program
   .command("health")
