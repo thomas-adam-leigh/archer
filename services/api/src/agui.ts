@@ -398,6 +398,102 @@ export function draftContent(state: Json): string {
   return draft?.content ?? "";
 }
 
+// ── The cover-letter submit run: end on an approve/edit/reject interrupt ───────
+// The revision loop (ARC-38). Once the Scribe has left a proposed draft, submitting
+// it for review re-presents the assembled letter in shared state and ends the run
+// on a tool_call INTERRUPT whose responseSchema supports approve / reject /
+// approve-with-edits (a full-replacement editedArgs). Mirrors runStub's interrupt
+// branch; the route backs the interrupt with a 'cover_letter_version' proposal the
+// owner resolves from any client (advancing candidacy in_review → approved | drafting).
+
+const SUBMIT_STEP = "submit";
+const SUBMIT_GREETING = "Submitting your cover letter for your approval.";
+const SUBMIT_MESSAGE = "Approve this cover letter to use it for your application?";
+/** The action the interrupt proposes — the cover-letter approval gate. */
+const COVER_LETTER_ACTION = "approveCoverLetter";
+
+export interface CoverLetterSubmitArgs {
+  threadId: string;
+  runId: string;
+  parentRunId?: string | null;
+  /** The proposed version being submitted; rides on the interrupt for the client. */
+  versionId: string;
+  /** The assembled letter, re-presented in shared state for review. */
+  content: string;
+}
+
+/**
+ * Produce the ordered event log for one cover-letter submit run. Re-presents the
+ * assembled letter in shared state and finishes on a tool_call interrupt carrying
+ * the approve/reject/approve-with-edits responseSchema. The final folded shared
+ * state is `{ phase: "awaiting_approval", draft: { content: "…" }, versionId }`.
+ */
+export function coverLetterSubmitRun({
+  threadId,
+  runId,
+  parentRunId = null,
+  versionId,
+  content,
+}: CoverLetterSubmitArgs): AgUiEvent[] {
+  const messageId = `${runId}:m1`;
+  const toolCallId = `${runId}:tc1`;
+  const interruptId = `${runId}:int1`;
+  const proposedArgs = { versionId, content };
+  return [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "step_started", data: { stepName: SUBMIT_STEP } },
+    { type: "text_message_start", data: { messageId, role: "assistant" } },
+    { type: "text_message_content", data: { messageId, delta: SUBMIT_GREETING } },
+    { type: "text_message_end", data: { messageId } },
+    {
+      type: "tool_call_start",
+      data: { toolCallId, toolCallName: COVER_LETTER_ACTION, parentMessageId: messageId },
+    },
+    { type: "tool_call_args", data: { toolCallId, delta: JSON.stringify(proposedArgs) } },
+    { type: "tool_call_end", data: { toolCallId } },
+    {
+      type: "state_snapshot",
+      data: { snapshot: { phase: "awaiting_approval", draft: { content }, versionId } },
+    },
+    {
+      type: "messages_snapshot",
+      data: { messages: [{ id: messageId, role: "assistant", content: SUBMIT_GREETING }] },
+    },
+    { type: "step_finished", data: { stepName: SUBMIT_STEP } },
+    {
+      type: "run_finished",
+      data: {
+        threadId,
+        runId,
+        outcome: {
+          type: "interrupt",
+          interrupts: [
+            {
+              id: interruptId,
+              reason: "tool_call",
+              action: COVER_LETTER_ACTION,
+              message: SUBMIT_MESSAGE,
+              toolCallId,
+              responseSchema: {
+                type: "object",
+                properties: {
+                  approved: { type: "boolean" },
+                  editedArgs: {
+                    type: "object",
+                    description:
+                      "Full replacement of the cover-letter fields (content/label). Not merged.",
+                  },
+                },
+                required: ["approved"],
+              },
+            },
+          ],
+        },
+      },
+    },
+  ];
+}
+
 /** The RunError event pair for a request that violates a contract rule. Bounded
  *  by run_started so a rejected request is still an auditable, persisted run. */
 export function runError(

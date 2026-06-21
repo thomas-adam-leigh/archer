@@ -125,6 +125,50 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects a cover-letter submit with a missing/invalid threadId or candidacyId", async () => {
+    expect((await app.request("/cover-letters/submit", post({}))).status).toBe(400);
+    expect(
+      (
+        await app.request(
+          "/cover-letters/submit",
+          post({ threadId: "nope", candidacyId: VALID_UUID }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (await app.request("/cover-letters/submit", post({ threadId: VALID_UUID }))).status,
+    ).toBe(400);
+  });
+
+  it("fails closed: denies /cover-letters/submit with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(
+      "/cover-letters/submit",
+      post({ threadId: VALID_UUID, candidacyId: VALID_UUID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a cover-letter decide with an invalid proposal id or action", async () => {
+    expect(
+      (await app.request("/cover-letters/proposals/not-a-uuid/decide", post({ action: "approve" })))
+        .status,
+    ).toBe(400);
+    expect(
+      (await app.request(`/cover-letters/proposals/${VALID_UUID}/decide`, post({ action: "nope" })))
+        .status,
+    ).toBe(400);
+  });
+
+  it("fails closed: denies /cover-letters decide with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(
+      `/cover-letters/proposals/${VALID_UUID}/decide`,
+      post({ action: "approve" }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("rejects history restore for an invalid threadId", async () => {
     const res = await app.request("/agui/threads/not-a-uuid/history");
     expect(res.status).toBe(400);
