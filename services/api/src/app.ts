@@ -21,6 +21,7 @@ import {
   getCandidacyContext,
   getCoverLetterVersion,
   getLiveProfileVersion,
+  getOnboardingProgress,
   getProfile,
   getProfileVersion,
   getThreadOwner,
@@ -571,6 +572,26 @@ const gOnboard = mk()
       if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
       const live = await getLiveProfileVersion(getDb(), user);
       return c.json({ user, onboarding: !live, liveVersionId: live?.id ?? null });
+    },
+  )
+  // The precise, resumable onboarding step (ARC-66): the full step machine
+  // (intro → processing → review → titles → submitting → done) + the stage flags
+  // the spec's resumability questions key on, extending the coarse
+  // /onboarding/state. Pure read; same own-rows service-role auth.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/onboarding/progress",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const progress = await getOnboardingProgress(getDb(), user);
+      return c.json({ user, ...progress });
     },
   )
   // Drive one onboarding run: the scripted Guide assembles a profile draft in

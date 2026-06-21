@@ -315,6 +315,18 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  // ── Onboarding progress (ARC-66) ──────────────────────────────────────────
+  it("rejects onboarding progress read with an invalid user", async () => {
+    const res = await app.request("/onboarding/progress?user=not-a-uuid");
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies onboarding progress read with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(`/onboarding/progress?user=${VALID_UUID}`);
+    expect(res.status).toBe(401);
+  });
+
   // ── Acceptance gate (ARC-31) ──────────────────────────────────────────────
   it("rejects account state read with an invalid user", async () => {
     const res = await app.request("/accounts/state?user=not-a-uuid");
