@@ -73,7 +73,6 @@ import { getBrain } from "./brain.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 import { stubResumeExtractor } from "./ingest.js";
-import { stubTranscriber } from "./stt.js";
 import { stubSynthesizer } from "./tts.js";
 
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
@@ -686,39 +685,38 @@ const app = new Hono()
     });
     return c.json({ user, kind, status: "proposed", ...result });
   })
-  // Voicenote ingest (ARC-30): an uploaded audio reference is transcribed and the
-  // transcript is persisted as a tier-2 message on the thread — the deep source the
-  // Scribe later reads, never a profile mutation. The audio→text step is the stubbed
-  // STT boundary (./stt.ts); this records a `transcribe` activity with the raw-audio
-  // storage reference, then stores the transcript message. The thread owner (not the
-  // caller) resolves the activity's user, mirroring the onboarding routes.
+  // Voicenote ingest (ARC-30, edge STT per ARC-53): the transcript text is
+  // persisted as a tier-2 message on the thread — the deep source the Scribe later
+  // reads, never a profile mutation. Transcription happens at the edge (the
+  // `transcribe` Supabase edge function → ElevenLabs); the audio is never persisted
+  // and this route receives only the resulting TEXT. It records a `transcribe`
+  // activity (provider/filename provenance, no audio reference), then stores the
+  // transcript message. The thread owner (not the caller) resolves the activity's
+  // user, mirroring the onboarding routes.
   .post("/onboarding/voicenote", async (c) => {
     if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
     const body = (await c.req.json().catch(() => ({}))) as {
       threadId?: string;
-      storageRef?: string;
+      transcript?: string;
       filename?: string;
+      provider?: string;
     };
     const threadId = body.threadId;
     if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    const storageRef = body.storageRef;
-    if (typeof storageRef !== "string" || storageRef.length === 0 || storageRef.length > 1024) {
-      return c.json({ error: "storageRef must be a non-empty string (≤1024 chars)" }, 400);
+    const transcript = body.transcript;
+    if (
+      typeof transcript !== "string" ||
+      transcript.trim().length === 0 ||
+      transcript.length > 100_000
+    ) {
+      return c.json({ error: "transcript must be a non-empty string (≤100000 chars)" }, 400);
     }
     const filename = typeof body.filename === "string" ? body.filename : undefined;
+    const provider = typeof body.provider === "string" ? body.provider : "elevenlabs";
     const db = getDb();
     const userId = await getThreadOwner(db, threadId);
     if (!userId) return c.json({ error: "unknown thread" }, 404);
-    // Stubbed STT boundary: audio reference → transcript text (deterministic stub).
-    const { transcript, provider } = stubTranscriber({ storageRef, filename });
-    const result = await ingestVoicenote(db, {
-      threadId,
-      userId,
-      storageRef,
-      filename,
-      transcript,
-      provider,
-    });
+    const result = await ingestVoicenote(db, { threadId, userId, filename, transcript, provider });
     return c.json({ threadId, status: "transcribed", transcript, ...result });
   })
   // ── Acceptance gate (ARC-31) ────────────────────────────────────────────────

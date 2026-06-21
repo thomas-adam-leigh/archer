@@ -371,6 +371,14 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# Real speech-to-text (ARC-53): audio → ElevenLabs Scribe → text only; audio is
+# never persisted. verify_jwt = true so only authenticated Supabase users may
+# transcribe (the ElevenLabs key can't be abused anonymously). ELEVENLABS_API_KEY
+# is provisioned in Supabase secrets.
+[functions.transcribe]
+enabled = true
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

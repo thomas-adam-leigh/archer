@@ -2,10 +2,11 @@ import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ingestVoicenote, searchMessages } from "./queries.js";
 
-// Integration test for voicenote ingest (ARC-30): a transcribed voicenote becomes
-// a tier-2 transcript MESSAGE on the thread (never a profile mutation), plus a
-// `transcribe` activity recording the raw-audio storage reference. Asserts the
-// transcript→message persistence and that it lands in the tier-2 search corpus.
+// Integration test for voicenote ingest (ARC-30; edge STT per ARC-53): a
+// transcribed voicenote becomes a tier-2 transcript MESSAGE on the thread (never
+// a profile mutation), plus a `transcribe` activity recording the provider (no
+// audio reference — the audio is never persisted). Asserts the transcript→message
+// persistence and that it lands in the tier-2 search corpus.
 //
 // Targets the same migrated Postgres as packages/db/scripts/gen-types.sh builds.
 // Point TEST_DATABASE_URL at it to run; skipped otherwise so no-DB CI stays green.
@@ -53,10 +54,9 @@ describe.skipIf(!TEST_DB_URL)("voicenote ingest → transcript message", () => {
     const result = await ingestVoicenote(sql, {
       threadId,
       userId,
-      storageRef: "s3://uploads/note.m4a",
       filename: "note.m4a",
       transcript: "I led the migration of our billing system to Postgres.",
-      provider: "stub",
+      provider: "elevenlabs",
     });
 
     // The transcript is stored as a user message on the thread (tier-2 memory).
@@ -65,11 +65,11 @@ describe.skipIf(!TEST_DB_URL)("voicenote ingest → transcript message", () => {
     expect(message[0]).toMatchObject({ thread_id: threadId, role: "user" });
     expect(message[0].content).toContain("billing system");
 
-    // A succeeded `transcribe` activity records the raw-audio storage reference.
-    const activity = await sql<{ type: string; status: string; detail: { storageRef?: string } }[]>`
+    // A succeeded `transcribe` activity records the provider provenance (no audio).
+    const activity = await sql<{ type: string; status: string; detail: { provider?: string } }[]>`
       select type, status, detail from activities where id = ${result.activityId}`;
     expect(activity[0]).toMatchObject({ type: "transcribe", status: "succeeded" });
-    expect(activity[0].detail.storageRef).toBe("s3://uploads/note.m4a");
+    expect(activity[0].detail.provider).toBe("elevenlabs");
   });
 
   it("makes the transcript searchable in the tier-2 corpus", async () => {
@@ -77,9 +77,8 @@ describe.skipIf(!TEST_DB_URL)("voicenote ingest → transcript message", () => {
     await ingestVoicenote(sql, {
       threadId,
       userId,
-      storageRef: "s3://uploads/note.m4a",
       transcript: "My deepest experience is in distributed systems and Kafka.",
-      provider: "stub",
+      provider: "elevenlabs",
     });
 
     const hits = await searchMessages(sql, userId, "kafka");

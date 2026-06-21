@@ -1159,22 +1159,21 @@ export async function ingestProposedVersion(
 }
 
 // ── voicenote ingest → transcript message (tier-2) ─────────────────────────
-// A voicenote upload becomes a transcript MESSAGE in the thread — the deep tier-2
-// source the Scribe later reads, never a profile mutation. This owns the backend
-// orchestration + provenance: a `transcribe` activity carrying the raw-audio
-// storage reference, then the transcript persisted as a message. The audio→text
-// transcription is the stubbed STT boundary upstream (services/api/src/stt.ts).
+// A voicenote becomes a transcript MESSAGE in the thread — the deep tier-2 source
+// the Scribe later reads, never a profile mutation. This owns the backend
+// orchestration + provenance: a `transcribe` activity, then the transcript
+// persisted as a message. The audio→text transcription happens at the edge
+// (ARC-53: the `transcribe` Supabase edge function → ElevenLabs); the audio is
+// never persisted and the backend only ever receives the transcript TEXT.
 
 export interface IngestVoicenoteInput {
   /** The thread the transcript message lands in; the owner is resolved upstream. */
   threadId: string;
   userId: string;
-  /** Reference to the already-uploaded raw audio (storage path/URL), for provenance. */
-  storageRef: string;
   filename?: string | null;
-  /** The transcribed text (from the STT provider/stub) to persist as a message. */
+  /** The transcribed text (from the STT edge function) to persist as a message. */
   transcript: string;
-  /** Which STT provider produced the transcript ("stub" until the real one lands). */
+  /** Which STT provider produced the transcript (e.g. "elevenlabs"). */
   provider: string;
 }
 
@@ -1185,19 +1184,20 @@ export interface IngestVoicenoteResult {
 
 /**
  * Ingest a transcribed voicenote into the tier-2 corpus. Logs a `transcribe`
- * activity carrying the raw-audio storage reference, persists the transcript as a
- * `user` message on the thread (run-less — it belongs to no AG-UI run), and marks
- * the activity succeeded with the resulting message id. Returns the created ids.
+ * activity, persists the transcript as a `user` message on the thread (run-less —
+ * it belongs to no AG-UI run), and marks the activity succeeded with the
+ * resulting message id. The audio is never persisted (transcription happens at
+ * the edge); only the transcript text reaches here. Returns the created ids.
  */
 export async function ingestVoicenote(
   db: Db,
   input: IngestVoicenoteInput,
 ): Promise<IngestVoicenoteResult> {
-  // Raw-audio provenance, carried through both writes (succeedActivity REPLACES
-  // detail, so the success update must re-include the storage reference).
+  // Provenance, carried through both writes (succeedActivity REPLACES detail, so
+  // the success update must re-include it). No audio reference: nothing about the
+  // bytes is stored — only which provider produced the text, and an optional name.
   const provenance = {
     kind: "voicenote",
-    storageRef: input.storageRef,
     filename: input.filename ?? null,
     provider: input.provider,
   };

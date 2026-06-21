@@ -286,12 +286,12 @@ describe("archer-api", () => {
   it("rejects voicenote ingest with an invalid threadId", async () => {
     const res = await app.request(
       "/onboarding/voicenote",
-      post({ threadId: "not-a-uuid", storageRef: "s3://uploads/note.m4a" }),
+      post({ threadId: "not-a-uuid", transcript: "a spoken note" }),
     );
     expect(res.status).toBe(400);
   });
 
-  it("rejects voicenote ingest with a missing storageRef", async () => {
+  it("rejects voicenote ingest with a missing transcript", async () => {
     const res = await app.request("/onboarding/voicenote", post({ threadId: VALID_UUID }));
     expect(res.status).toBe(400);
   });
@@ -300,7 +300,7 @@ describe("archer-api", () => {
     delete process.env.ARCHER_API_DEV_OPEN;
     const res = await app.request(
       "/onboarding/voicenote",
-      post({ threadId: VALID_UUID, storageRef: "s3://uploads/note.m4a" }),
+      post({ threadId: VALID_UUID, transcript: "a spoken note" }),
     );
     expect(res.status).toBe(401);
   });
