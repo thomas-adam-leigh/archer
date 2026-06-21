@@ -256,17 +256,21 @@ export interface CandidacyContext {
   status: Enum<"candidacy_status">;
   posting_title: string;
   company_name: string | null;
+  /** The board the posting came from — the apply adapter dispatches per board. */
+  board_slug: string;
 }
 
-/** One candidacy with its posting title + company name — the context the Scribe
- *  assembles a draft against, and the owner/status a cover-letter run checks.
- *  Undefined if the candidacy does not exist. */
+/** One candidacy with its posting title + company name + board — the context the
+ *  Scribe assembles a draft against, the owner/status a cover-letter run checks,
+ *  and the board the apply adapter targets. Undefined if the candidacy does not
+ *  exist. */
 export async function getCandidacyContext(
   db: Db,
   id: string,
 ): Promise<CandidacyContext | undefined> {
   const rows = await db<CandidacyContext[]>`
-    select c.id, c.user_id, c.status, p.title as posting_title, co.name as company_name
+    select c.id, c.user_id, c.status, p.title as posting_title,
+           p.board_slug, co.name as company_name
     from candidacies c
     join postings p on p.id = c.posting_id
     left join companies co on co.id = p.company_id
