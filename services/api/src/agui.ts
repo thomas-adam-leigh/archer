@@ -293,6 +293,111 @@ export function draftAttributes(state: Json): Json {
   return draft?.attributes ?? {};
 }
 
+// ── The Scribe run: cover-letter draft assembly into shared state ─────────────
+// The Scribe drafts the one thing Archer puts in front of an employer in the
+// candidate's name. Like the onboarding Guide, it is a scripted, deterministic
+// stub (no live LLM): it opens an empty draft in shared state (StateSnapshot),
+// writes the assembled letter into `state.draft.content` (StateDelta), flips the
+// phase to `draft_ready`, and finishes successfully. The route folds the run
+// (restoreThread → draftContent) and persists the letter as a proposed
+// cover-letter VERSION. The proposal/interrupt approve-edit-reject loop lands in
+// a later milestone (it consumes this draft; it does not change this run).
+
+const SCRIBE_STEP = "scribe";
+const SCRIBE_GREETING = "Drafting your cover letter — one moment.";
+const SCRIBE_CLOSING = "Here's your draft cover letter — review and approve it.";
+
+/** The context the Scribe assembles a letter against: the role and company it is
+ *  applying to, plus a few candidate highlights folded into the body. */
+export interface ScribeContext {
+  roleTitle: string;
+  companyName?: string | null;
+  /** Short candidate highlights (e.g. from the live profile version) woven into
+   *  the letter body; an empty list still yields a complete, generic letter. */
+  highlights?: string[];
+}
+
+/**
+ * Assemble a cover-letter draft from its context — the deterministic, network-free
+ * stand-in for the real Scribe brain (which the later, non-stubbed implementation
+ * drops in here). Pure: the same context always yields the same letter, so the
+ * whole draft-assembly run is unit-testable with no live LLM.
+ */
+export function assembleCoverLetter(ctx: ScribeContext): string {
+  const company = ctx.companyName?.trim() || "your team";
+  const highlights = (ctx.highlights ?? []).map((h) => h.trim()).filter(Boolean);
+  const body =
+    highlights.length > 0
+      ? `In particular: ${highlights.join("; ")}.`
+      : "I bring the focus and ownership the role calls for.";
+  return [
+    `Dear ${company} Hiring Team,`,
+    ``,
+    `I'm excited to apply for the ${ctx.roleTitle} role. ${body}`,
+    ``,
+    `I'd welcome the chance to discuss how I can contribute.`,
+    ``,
+    `Kind regards,`,
+  ].join("\n");
+}
+
+export interface ScribeArgs {
+  threadId: string;
+  runId: string;
+  parentRunId?: string | null;
+  /** The context the Scribe drafts against (role/company/highlights). */
+  context: ScribeContext;
+}
+
+/**
+ * Produce the ordered event log for one Scribe run. Greets, opens an empty draft
+ * in shared state, writes the assembled letter into `state.draft.content` with a
+ * single StateDelta, flips the phase to `draft_ready`, confirms in text, and
+ * finishes successfully. The final folded shared state is
+ * `{ phase: "draft_ready", draft: { content: "…" } }`.
+ */
+export function scribeRun({
+  threadId,
+  runId,
+  parentRunId = null,
+  context,
+}: ScribeArgs): AgUiEvent[] {
+  const content = assembleCoverLetter(context);
+  const open = `${runId}:m1`;
+  const close = `${runId}:m2`;
+  return [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "step_started", data: { stepName: SCRIBE_STEP } },
+    { type: "text_message_start", data: { messageId: open, role: "assistant" } },
+    { type: "text_message_content", data: { messageId: open, delta: SCRIBE_GREETING } },
+    { type: "text_message_end", data: { messageId: open } },
+    { type: "state_snapshot", data: { snapshot: { phase: "drafting", draft: { content: "" } } } },
+    {
+      type: "state_delta",
+      data: { delta: [{ op: "replace", path: "/draft/content", value: content }] },
+    },
+    {
+      type: "state_delta",
+      data: { delta: [{ op: "replace", path: "/phase", value: "draft_ready" }] },
+    },
+    { type: "text_message_start", data: { messageId: close, role: "assistant" } },
+    { type: "text_message_content", data: { messageId: close, delta: SCRIBE_CLOSING } },
+    { type: "text_message_end", data: { messageId: close } },
+    { type: "step_finished", data: { stepName: SCRIBE_STEP } },
+    {
+      type: "run_finished",
+      data: { threadId, runId, outcome: { type: "success", phase: "draft_ready" } },
+    },
+  ];
+}
+
+/** The Scribe's assembled letter, read out of folded shared state
+ *  (`state.draft.content`). The text the route persists as a cover-letter version. */
+export function draftContent(state: Json): string {
+  const draft = (state as { draft?: { content?: string } } | null)?.draft;
+  return draft?.content ?? "";
+}
+
 /** The RunError event pair for a request that violates a contract rule. Bounded
  *  by run_started so a rejected request is still an auditable, persisted run. */
 export function runError(

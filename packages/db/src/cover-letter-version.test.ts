@@ -3,9 +3,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   createCoverLetterVersion,
   getActiveCoverLetterVersion,
+  getCandidacyContext,
   getCoverLetterVersion,
   listCoverLetterVersions,
   setActiveCoverLetterVersion,
+  submitCoverLetterVersion,
 } from "./queries.js";
 
 // Integration test for cover-letter version history (ARC-14): whole-version rows
@@ -118,5 +120,38 @@ describe.skipIf(!TEST_DB_URL)("cover-letter version history", () => {
     await expect(
       setActiveCoverLetterVersion(sql, candidacyId, "00000000-0000-4000-8000-000000000000"),
     ).rejects.toThrow(/not found for candidacy/);
+  });
+
+  // ── Scribe draft-assembly helpers (ARC-37) ─────────────────────────────────
+  it("getCandidacyContext joins the role/company + owner/status, undefined when absent", async () => {
+    const ctx = await getCandidacyContext(sql, candidacyId);
+    expect(ctx?.id).toBe(candidacyId);
+    expect(ctx?.user_id).toBe(userId);
+    expect(ctx?.status).toBe("awaiting_cover_letter");
+    expect(ctx?.posting_title).toBe("Staff Engineer");
+    expect(ctx?.company_name).toBeNull(); // the seed posting has no company
+    expect(await getCandidacyContext(sql, "00000000-0000-4000-8000-000000000000")).toBeUndefined();
+  });
+
+  it("submitCoverLetterVersion flips a draft to proposed (submitted)", async () => {
+    const v = await createCoverLetterVersion(sql, {
+      candidacyId,
+      userId,
+      content: "Dear Acme Hiring Team,",
+    });
+    const submitted = await submitCoverLetterVersion(sql, v.id);
+    expect(submitted.status).toBe("proposed");
+    expect((await getCoverLetterVersion(sql, v.id))?.status).toBe("proposed");
+  });
+
+  it("submitCoverLetterVersion rejects a missing or non-draft version", async () => {
+    await expect(
+      submitCoverLetterVersion(sql, "00000000-0000-4000-8000-000000000000"),
+    ).rejects.toThrow(/not found or not a draft/);
+
+    // A second submit is a no-op error: the version is already proposed, not draft.
+    const v = await createCoverLetterVersion(sql, { candidacyId, userId });
+    await submitCoverLetterVersion(sql, v.id);
+    await expect(submitCoverLetterVersion(sql, v.id)).rejects.toThrow(/not found or not a draft/);
   });
 });

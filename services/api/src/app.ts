@@ -7,6 +7,7 @@ import {
   applyVersionProposal,
   Constants,
   checkReadiness,
+  createCoverLetterVersion,
   createInterruptProposal,
   createProfileVersion,
   createRun,
@@ -14,6 +15,7 @@ import {
   decideInterruptProposal,
   finishRun,
   getAccount,
+  getCandidacyContext,
   getLiveProfileVersion,
   getProfile,
   getProfileVersion,
@@ -33,6 +35,7 @@ import {
   rollbackToVersion,
   setCandidacyStatus,
   submitAccountForReview,
+  submitCoverLetterVersion,
   submitVersionProposal,
   type VersionDecision,
 } from "@archer/db";
@@ -41,6 +44,7 @@ import { Hono } from "hono";
 import {
   classifyRun,
   draftAttributes,
+  draftContent,
   interruptsFromEvents,
   onboardingRun,
   outcomeFromEvents,
@@ -49,6 +53,7 @@ import {
   restoreThread,
   runError,
   runStub,
+  scribeRun,
   statusFromEvents,
 } from "./agui.js";
 import { runCli } from "./cli.js";
@@ -340,6 +345,88 @@ const app = new Hono()
         : { action: "reject", note: body.note };
     const result = await applyVersionProposal(getDb(), proposalId, decision);
     return c.json({ proposalId, ...result });
+  })
+  // ── Cover-letter draft assembly (ARC-37) ───────────────────────────────────
+  // Drive one Scribe run: the scripted Scribe assembles a cover-letter draft in
+  // AG-UI shared state (StateSnapshot + a JSON-Patch delta), then the assembled
+  // letter is persisted as a PROPOSED cover-letter version and the candidacy
+  // advances awaiting_cover_letter → drafting. The version owner is resolved from
+  // the thread (not trusted from the caller), and the candidacy must belong to
+  // that owner and be ready for a cover letter. The proposal/interrupt approve-
+  // edit-reject loop lands in a later milestone (it consumes this proposed version).
+  .post("/cover-letters/run", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      threadId?: string;
+      candidacyId?: string;
+      highlights?: unknown;
+    };
+    const threadId = body.threadId;
+    const candidacyId = body.candidacyId;
+    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
+    if (!candidacyId || !UUID_RE.test(candidacyId)) {
+      return c.json({ error: "invalid candidacyId" }, 400);
+    }
+    const db = getDb();
+    const userId = await getThreadOwner(db, threadId);
+    if (!userId) return c.json({ error: "unknown thread" }, 404);
+    const candidacy = await getCandidacyContext(db, candidacyId);
+    if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+    if (candidacy.user_id !== userId) {
+      return c.json({ error: "candidacy not owned by thread owner" }, 403);
+    }
+    if (candidacy.status !== "awaiting_cover_letter" && candidacy.status !== "drafting") {
+      return c.json(
+        { error: `candidacy is not ready for a cover letter (status: ${candidacy.status})` },
+        409,
+      );
+    }
+
+    // Candidate highlights woven into the letter: the caller's, else string
+    // attributes from the live profile version (the candidate's own words).
+    const live = await getLiveProfileVersion(db, userId);
+    const attrs = (live?.attributes ?? {}) as Record<string, unknown>;
+    const highlights = Array.isArray(body.highlights)
+      ? body.highlights.filter((h): h is string => typeof h === "string")
+      : Object.values(attrs)
+          .filter((v): v is string => typeof v === "string")
+          .slice(0, 3);
+
+    const run = await createRun(db, { threadId, input: body as unknown as Json });
+    const events = scribeRun({
+      threadId,
+      runId: run.id,
+      context: {
+        roleTitle: candidacy.posting_title,
+        companyName: candidacy.company_name,
+        highlights,
+      },
+    });
+    await appendEvents(db, threadId, run.id, events);
+    const status = statusFromEvents(events);
+    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+
+    // Fold the run's shared state and persist the assembled letter as a proposed
+    // (submitted) version, then advance the candidacy into drafting.
+    const content = draftContent(restoreThread(events).state);
+    const version = await createCoverLetterVersion(db, {
+      candidacyId,
+      userId,
+      label: "scribe draft",
+      content,
+    });
+    const submitted = await submitCoverLetterVersion(db, version.id);
+    await setCandidacyStatus(db, candidacyId, "drafting");
+    return c.json({
+      threadId,
+      runId: run.id,
+      status,
+      candidacyId,
+      versionId: version.id,
+      versionStatus: submitted.status,
+      content,
+      events,
+    });
   })
   // Resume / portfolio ingest (ARC-29): an uploaded file is extracted into a
   // PROPOSED profile version — never the live profile. The file→content extraction
