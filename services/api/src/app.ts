@@ -29,6 +29,7 @@ import {
   ingestVoicenote,
   isAccepted,
   type Json,
+  listActivities,
   listCandidacies,
   listCoverLetterVersions,
   listNegativeCriteria,
@@ -75,6 +76,8 @@ import { stubTranscriber } from "./stt.js";
 import { stubSynthesizer } from "./tts.js";
 
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
+const ACTIVITY_TYPES = Constants.public.Enums.activity_type as readonly string[];
+const ACTIVITY_STATUSES = Constants.public.Enums.activity_status as readonly string[];
 // Validate path/query values before they reach the CLI argv or the DB.
 const BOARD_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -178,6 +181,29 @@ const app = new Hono()
     }
     const jobs = await listCandidacies(getDb(), user, { status: status as never });
     return c.json({ user, jobs });
+  })
+  // Activities feed (ARC-43): a user's own runs (collect/match/enrich/cover_letter/
+  // apply/external_fill/proposal_exec/transcribe) — the observability read surface
+  // over the universal Activity primitive, newest first, optionally filtered by
+  // type/status. RLS own-rows-only (scoped on user_id); system-level rows (e.g.
+  // `deploy`, user_id null) need an admin access decision and are out of scope here.
+  .get("/activities", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
+    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+    const type = c.req.query("type");
+    if (type && !ACTIVITY_TYPES.includes(type)) {
+      return c.json({ error: `'type' must be one of ${ACTIVITY_TYPES.join(", ")}` }, 400);
+    }
+    const status = c.req.query("status");
+    if (status && !ACTIVITY_STATUSES.includes(status)) {
+      return c.json({ error: `'status' must be one of ${ACTIVITY_STATUSES.join(", ")}` }, 400);
+    }
+    const activities = await listActivities(getDb(), user, {
+      type: type as never,
+      status: status as never,
+    });
+    return c.json({ user, activities });
   })
   // DB-only command: move a candidacy through the kanban (in-process, no CLI). The
   // move goes through the status machine (transitionCandidacy), so an illegal jump
