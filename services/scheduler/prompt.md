@@ -62,10 +62,15 @@ Linear is the source of truth, so it must never drift from `main`. On every run:
 - **Build only what the issue's acceptance criteria and the Vision/roadmap define.**
   No features, endpoints, tables, or abstractions nobody asked for. When the DoD is
   met, the issue is **done** — do not gold-plate or add "nice to haves."
-- **Honour the stubbed seams.** Browser automation (board scrape/apply), STT, TTS, and
-  the real agent brain are deliberately stubbed behind interfaces. **Never** wire in a
-  real provider, real credentials/API keys, or real external network calls for these —
-  keep them stub/fixture-driven exactly as they are.
+- **Honour the stubbed seams — with one exception.** Browser automation (board
+  scrape/apply), **TTS**, and the real agent brain remain deliberately stubbed: never
+  wire in a real provider, credentials, or external calls for those — keep them
+  stub/fixture-driven. **STT is now in scope** (issue ARC-53): build the real
+  ElevenLabs **Supabase Edge Function** (audio → text, audio **never persisted**) and
+  the AG-UI voice-input wiring. The `ELEVENLABS_API_KEY` is provisioned by a human in
+  Supabase secrets, so write the code + tests with the **provider mocked**, and treat
+  the secret provisioning + edge deploy as the human/provisioning step (note it on the
+  issue; don't block the PR on it).
 - **Smallest correct change.** Match existing conventions; touch only what the issue
   needs; no opportunistic refactors of code that already works.
 - **If anything is ambiguous, blocked, or needs a human decision / credential / secret,
@@ -94,8 +99,8 @@ remains, and there is nothing left to break down:
   code to look busy.
 - Make sure the board is clean (statuses synced, no stale duplicates), then end the run
   with exactly: *"build_now scope complete — all milestones Done. Awaiting human for
-  vision_later (UI, real agent brain) and the stubbed seams (browser automation, STT,
-  TTS, real provider credentials)."*
+  vision_later (UI, real agent brain), the remaining stubbed seams (browser automation,
+  TTS, real provider credentials), and any human-gated provisioning/decisions."*
 - Every later run repeats this check and idles the same way until a human changes the
   plan. **Idling safely is the correct outcome — never manufacture work to fill a run.**
 
