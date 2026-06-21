@@ -490,8 +490,8 @@ Each stub is a one-line swap at the call site behind a typed interface (`fixture
 
 ## 10. Gotchas & contract rules
 
-**Auth posture (most important):**
-- The API authenticates with a **shared secret**, not the user's JWT, and **trusts the `user`/`userId` parameter** for data scoping (`app.ts:93-97`, `/jobs`, `/profile`, etc.). A mobile client must not call this API directly with an attacker-controllable `user`. Put a JWT-verifying gateway in front that derives `user` from `auth.uid()`, or have clients use **direct Supabase reads** (RLS-safe) for reads and only proxy *actions* through a trusted server.
+**Auth posture (most important):** see `docs/SECURITY-OPS-RUNBOOK.md` for the operator-facing two-plane trust model, the fail-closed-in-prod startup invariant, and the network/deploy posture.
+- The API authenticates with a **shared secret**, not the user's JWT, and **trusts the `user`/`userId` parameter** for data scoping (`authorized()` in `app.ts`; `/jobs`, `/profile`, etc.). A mobile client must not call this API directly with an attacker-controllable `user`. Put a JWT-verifying gateway in front that derives `user` from `auth.uid()`, or have clients use **direct Supabase reads** (RLS-safe) for reads and only proxy *actions* through a trusted server.
 - For **direct reads**, RLS is solid and per-user. Prefer direct Supabase for all read screens (jobs, activities, notifications, profile, versions, cover letters) — RLS makes them safe by construction.
 
 **RLS pitfalls:**

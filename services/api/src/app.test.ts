@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import app from "./app";
+import app, { assertSecureStartup } from "./app";
 
 const VALID_UUID = "00000000-0000-0000-0000-000000000000";
 const post = (body: unknown, headers: Record<string, string> = {}) => ({
@@ -414,5 +414,26 @@ describe("archer-api", () => {
       );
       expect(res.status).toBe(400);
     });
+  });
+});
+
+describe("assertSecureStartup (fail-closed in prod, ARC-55)", () => {
+  it("throws in production when ARCHER_API_SECRET is unset", () => {
+    expect(() => assertSecureStartup({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
+      /ARCHER_API_SECRET/,
+    );
+  });
+
+  it("does not throw in production when ARCHER_API_SECRET is set", () => {
+    expect(() =>
+      assertSecureStartup({ NODE_ENV: "production", ARCHER_API_SECRET: "s" } as NodeJS.ProcessEnv),
+    ).not.toThrow();
+  });
+
+  it("does not throw outside production (preserves dev startup)", () => {
+    expect(() =>
+      assertSecureStartup({ NODE_ENV: "development" } as NodeJS.ProcessEnv),
+    ).not.toThrow();
+    expect(() => assertSecureStartup({} as NodeJS.ProcessEnv)).not.toThrow();
   });
 });
