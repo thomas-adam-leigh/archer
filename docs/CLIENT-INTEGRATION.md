@@ -70,7 +70,7 @@ The onboarding résumé path uploads the file to a **private** Supabase Storage 
 - **Bucket:** `resumes` — private (not publicly readable).
 - **Path convention:** `resumes/{auth.uid()}/{filename}` — the first path segment **must** be the user's own `auth.uid()`. Owner-only RLS on `storage.objects` (`(storage.foldername(name))[1] = auth.uid()`) lets each user read/write/delete only under their own folder, never another user's.
 - **Allowed types / size:** `application/pdf` and `.docx` (`application/vnd.openxmlformats-officedocument.wordprocessingml.document`), **≤10 MiB** — enforced by the bucket (`allowed_mime_types` / `file_size_limit`) on top of client-side pre-upload validation.
-- **Hand-off:** the uploaded object path is passed to `POST /onboarding/resume` as `storageRef`; the ingest run reads the bytes server-side via the service role (file bytes never transit the API from the client). Per the seams table, extraction is currently `stubResumeExtractor`; real PDF/DOCX extraction lands in ARC-63→65.
+- **Hand-off:** the uploaded object path is passed to `POST /onboarding/resume` as `storageRef` (alongside the `threadId` the run attaches to); the ingest run reads the bytes server-side via the service role (file bytes never transit the API from the client). Extraction is real: PDF/DOCX → text (ARC-63) → LLM structuring into attributes + spine (ARC-64), wrapped in a streamed 3-phase AG-UI run (ARC-65) that returns `runId`/`threadId` so the client subscribes + restores via `GET /agui/threads/:id/history`.
 
 A client uploads with the user's JWT (supabase-js `storage.from('resumes').upload(path, file)` or the Storage REST endpoint); RLS authorizes the write against the owner-folder policy.
 
@@ -453,7 +453,7 @@ All routes require the `x-archer-secret` header (`ARCHER_API_SECRET`), or dev-op
 |---|---|---|---|
 | POST | `/onboarding/run` | `{ threadId, draft? }` | `{ runId, versionId, proposalId, attributes, events }` |
 | POST | `/onboarding/proposals/:proposalId/decide` | `{ action:"approve"\|"reject", edits?, note? }` | `{ proposalStatus, versionStatus, error? }` — **owner-gated** (`x-archer-admin-secret`) |
-| POST | `/onboarding/resume` | `{ userId, storageRef, filename?, kind?:"resume"\|"portfolio" }` | `{ user, kind, status:"proposed", versionId, proposalId, … }` — resume/portfolio ingest (stub extractor) |
+| POST | `/onboarding/resume` | `{ threadId, storageRef, filename?, kind?:"resume"\|"portfolio" }` | `{ threadId, runId, kind, status:"proposed", versionId, proposalId, activityId }` — resume/portfolio ingest as a streamed 3-phase AG-UI run (real PDF/DOCX extraction + LLM structuring); owner resolved from the thread |
 | POST | `/onboarding/voicenote` | `{ threadId, transcript, provider?, filename? }` | `{ threadId, status:"transcribed", transcript, … }` — persists an already-transcribed note: `transcribe` Activity + transcript message. The client transcribes **first** via the `transcribe` Edge Function (real STT, audio never persisted — runbook §5); `provider` defaults to `"elevenlabs"` |
 | POST | `/profile/versions` | `{ userId?, attributes?, label? }` | `{ versionId, status:"draft", version }` |
 | POST | `/profile/versions/:id/submit` | `{ userId?, title? }` | `{ versionId, proposalId }` |

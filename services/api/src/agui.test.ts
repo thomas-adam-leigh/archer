@@ -7,10 +7,12 @@ import {
   coverLetterSubmitRun,
   draftAttributes,
   draftContent,
+  INGEST_PHASES,
   interruptsFromEvents,
   onboardingRun,
   outcomeFromEvents,
   restoreThread,
+  resumeIngestRun,
   runError,
   runStub,
   scribeRun,
@@ -425,6 +427,42 @@ describe("onboardingRun — shared-state draft assembly → version proposal", (
     const events = onboardingRun(args);
     const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
     expect(Object.keys(draftAttributes(state) as object).length).toBeGreaterThan(0);
+  });
+});
+
+describe("resumeIngestRun — streamed 3-phase ingest → proposed version", () => {
+  const args = { threadId: THREAD, runId: RUN, versionId: "v-1", proposalId: "p-1" };
+
+  it("streams the three ordered phases bounded by RunStarted/RunFinished", () => {
+    const events = resumeIngestRun(args);
+    const seq = types(events);
+    expect(seq[0]).toBe("run_started");
+    expect(seq.at(-1)).toBe("run_finished");
+    // The phase status lines, in order, are the assistant text the screen renders.
+    const lines = events
+      .filter((e) => e.type === "text_message_content")
+      .map((e) => (e.data as { delta: string }).delta);
+    expect(lines).toEqual(INGEST_PHASES.map((p) => p.message));
+    // One snapshot opens shared state; the rest of the phase flips are deltas.
+    expect(seq.filter((t) => t === "state_snapshot")).toHaveLength(1);
+    // Non-interruptible: it always completes, never interrupts.
+    expect(statusFromEvents(events)).toBe("completed");
+  });
+
+  it("finishes carrying the proposed version + proposal on the terminal outcome", () => {
+    const events = resumeIngestRun(args);
+    expect(outcomeFromEvents(events)).toEqual({
+      type: "success",
+      phase: "complete",
+      versionId: "v-1",
+      proposalId: "p-1",
+    });
+  });
+
+  it("folds to a completed state surfacing the version + proposal (history restore)", () => {
+    const events = resumeIngestRun(args);
+    const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
+    expect(state).toEqual({ phase: "complete", versionId: "v-1", proposalId: "p-1" });
   });
 });
 

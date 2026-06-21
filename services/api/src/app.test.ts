@@ -271,16 +271,16 @@ describe("archer-api", () => {
     expect(res.status).toBe(202);
   });
 
-  it("rejects resume ingest with an invalid user", async () => {
+  it("rejects resume ingest with an invalid threadId", async () => {
     const res = await app.request(
       "/onboarding/resume",
-      post({ userId: "not-a-uuid", storageRef: "s3://uploads/cv.pdf" }),
+      post({ threadId: "not-a-uuid", storageRef: "s3://uploads/cv.pdf" }),
     );
     expect(res.status).toBe(400);
   });
 
   it("rejects resume ingest with a missing storageRef", async () => {
-    const res = await app.request("/onboarding/resume", post({ userId: VALID_UUID }));
+    const res = await app.request("/onboarding/resume", post({ threadId: VALID_UUID }));
     expect(res.status).toBe(400);
   });
 
@@ -288,7 +288,7 @@ describe("archer-api", () => {
     delete process.env.ARCHER_API_DEV_OPEN;
     const res = await app.request(
       "/onboarding/resume",
-      post({ userId: VALID_UUID, storageRef: "s3://uploads/cv.pdf" }),
+      post({ threadId: VALID_UUID, storageRef: "s3://uploads/cv.pdf" }),
     );
     expect(res.status).toBe(401);
   });
