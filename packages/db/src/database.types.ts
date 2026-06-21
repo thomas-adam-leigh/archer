@@ -593,6 +593,73 @@ export type Database = {
           },
         ]
       }
+      external_application_forms: {
+        Row: {
+          candidacy_id: string
+          cover_letter_version_id: string | null
+          created_at: string
+          detail: Json
+          error: string | null
+          finished_at: string | null
+          id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["external_form_status"]
+          updated_at: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          candidacy_id: string
+          cover_letter_version_id?: string | null
+          created_at?: string
+          detail?: Json
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["external_form_status"]
+          updated_at?: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          candidacy_id?: string
+          cover_letter_version_id?: string | null
+          created_at?: string
+          detail?: Json
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["external_form_status"]
+          updated_at?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_application_forms_candidacy_id_fkey"
+            columns: ["candidacy_id"]
+            isOneToOne: false
+            referencedRelation: "candidacies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_application_forms_cover_letter_version_id_fkey"
+            columns: ["cover_letter_version_id"]
+            isOneToOne: false
+            referencedRelation: "cover_letter_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_application_forms_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string | null
@@ -1389,6 +1456,7 @@ export type Database = {
         | "reasoning_end"
         | "raw"
         | "custom"
+      external_form_status: "pending" | "in_progress" | "completed" | "failed"
       integration_status:
         | "not_integrated"
         | "in_progress"
@@ -1614,6 +1682,7 @@ export const Constants = {
         "raw",
         "custom",
       ],
+      external_form_status: ["pending", "in_progress", "completed", "failed"],
       integration_status: [
         "not_integrated",
         "in_progress",
