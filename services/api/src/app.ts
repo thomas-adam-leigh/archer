@@ -15,9 +15,11 @@ import {
   createRun,
   decideAccount,
   decideInterruptProposal,
+  failActivity,
   finishRun,
   getAccount,
   getCandidacyContext,
+  getCoverLetterVersion,
   getLiveProfileVersion,
   getProfile,
   getProfileVersion,
@@ -33,14 +35,17 @@ import {
   listTargetTitles,
   loadThreadEvents,
   loadThreadInterrupts,
+  recordCoverLetterSpokenNote,
   removeNegativeCriterion,
   removeTargetTitle,
   rollbackToVersion,
   setCandidacyStatus,
+  startActivity,
   submitAccountForReview,
   submitCoverLetterVersion,
   submitCoverLetterVersionProposal,
   submitVersionProposal,
+  succeedActivity,
   type VersionDecision,
 } from "@archer/db";
 import type { Context } from "hono";
@@ -65,6 +70,7 @@ import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 import { stubResumeExtractor } from "./ingest.js";
 import { stubTranscriber } from "./stt.js";
+import { stubSynthesizer } from "./tts.js";
 
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
 // Validate path/query values before they reach the CLI argv or the DB.
@@ -526,6 +532,55 @@ const app = new Hono()
         : { action: "reject", note: body.note };
     const result = await applyCoverLetterVersionProposal(getDb(), proposalId, decision);
     return c.json({ proposalId, ...result });
+  })
+  // ── Spoken-note generation (ARC-39) ────────────────────────────────────────
+  // Generate Archer's spoken note for a cover-letter version: synthesise the audio
+  // (stubbed ElevenLabs TTS boundary, ./tts.ts) inside a `spoken_note` activity and
+  // record the artifact (audio URL + provider) on the version's `details` jsonb —
+  // so the note is produced on demand, never assumed to pre-exist on the client.
+  // The version owner is resolved from the thread (not trusted from the caller).
+  .post("/cover-letters/spoken-note", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      threadId?: string;
+      versionId?: string;
+    };
+    const threadId = body.threadId;
+    const versionId = body.versionId;
+    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
+    if (!versionId || !UUID_RE.test(versionId)) return c.json({ error: "invalid versionId" }, 400);
+    const db = getDb();
+    const userId = await getThreadOwner(db, threadId);
+    if (!userId) return c.json({ error: "unknown thread" }, 404);
+    const version = await getCoverLetterVersion(db, versionId);
+    if (!version) return c.json({ error: "unknown cover-letter version" }, 404);
+    if (version.user_id !== userId) {
+      return c.json({ error: "cover-letter version not owned by thread owner" }, 403);
+    }
+
+    // Stubbed TTS boundary: the letter text → a spoken-note audio artifact ref.
+    const activity = await startActivity(db, {
+      type: "spoken_note",
+      userId,
+      candidacyId: version.candidacy_id,
+      detail: { versionId },
+    });
+    try {
+      const note = stubSynthesizer({ versionId, text: version.content });
+      await recordCoverLetterSpokenNote(db, versionId, note);
+      await succeedActivity(db, activity.id, { audioUrl: note.audioUrl, provider: note.provider });
+      return c.json({
+        threadId,
+        candidacyId: version.candidacy_id,
+        versionId,
+        activityId: activity.id,
+        spokenNote: note,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "spoken-note generation failed";
+      await failActivity(db, activity.id, message);
+      return c.json({ error: message }, 500);
+    }
   })
   // Resume / portfolio ingest (ARC-29): an uploaded file is extracted into a
   // PROPOSED profile version — never the live profile. The file→content extraction

@@ -1459,6 +1459,28 @@ export async function submitCoverLetterVersion(
   return rows[0];
 }
 
+/** Archer's spoken note for a cover letter — the audio artifact a client plays
+ *  aloud. The migration reserves the version's `details` jsonb for "the spoken-note
+ *  artifact ref"; this merges it in under `spokenNote` (preserving other keys, and
+ *  replacing any prior note) so the artifact is recorded on the version itself, not
+ *  assumed to pre-exist. The synthesis is stubbed/swappable (services/api/tts.ts);
+ *  this only persists the reference. Throws if the version does not exist. */
+export async function recordCoverLetterSpokenNote(
+  db: Db,
+  versionId: string,
+  note: { audioUrl: string; provider: string; durationMs: number },
+): Promise<CoverLetterVersion> {
+  const rows = await db<CoverLetterVersion[]>`
+    update cover_letter_versions
+    set details = details || ${db.json({ spokenNote: note } as never)}
+    where id = ${versionId}
+    returning *`;
+  if (!rows[0]) {
+    throw new Error(`cover-letter version ${versionId} not found`);
+  }
+  return rows[0];
+}
+
 // ── cover-letter revision loop (proposal-driven approve / edit / reject) ───────
 // The cover-letter analogue of submitVersionProposal/applyVersionProposal (ARC-38).
 // A proposed draft is submitted for review (a kind 'cover_letter_version' proposal,

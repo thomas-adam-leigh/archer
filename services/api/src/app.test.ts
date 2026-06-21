@@ -169,6 +169,30 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects a spoken-note request with a missing/invalid threadId or versionId", async () => {
+    expect((await app.request("/cover-letters/spoken-note", post({}))).status).toBe(400);
+    expect(
+      (
+        await app.request(
+          "/cover-letters/spoken-note",
+          post({ threadId: "nope", versionId: VALID_UUID }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (await app.request("/cover-letters/spoken-note", post({ threadId: VALID_UUID }))).status,
+    ).toBe(400);
+  });
+
+  it("fails closed: denies /cover-letters/spoken-note with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(
+      "/cover-letters/spoken-note",
+      post({ threadId: VALID_UUID, versionId: VALID_UUID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("rejects history restore for an invalid threadId", async () => {
     const res = await app.request("/agui/threads/not-a-uuid/history");
     expect(res.status).toBe(400);
