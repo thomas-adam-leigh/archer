@@ -43,6 +43,15 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/llm:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.3
+        version: 25.9.4
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   services/api:
     dependencies:
       '@archer/db':
