@@ -377,4 +377,42 @@ describe("archer-api", () => {
       });
     }
   });
+
+  // ── OpenAPI document + Scalar reference (ARC-52) ───────────────────────────
+  describe("OpenAPI surface", () => {
+    it("serves a valid OpenAPI document at /openapi.json", async () => {
+      const res = await app.request("/openapi.json");
+      expect(res.status).toBe(200);
+      const doc = (await res.json()) as {
+        openapi: string;
+        info: { title: string };
+        paths: Record<string, unknown>;
+        components?: { securitySchemes?: Record<string, unknown> };
+      };
+      expect(doc.openapi).toMatch(/^3\./);
+      expect(doc.info.title).toBe("Archer API");
+      // The document covers the real surface and both auth schemes are declared.
+      expect(Object.keys(doc.paths).length).toBeGreaterThan(20);
+      expect(doc.paths["/agui/run"]).toBeDefined();
+      expect(Object.keys(doc.components?.securitySchemes ?? {})).toEqual(
+        expect.arrayContaining(["serviceSecret", "ownerSecret"]),
+      );
+    });
+
+    it("renders the Scalar reference at /reference", async () => {
+      const res = await app.request("/reference");
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html.toLowerCase()).toContain("scalar");
+    });
+
+    it("validates request bodies via zod (zod-openapi → 400)", async () => {
+      // A bad enum on a validated body is rejected by the schema, not the handler.
+      const res = await app.request(
+        `/commands/candidacies/${VALID_UUID}/transition`,
+        post({ to: "definitely-not-a-status" }),
+      );
+      expect(res.status).toBe(400);
+    });
+  });
 });

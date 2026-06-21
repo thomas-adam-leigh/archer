@@ -51,8 +51,8 @@ import {
   transitionCandidacy,
   type VersionDecision,
 } from "@archer/db";
-import type { Context } from "hono";
-import { Hono } from "hono";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { Scalar } from "@scalar/hono-api-reference";
 import {
   classifyRun,
   coverLetterSubmitRun,
@@ -88,9 +88,13 @@ function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
+// Minimal context shape the auth helpers read — keeps them decoupled from the
+// generated per-route Context types the OpenAPIHono handlers carry.
+type AuthCtx = { req: { header(name: string): string | undefined } };
+
 // Fail closed: require the shared secret (constant-time compare). With no secret
 // set, deny unless an explicit dev opt-in (ARCHER_API_DEV_OPEN=1, non-prod) is on.
-function authorized(c: Context): boolean {
+function authorized(c: AuthCtx): boolean {
   const secret = process.env.ARCHER_API_SECRET;
   if (secret) return safeEqual(c.req.header("x-archer-secret") ?? "", secret);
   return process.env.NODE_ENV !== "production" && process.env.ARCHER_API_DEV_OPEN === "1";
@@ -103,145 +107,272 @@ function authorized(c: Context): boolean {
 // holding only the service secret must not be able to accept accounts or approve
 // versions. Mirrors `authorized`'s fail-closed shape — require the owner secret
 // when set, else allow only the explicit non-prod dev opt-in.
-function ownerAuthorized(c: Context): boolean {
+function ownerAuthorized(c: AuthCtx): boolean {
   const adminSecret = process.env.ARCHER_API_ADMIN_SECRET;
   if (adminSecret) return safeEqual(c.req.header("x-archer-admin-secret") ?? "", adminSecret);
   return process.env.NODE_ENV !== "production" && process.env.ARCHER_API_DEV_OPEN === "1";
 }
 
-const app = new Hono()
-  .get("/", (c) => c.json({ name: "archer-api", status: "ok" }))
-  .get("/health", (c) => c.json({ status: "ok" }))
+// ── Shared zod schemas ──────────────────────────────────────────────────────
+// A UUID string, and the board slug guard, both surfaced in the OpenAPI doc and
+// enforced as real request validation (a failure becomes a 400 via defaultHook).
+const Uuid = z.string().regex(UUID_RE);
+const Board = z.string().regex(BOARD_RE);
+const candidacyStatus = z.enum(CANDIDACY_STATUSES as unknown as [string, ...string[]]);
+const activityType = z.enum(ACTIVITY_TYPES as unknown as [string, ...string[]]);
+const activityStatus = z.enum(ACTIVITY_STATUSES as unknown as [string, ...string[]]);
+
+// Response bodies stay permissive (`z.any()`) so each handler's existing return
+// shape satisfies every declared status without churn — and the heavy event/spread
+// literals are cast to a shallow type at the `c.json` call to keep TypeScript's
+// instantiation depth in check (TS2589). The value of this issue is the *request*
+// validation, which stays fully typed. The two documented routes (`/`, `/health`)
+// pass an explicit schema so their published contract — and the typed `hc` client
+// the CLI's `health` command relies on — stays precise.
+const OkBody = z.any();
+const ErrBody = z.any();
+const jsonBody = <T extends z.ZodType>(schema: T, description: string) => ({
+  content: { "application/json": { schema } },
+  description,
+});
+const ok = <T extends z.ZodType>(description = "OK", schema: T = OkBody as unknown as T) =>
+  jsonBody(schema, description);
+// The error responses each route may emit; spread the ones a route uses.
+const ERR = {
+  400: jsonBody(ErrBody, "Invalid request"),
+  401: jsonBody(ErrBody, "Unauthorized"),
+  403: jsonBody(ErrBody, "Forbidden"),
+  404: jsonBody(ErrBody, "Not found"),
+  409: jsonBody(ErrBody, "Conflict"),
+  500: jsonBody(ErrBody, "Server error"),
+  502: jsonBody(ErrBody, "Upstream CLI error"),
+};
+
+const SERVICE_SECURITY = [{ serviceSecret: [] }];
+const OWNER_SECURITY = [{ ownerSecret: [] }];
+
+// One OpenAPIHono per route group. The route definitions are split across several
+// groups and merged with `.route()` below: a single 35-link `.openapi()` chain
+// blows TypeScript's generic instantiation depth (TS2589), whereas grouping keeps
+// each chain short while the merged `AppType` still carries every route for `hc`.
+//
+// `defaultHook` turns any failed zod validation (params/query/body) into a 400 —
+// preserving the API's existing "invalid request → 400" contract instead of the
+// library's default. Auth (401) still runs inside the handler, so the fail-closed
+// tests that send a *valid* payload with no secret continue to see 401.
+const mk = () =>
+  new OpenAPIHono({
+    defaultHook: (result, c) => {
+      if (!result.success) {
+        return c.json({ error: "invalid request", issues: result.error.issues }, 400);
+      }
+    },
+  });
+
+const gCore = mk()
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/",
+      responses: {
+        200: ok("Service identity", z.object({ name: z.string(), status: z.string() })),
+      },
+    }),
+    (c) => c.json({ name: "archer-api", status: "ok" }),
+  )
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/health",
+      responses: { 200: ok("Health probe", z.object({ status: z.string() })) },
+    }),
+    (c) => c.json({ status: "ok" }),
+  )
   // Trigger a collect run by invoking the CLI (browser work stays in the CLI).
-  .post("/commands/collect/:board", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const board = c.req.param("board");
-    if (!BOARD_RE.test(board)) return c.json({ error: "invalid board" }, 400);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (user && !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    // Acceptance gate (ARC-31): collect/match run only for an accepted account.
-    if (user && !(await isAccepted(getDb(), user))) {
-      return c.json({ error: "account not accepted" }, 403);
-    }
-    const args = ["collect", board, "--json"];
-    if (user) args.push("--user", user);
-    const res = await runCli(args);
-    if (res.code !== 0) {
-      return c.json({ error: res.stderr.trim() || "collect failed", code: res.code }, 502);
-    }
-    return c.json(JSON.parse(res.stdout));
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/commands/collect/{board}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ board: Board }), query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 502: ERR[502] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { board } = c.req.valid("param");
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      // Acceptance gate (ARC-31): collect/match run only for an accepted account.
+      if (user && !(await isAccepted(getDb(), user))) {
+        return c.json({ error: "account not accepted" }, 403);
+      }
+      const args = ["collect", board, "--json"];
+      if (user) args.push("--user", user);
+      const res = await runCli(args);
+      if (res.code !== 0) {
+        return c.json({ error: res.stderr.trim() || "collect failed", code: res.code }, 502);
+      }
+      return c.json(JSON.parse(res.stdout));
+    },
+  )
   // Trigger a Matchmaker pass by invoking the CLI. This is the per-minute matcher
   // cron's target (20260620180000_event_engine.sql): the cron only POSTs here when
   // `new` candidacies exist, and `match` is itself a no-op when there are none.
-  .post("/commands/match", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (user && !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    // Acceptance gate (ARC-31): collect/match run only for an accepted account.
-    if (user && !(await isAccepted(getDb(), user))) {
-      return c.json({ error: "account not accepted" }, 403);
-    }
-    const args = ["match", "--json"];
-    if (user) args.push("--user", user);
-    const res = await runCli(args);
-    if (res.code !== 0) {
-      return c.json({ error: res.stderr.trim() || "match failed", code: res.code }, 502);
-    }
-    return c.json(JSON.parse(res.stdout));
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/commands/match",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 502: ERR[502] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (user && !(await isAccepted(getDb(), user))) {
+        return c.json({ error: "account not accepted" }, 403);
+      }
+      const args = ["match", "--json"];
+      if (user) args.push("--user", user);
+      const res = await runCli(args);
+      if (res.code !== 0) {
+        return c.json({ error: res.stderr.trim() || "match failed", code: res.code }, 502);
+      }
+      return c.json(JSON.parse(res.stdout));
+    },
+  )
   // Trigger a company enrichment by invoking the CLI (the Researcher's LinkedIn MCP +
   // Firecrawl calls stay in the CLI process, stubbed for now). Same "API runs the CLI"
   // model as collect/match — the run is real, the tools are faked. Company-scoped (no
   // user gate): enrichment fires for shortlisted companies, not per requesting user.
-  .post("/commands/enrich/:companyId", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const companyId = c.req.param("companyId");
-    if (!UUID_RE.test(companyId)) return c.json({ error: "invalid company id" }, 400);
-    const res = await runCli(["enrich", companyId, "--json"]);
-    if (res.code !== 0) {
-      return c.json({ error: res.stderr.trim() || "enrich failed", code: res.code }, 502);
-    }
-    return c.json(JSON.parse(res.stdout));
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/commands/enrich/{companyId}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ companyId: Uuid }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 502: ERR[502] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { companyId } = c.req.valid("param");
+      const res = await runCli(["enrich", companyId, "--json"]);
+      if (res.code !== 0) {
+        return c.json({ error: res.stderr.trim() || "enrich failed", code: res.code }, 502);
+      }
+      return c.json(JSON.parse(res.stdout));
+    },
+  )
   // Trigger an apply by invoking the CLI (the apply adapter's browser automation
   // stays in the CLI process, stubbed for now). Same "API runs the CLI" model as
   // collect/match/enrich — the run is real, the browser work is faked. The CLI
   // gates on an `approved` cover letter, so this fires the one irreversible action
   // only on a candidacy whose letter the owner already approved (ARC-38).
-  .post("/commands/apply/:candidacyId", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const candidacyId = c.req.param("candidacyId");
-    if (!UUID_RE.test(candidacyId)) return c.json({ error: "invalid candidacy id" }, 400);
-    const res = await runCli(["apply", candidacyId, "--json"]);
-    if (res.code !== 0) {
-      return c.json({ error: res.stderr.trim() || "apply failed", code: res.code }, 502);
-    }
-    return c.json(JSON.parse(res.stdout));
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/commands/apply/{candidacyId}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ candidacyId: Uuid }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 502: ERR[502] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { candidacyId } = c.req.valid("param");
+      const res = await runCli(["apply", candidacyId, "--json"]);
+      if (res.code !== 0) {
+        return c.json({ error: res.stderr.trim() || "apply failed", code: res.code }, 502);
+      }
+      return c.json(JSON.parse(res.stdout));
+    },
+  );
+
+const gFeed = mk()
   // Jobs feed (ARC-11): a user's candidacies joined to their posting/company —
   // title, board, company, status, triage decision, match score — optionally
   // filtered by status. RLS own-rows-only (scoped on user_id); the thin clients
   // poll this for the kanban and write via the transition command below. Live
   // fan-out itself rides the Substrate's Realtime transport on the events table.
-  .get("/jobs", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const status = c.req.query("status");
-    if (status && !CANDIDACY_STATUSES.includes(status)) {
-      return c.json({ error: `'status' must be one of ${CANDIDACY_STATUSES.join(", ")}` }, 400);
-    }
-    const jobs = await listCandidacies(getDb(), user, { status: status as never });
-    return c.json({ user, jobs });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/jobs",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional(), status: candidacyStatus.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const q = c.req.valid("query");
+      const user = q.user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const jobs = await listCandidacies(getDb(), user, { status: q.status as never });
+      return c.json({ user, jobs });
+    },
+  )
   // Activities feed (ARC-43): a user's own runs (collect/match/enrich/cover_letter/
   // apply/external_fill/proposal_exec/transcribe) — the observability read surface
   // over the universal Activity primitive, newest first, optionally filtered by
   // type/status. RLS own-rows-only (scoped on user_id); system-level rows (e.g.
   // `deploy`, user_id null) need an admin access decision and are out of scope here.
-  .get("/activities", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const type = c.req.query("type");
-    if (type && !ACTIVITY_TYPES.includes(type)) {
-      return c.json({ error: `'type' must be one of ${ACTIVITY_TYPES.join(", ")}` }, 400);
-    }
-    const status = c.req.query("status");
-    if (status && !ACTIVITY_STATUSES.includes(status)) {
-      return c.json({ error: `'status' must be one of ${ACTIVITY_STATUSES.join(", ")}` }, 400);
-    }
-    const activities = await listActivities(getDb(), user, {
-      type: type as never,
-      status: status as never,
-    });
-    return c.json({ user, activities });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/activities",
+      security: SERVICE_SECURITY,
+      request: {
+        query: z.object({
+          user: Uuid.optional(),
+          type: activityType.optional(),
+          status: activityStatus.optional(),
+        }),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const q = c.req.valid("query");
+      const user = q.user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const activities = await listActivities(getDb(), user, {
+        type: q.type as never,
+        status: q.status as never,
+      });
+      return c.json({ user, activities });
+    },
+  )
   // DB-only command: move a candidacy through the kanban (in-process, no CLI). The
   // move goes through the status machine (transitionCandidacy), so an illegal jump
   // (e.g. new → applied) is rejected 409 rather than silently corrupting the kanban.
-  .post("/commands/candidacies/:id/transition", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const id = c.req.param("id");
-    if (!UUID_RE.test(id)) return c.json({ error: "invalid candidacy id" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-    const to = typeof body.to === "string" ? body.to : undefined;
-    if (!to || !CANDIDACY_STATUSES.includes(to)) {
-      return c.json({ error: `'to' must be one of ${CANDIDACY_STATUSES.join(", ")}` }, 400);
-    }
-    const reason = typeof body.reason === "string" ? body.reason : undefined;
-    try {
-      const updated = await transitionCandidacy(getDb(), id, to as never, { reason });
-      if (!updated) return c.json({ error: "unknown candidacy" }, 404);
-      return c.json({ id: updated.id, status: updated.status });
-    } catch (err) {
-      if (err instanceof IllegalCandidacyTransitionError) {
-        return c.json({ error: err.message, from: err.from, to: err.to }, 409);
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/commands/candidacies/{id}/transition",
+      security: SERVICE_SECURITY,
+      request: {
+        params: z.object({ id: Uuid }),
+        body: jsonBody(
+          z.object({ to: candidacyStatus, reason: z.string().optional() }),
+          "Target status",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404], 409: ERR[409] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const { to, reason } = c.req.valid("json");
+      try {
+        const updated = await transitionCandidacy(getDb(), id, to as never, { reason });
+        if (!updated) return c.json({ error: "unknown candidacy" }, 404);
+        return c.json({ id: updated.id, status: updated.status });
+      } catch (err) {
+        if (err instanceof IllegalCandidacyTransitionError) {
+          return c.json({ error: err.message, from: err.from, to: err.to }, 409);
+        }
+        throw err;
       }
-      throw err;
-    }
-  })
+    },
+  )
   // AG-UI run lifecycle: open a run, drive the stubbed agent, persist its ordered
   // event log, then close the run with its terminal status/outcome. The agent is a
   // deterministic stub (see ./agui.ts) — the run loop is real, the brain is stubbed.
@@ -250,180 +381,239 @@ const app = new Hono()
   // decided interrupts (classifyRun): a fresh request while interrupts are open is
   // a RunError; a resume opens a CHILD run (parent_run_id set), records the human's
   // decision on the proposal substrate, and continues; a replayed resume is a no-op.
-  .post("/agui/run", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const input = (await c.req.json().catch(() => ({}))) as RunAgentInput;
-    const threadId = input.threadId;
-    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    const db = getDb();
-    const asJson = input as unknown as Json;
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/agui/run",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(z.looseObject({ threadId: Uuid }), "AG-UI RunAgentInput"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const input = c.req.valid("json") as unknown as RunAgentInput;
+      const threadId = input.threadId;
+      const db = getDb();
+      const asJson = input as unknown as Json;
 
-    const interrupts = await loadThreadInterrupts(db, threadId);
-    const open = interrupts.filter((i) => i.status === "submitted").map((i) => i.interruptId);
-    const decided = interrupts.filter((i) => i.status !== "submitted").map((i) => i.interruptId);
-    const decision = classifyRun({ resume: input.resume, state: { open, decided } });
+      const interrupts = await loadThreadInterrupts(db, threadId);
+      const open = interrupts.filter((i) => i.status === "submitted").map((i) => i.interruptId);
+      const decided = interrupts.filter((i) => i.status !== "submitted").map((i) => i.interruptId);
+      const decision = classifyRun({ resume: input.resume, state: { open, decided } });
 
-    // Contract violation: persist a bounded RunError run so it stays auditable.
-    if (decision.action === "error") {
-      const run = await createRun(db, { threadId, input: asJson });
-      const events = runError(threadId, run.id, decision.reason);
-      await appendEvents(db, threadId, run.id, events);
-      await finishRun(db, run.id, { status: "error", error: decision.reason });
-      return c.json(
-        { threadId, runId: run.id, status: "error", error: decision.reason, events },
-        409,
-      );
-    }
-
-    // Idempotent replay: the interrupts are already decided — do nothing.
-    if (decision.action === "replay") {
-      return c.json({ threadId, status: "noop", replay: true });
-    }
-
-    // Resume: record each decision on its proposal, then open a child run whose
-    // parent is the interrupted run and let the stub continue from the payload.
-    if (decision.action === "resume") {
-      const byId = new Map(interrupts.map((i) => [i.interruptId, i]));
-      const resolved: ResolvedInterrupt[] = [];
-      let parentRunId: string | null = null;
-      for (const d of decision.resolves) {
-        const loc = byId.get(d.interruptId);
-        if (!loc) continue; // classifyRun guarantees membership; satisfies the types
-        const payload = (d.payload ?? {}) as { approved?: boolean; editedArgs?: Json };
-        const approved = d.status === "resolved" && payload.approved === true;
-        await decideInterruptProposal(db, loc.proposalId, {
-          status: approved ? "approved" : "rejected",
-          note: approved ? "approved" : "rejected",
-        });
-        resolved.push({
-          interruptId: d.interruptId,
-          toolCallId: loc.toolCallId,
-          approved,
-          editedArgs: payload.editedArgs,
-        });
-        parentRunId = loc.runId;
+      // Contract violation: persist a bounded RunError run so it stays auditable.
+      if (decision.action === "error") {
+        const run = await createRun(db, { threadId, input: asJson });
+        const events = runError(threadId, run.id, decision.reason);
+        await appendEvents(db, threadId, run.id, events);
+        await finishRun(db, run.id, { status: "error", error: decision.reason });
+        return c.json(
+          { threadId, runId: run.id, status: "error", error: decision.reason, events } as Record<
+            string,
+            unknown
+          >,
+          409,
+        );
       }
-      const run = await createRun(db, { threadId, parentRunId, input: asJson });
-      const events = runStub({ threadId, runId: run.id, input, parentRunId, resolved });
+
+      // Idempotent replay: the interrupts are already decided — do nothing.
+      if (decision.action === "replay") {
+        return c.json({ threadId, status: "noop", replay: true });
+      }
+
+      // Resume: record each decision on its proposal, then open a child run whose
+      // parent is the interrupted run and let the stub continue from the payload.
+      if (decision.action === "resume") {
+        const byId = new Map(interrupts.map((i) => [i.interruptId, i]));
+        const resolved: ResolvedInterrupt[] = [];
+        let parentRunId: string | null = null;
+        for (const d of decision.resolves) {
+          const loc = byId.get(d.interruptId);
+          if (!loc) continue; // classifyRun guarantees membership; satisfies the types
+          const payload = (d.payload ?? {}) as { approved?: boolean; editedArgs?: Json };
+          const approved = d.status === "resolved" && payload.approved === true;
+          await decideInterruptProposal(db, loc.proposalId, {
+            status: approved ? "approved" : "rejected",
+            note: approved ? "approved" : "rejected",
+          });
+          resolved.push({
+            interruptId: d.interruptId,
+            toolCallId: loc.toolCallId,
+            approved,
+            editedArgs: payload.editedArgs,
+          });
+          parentRunId = loc.runId;
+        }
+        const run = await createRun(db, { threadId, parentRunId, input: asJson });
+        const events = runStub({ threadId, runId: run.id, input, parentRunId, resolved });
+        await appendEvents(db, threadId, run.id, events);
+        const status = statusFromEvents(events);
+        await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+        return c.json({ threadId, runId: run.id, status, parentRunId, events } as Record<
+          string,
+          unknown
+        >);
+      }
+
+      // Fresh run. The conversational reply is real LLM output (brain.ts); the run
+      // loop scaffolding (lifecycle, autonomy-gated tool proposal) stays deterministic.
+      const run = await createRun(db, { threadId, input: asJson });
+      const reply = await getBrain()(input);
+      const events = runStub({ threadId, runId: run.id, input, reply });
       await appendEvents(db, threadId, run.id, events);
       const status = statusFromEvents(events);
-      await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
-      return c.json({ threadId, runId: run.id, status, parentRunId, events });
-    }
-
-    // Fresh run. The conversational reply is real LLM output (brain.ts); the run
-    // loop scaffolding (lifecycle, autonomy-gated tool proposal) stays deterministic.
-    const run = await createRun(db, { threadId, input: asJson });
-    const reply = await getBrain()(input);
-    const events = runStub({ threadId, runId: run.id, input, reply });
-    await appendEvents(db, threadId, run.id, events);
-    const status = statusFromEvents(events);
-    // An interrupt outcome durably backs each interrupt with a proposals row.
-    if (status === "interrupted") {
-      for (const it of interruptsFromEvents(events)) {
-        await createInterruptProposal(db, {
-          threadId,
-          runId: run.id,
-          interruptId: it.id,
-          toolCallId: it.toolCallId,
-          action: it.action ?? "unknown",
-          title: it.message ?? "Approval required",
-          rationale: it.reason ?? null,
-        });
+      // An interrupt outcome durably backs each interrupt with a proposals row.
+      if (status === "interrupted") {
+        for (const it of interruptsFromEvents(events)) {
+          await createInterruptProposal(db, {
+            threadId,
+            runId: run.id,
+            interruptId: it.id,
+            toolCallId: it.toolCallId,
+            action: it.action ?? "unknown",
+            title: it.message ?? "Approval required",
+            rationale: it.reason ?? null,
+          });
+        }
       }
-    }
-    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
-    return c.json({ threadId, runId: run.id, status, events });
-  })
+      await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+      return c.json({ threadId, runId: run.id, status, events } as Record<string, unknown>);
+    },
+  )
   // History restore: fold the thread's persisted event log into a StateSnapshot +
   // MessagesSnapshot (+ the replayable log) so a reconnecting or brand-new client
   // rebuilds the conversation identically to what a live subscriber accumulated.
   // Live fan-out itself rides Supabase Realtime on the events table (RLS-scoped
   // per user) — see 20260620130000_realtime_fanout.sql.
-  .get("/agui/threads/:threadId/history", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const threadId = c.req.param("threadId");
-    if (!UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    const events = await loadThreadEvents(getDb(), threadId);
-    const { state, messages } = restoreThread(events);
-    return c.json({ threadId, state, messages, events });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/agui/threads/{threadId}/history",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ threadId: Uuid }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { threadId } = c.req.valid("param");
+      const events = await loadThreadEvents(getDb(), threadId);
+      const { state, messages } = restoreThread(events);
+      return c.json({ threadId, state, messages, events } as Record<string, unknown>);
+    },
+  );
+
+const gOnboard = mk()
   // ── Candidate onboarding (ARC-28) ──────────────────────────────────────────
   // Empty-state gate: a user with no live (approved) profile version is in
   // onboarding mode. The thin clients key their empty-state on this.
-  .get("/onboarding/state", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const live = await getLiveProfileVersion(getDb(), user);
-    return c.json({ user, onboarding: !live, liveVersionId: live?.id ?? null });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/onboarding/state",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const live = await getLiveProfileVersion(getDb(), user);
+      return c.json({ user, onboarding: !live, liveVersionId: live?.id ?? null });
+    },
+  )
   // Drive one onboarding run: the scripted Guide assembles a profile draft in
   // AG-UI shared state (StateSnapshot + JSON-Patch deltas), then the assembled
   // draft is submitted as a proposed profile VERSION through the apply executor.
   // The version owner is resolved from the thread, not trusted from the caller.
-  .post("/onboarding/run", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      threadId?: string;
-      draft?: Record<string, Json>;
-    };
-    const threadId = body.threadId;
-    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    const db = getDb();
-    const userId = await getThreadOwner(db, threadId);
-    if (!userId) return c.json({ error: "unknown thread" }, 404);
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/run",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.object({ threadId: Uuid, draft: z.record(z.string(), z.any()).optional() }),
+          "Onboarding draft",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json");
+      const threadId = body.threadId;
+      const db = getDb();
+      const userId = await getThreadOwner(db, threadId);
+      if (!userId) return c.json({ error: "unknown thread" }, 404);
 
-    const run = await createRun(db, { threadId, input: body as unknown as Json });
-    const events = onboardingRun({ threadId, runId: run.id, draft: body.draft });
-    await appendEvents(db, threadId, run.id, events);
-    const status = statusFromEvents(events);
-    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+      const run = await createRun(db, { threadId, input: body as unknown as Json });
+      const events = onboardingRun({ threadId, runId: run.id, draft: body.draft });
+      await appendEvents(db, threadId, run.id, events);
+      const status = statusFromEvents(events);
+      await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
 
-    // Fold the run's shared state and submit the assembled draft as a version.
-    const attributes = draftAttributes(restoreThread(events).state);
-    const version = await createProfileVersion(db, {
-      userId,
-      label: "onboarding draft",
-      attributes,
-    });
-    const proposal = await submitVersionProposal(db, {
-      userId,
-      versionId: version.id,
-      title: "Approve your profile",
-    });
-    return c.json({
-      threadId,
-      runId: run.id,
-      status,
-      versionId: version.id,
-      proposalId: proposal.id,
-      attributes,
-      events,
-    });
-  })
+      // Fold the run's shared state and submit the assembled draft as a version.
+      const attributes = draftAttributes(restoreThread(events).state);
+      const version = await createProfileVersion(db, {
+        userId,
+        label: "onboarding draft",
+        attributes,
+      });
+      const proposal = await submitVersionProposal(db, {
+        userId,
+        versionId: version.id,
+        title: "Approve your profile",
+      });
+      return c.json({
+        threadId,
+        runId: run.id,
+        status,
+        versionId: version.id,
+        proposalId: proposal.id,
+        attributes,
+        events,
+      } as Record<string, unknown>);
+    },
+  )
   // Decide a submitted profile-version proposal: approve (optionally with edits)
   // materialises it as the live profile via the apply executor; reject leaves the
   // live profile untouched. Closes the onboarding round trip to an approved version.
-  .post("/onboarding/proposals/:proposalId/decide", async (c) => {
-    if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const proposalId = c.req.param("proposalId");
-    if (!UUID_RE.test(proposalId)) return c.json({ error: "invalid proposal id" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      action?: string;
-      edits?: { attributes?: Json; label?: string | null };
-      note?: string | null;
-    };
-    if (body.action !== "approve" && body.action !== "reject") {
-      return c.json({ error: "'action' must be approve or reject" }, 400);
-    }
-    const decision: VersionDecision =
-      body.action === "approve"
-        ? { action: "approve", edits: body.edits, note: body.note }
-        : { action: "reject", note: body.note };
-    const result = await applyVersionProposal(getDb(), proposalId, decision);
-    return c.json({ proposalId, ...result });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/proposals/{proposalId}/decide",
+      security: OWNER_SECURITY,
+      request: {
+        params: z.object({ proposalId: Uuid }),
+        // `action` is validated in the handler so the owner gate (401) runs first.
+        body: jsonBody(z.looseObject({}), "Decision"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { proposalId } = c.req.valid("param");
+      const body = c.req.valid("json") as {
+        action?: string;
+        edits?: { attributes?: Json; label?: string | null };
+        note?: string | null;
+      };
+      if (body.action !== "approve" && body.action !== "reject") {
+        return c.json({ error: "'action' must be approve or reject" }, 400);
+      }
+      const decision: VersionDecision =
+        body.action === "approve"
+          ? { action: "approve", edits: body.edits, note: body.note }
+          : { action: "reject", note: body.note };
+      const result = await applyVersionProposal(getDb(), proposalId, decision);
+      return c.json({ proposalId, ...result });
+    },
+  );
+
+const gCover = mk()
   // ── Cover-letter draft assembly (ARC-37) ───────────────────────────────────
   // Drive one Scribe run: the scripted Scribe assembles a cover-letter draft in
   // AG-UI shared state (StateSnapshot + a JSON-Patch delta), then the assembled
@@ -432,80 +622,97 @@ const app = new Hono()
   // the thread (not trusted from the caller), and the candidacy must belong to
   // that owner and be ready for a cover letter. The proposal/interrupt approve-
   // edit-reject loop lands in a later milestone (it consumes this proposed version).
-  .post("/cover-letters/run", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      threadId?: string;
-      candidacyId?: string;
-      highlights?: unknown;
-    };
-    const threadId = body.threadId;
-    const candidacyId = body.candidacyId;
-    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    if (!candidacyId || !UUID_RE.test(candidacyId)) {
-      return c.json({ error: "invalid candidacyId" }, 400);
-    }
-    const db = getDb();
-    const userId = await getThreadOwner(db, threadId);
-    if (!userId) return c.json({ error: "unknown thread" }, 404);
-    const candidacy = await getCandidacyContext(db, candidacyId);
-    if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
-    if (candidacy.user_id !== userId) {
-      return c.json({ error: "candidacy not owned by thread owner" }, 403);
-    }
-    if (candidacy.status !== "awaiting_cover_letter" && candidacy.status !== "drafting") {
-      return c.json(
-        { error: `candidacy is not ready for a cover letter (status: ${candidacy.status})` },
-        409,
-      );
-    }
-
-    // Candidate highlights woven into the letter: the caller's, else string
-    // attributes from the live profile version (the candidate's own words).
-    const live = await getLiveProfileVersion(db, userId);
-    const attrs = (live?.attributes ?? {}) as Record<string, unknown>;
-    const highlights = Array.isArray(body.highlights)
-      ? body.highlights.filter((h): h is string => typeof h === "string")
-      : Object.values(attrs)
-          .filter((v): v is string => typeof v === "string")
-          .slice(0, 3);
-
-    const run = await createRun(db, { threadId, input: body as unknown as Json });
-    const events = scribeRun({
-      threadId,
-      runId: run.id,
-      context: {
-        roleTitle: candidacy.posting_title,
-        companyName: candidacy.company_name,
-        highlights,
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/cover-letters/run",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({ threadId: Uuid, candidacyId: Uuid }),
+          "Cover-letter draft request",
+        ),
       },
-    });
-    await appendEvents(db, threadId, run.id, events);
-    const status = statusFromEvents(events);
-    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+      responses: {
+        200: ok(),
+        400: ERR[400],
+        401: ERR[401],
+        403: ERR[403],
+        404: ERR[404],
+        409: ERR[409],
+      },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as {
+        threadId: string;
+        candidacyId: string;
+        highlights?: unknown;
+      };
+      const threadId = body.threadId;
+      const candidacyId = body.candidacyId;
+      const db = getDb();
+      const userId = await getThreadOwner(db, threadId);
+      if (!userId) return c.json({ error: "unknown thread" }, 404);
+      const candidacy = await getCandidacyContext(db, candidacyId);
+      if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+      if (candidacy.user_id !== userId) {
+        return c.json({ error: "candidacy not owned by thread owner" }, 403);
+      }
+      if (candidacy.status !== "awaiting_cover_letter" && candidacy.status !== "drafting") {
+        return c.json(
+          { error: `candidacy is not ready for a cover letter (status: ${candidacy.status})` },
+          409,
+        );
+      }
 
-    // Fold the run's shared state and persist the assembled letter as a proposed
-    // (submitted) version, then advance the candidacy into drafting.
-    const content = draftContent(restoreThread(events).state);
-    const version = await createCoverLetterVersion(db, {
-      candidacyId,
-      userId,
-      label: "scribe draft",
-      content,
-    });
-    const submitted = await submitCoverLetterVersion(db, version.id);
-    await setCandidacyStatus(db, candidacyId, "drafting");
-    return c.json({
-      threadId,
-      runId: run.id,
-      status,
-      candidacyId,
-      versionId: version.id,
-      versionStatus: submitted.status,
-      content,
-      events,
-    });
-  })
+      // Candidate highlights woven into the letter: the caller's, else string
+      // attributes from the live profile version (the candidate's own words).
+      const live = await getLiveProfileVersion(db, userId);
+      const attrs = (live?.attributes ?? {}) as Record<string, unknown>;
+      const highlights = Array.isArray(body.highlights)
+        ? body.highlights.filter((h): h is string => typeof h === "string")
+        : Object.values(attrs)
+            .filter((v): v is string => typeof v === "string")
+            .slice(0, 3);
+
+      const run = await createRun(db, { threadId, input: body as unknown as Json });
+      const events = scribeRun({
+        threadId,
+        runId: run.id,
+        context: {
+          roleTitle: candidacy.posting_title,
+          companyName: candidacy.company_name,
+          highlights,
+        },
+      });
+      await appendEvents(db, threadId, run.id, events);
+      const status = statusFromEvents(events);
+      await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+
+      // Fold the run's shared state and persist the assembled letter as a proposed
+      // (submitted) version, then advance the candidacy into drafting.
+      const content = draftContent(restoreThread(events).state);
+      const version = await createCoverLetterVersion(db, {
+        candidacyId,
+        userId,
+        label: "scribe draft",
+        content,
+      });
+      const submitted = await submitCoverLetterVersion(db, version.id);
+      await setCandidacyStatus(db, candidacyId, "drafting");
+      return c.json({
+        threadId,
+        runId: run.id,
+        status,
+        candidacyId,
+        versionId: version.id,
+        versionStatus: submitted.status,
+        content,
+        events,
+      } as Record<string, unknown>);
+    },
+  )
   // ── Cover-letter revision loop (ARC-38) ────────────────────────────────────
   // Submit the candidacy's proposed draft for review: drive a run that re-presents
   // the assembled letter and ENDS ON A tool_call INTERRUPT (approve / reject /
@@ -513,178 +720,234 @@ const app = new Hono()
   // and advance the candidacy drafting → in_review. The owner is resolved from the
   // thread (not trusted from the caller). The owner then resolves the proposal via
   // /cover-letters/proposals/:id/decide from any client.
-  .post("/cover-letters/submit", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      threadId?: string;
-      candidacyId?: string;
-    };
-    const threadId = body.threadId;
-    const candidacyId = body.candidacyId;
-    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    if (!candidacyId || !UUID_RE.test(candidacyId)) {
-      return c.json({ error: "invalid candidacyId" }, 400);
-    }
-    const db = getDb();
-    const userId = await getThreadOwner(db, threadId);
-    if (!userId) return c.json({ error: "unknown thread" }, 404);
-    const candidacy = await getCandidacyContext(db, candidacyId);
-    if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
-    if (candidacy.user_id !== userId) {
-      return c.json({ error: "candidacy not owned by thread owner" }, 403);
-    }
-    if (candidacy.status !== "drafting") {
-      return c.json(
-        { error: `candidacy is not ready to submit (status: ${candidacy.status})` },
-        409,
-      );
-    }
-    // The proposed draft the Scribe left for this candidacy (newest wins).
-    const proposed = (await listCoverLetterVersions(db, candidacyId))
-      .filter((v) => v.status === "proposed")
-      .at(-1);
-    if (!proposed) return c.json({ error: "no proposed cover-letter version to submit" }, 409);
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/cover-letters/submit",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(z.object({ threadId: Uuid, candidacyId: Uuid }), "Cover-letter submit"),
+      },
+      responses: {
+        200: ok(),
+        400: ERR[400],
+        401: ERR[401],
+        403: ERR[403],
+        404: ERR[404],
+        409: ERR[409],
+      },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { threadId, candidacyId } = c.req.valid("json");
+      const db = getDb();
+      const userId = await getThreadOwner(db, threadId);
+      if (!userId) return c.json({ error: "unknown thread" }, 404);
+      const candidacy = await getCandidacyContext(db, candidacyId);
+      if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+      if (candidacy.user_id !== userId) {
+        return c.json({ error: "candidacy not owned by thread owner" }, 403);
+      }
+      if (candidacy.status !== "drafting") {
+        return c.json(
+          { error: `candidacy is not ready to submit (status: ${candidacy.status})` },
+          409,
+        );
+      }
+      // The proposed draft the Scribe left for this candidacy (newest wins).
+      const proposed = (await listCoverLetterVersions(db, candidacyId))
+        .filter((v) => v.status === "proposed")
+        .at(-1);
+      if (!proposed) return c.json({ error: "no proposed cover-letter version to submit" }, 409);
 
-    const run = await createRun(db, { threadId, input: body as unknown as Json });
-    const events = coverLetterSubmitRun({
-      threadId,
-      runId: run.id,
-      versionId: proposed.id,
-      content: proposed.content,
-    });
-    await appendEvents(db, threadId, run.id, events);
-    const status = statusFromEvents(events);
-    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+      const run = await createRun(db, { threadId, input: { threadId, candidacyId } as Json });
+      const events = coverLetterSubmitRun({
+        threadId,
+        runId: run.id,
+        versionId: proposed.id,
+        content: proposed.content,
+      });
+      await appendEvents(db, threadId, run.id, events);
+      const status = statusFromEvents(events);
+      await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
 
-    // Back the interrupt with a cover_letter_version proposal + advance to in_review.
-    const [interrupt] = interruptsFromEvents(events);
-    const proposal = await submitCoverLetterVersionProposal(db, {
-      candidacyId,
-      userId,
-      versionId: proposed.id,
-      title: "Approve your cover letter",
-      interrupt: interrupt
-        ? { threadId, runId: run.id, interruptId: interrupt.id, toolCallId: interrupt.toolCallId }
-        : undefined,
-    });
-    return c.json({
-      threadId,
-      runId: run.id,
-      status,
-      candidacyId,
-      versionId: proposed.id,
-      proposalId: proposal.id,
-      interruptId: interrupt?.id ?? null,
-      events,
-    });
-  })
+      // Back the interrupt with a cover_letter_version proposal + advance to in_review.
+      const [interrupt] = interruptsFromEvents(events);
+      const proposal = await submitCoverLetterVersionProposal(db, {
+        candidacyId,
+        userId,
+        versionId: proposed.id,
+        title: "Approve your cover letter",
+        interrupt: interrupt
+          ? { threadId, runId: run.id, interruptId: interrupt.id, toolCallId: interrupt.toolCallId }
+          : undefined,
+      });
+      return c.json({
+        threadId,
+        runId: run.id,
+        status,
+        candidacyId,
+        versionId: proposed.id,
+        proposalId: proposal.id,
+        interruptId: interrupt?.id ?? null,
+        events,
+      } as Record<string, unknown>);
+    },
+  )
   // Decide a submitted cover-letter version proposal: approve (optionally with
   // edits) makes the version the candidacy's active letter and advances it to
   // approved; reject returns it to drafting with the feedback captured. Idempotent.
-  .post("/cover-letters/proposals/:proposalId/decide", async (c) => {
-    if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const proposalId = c.req.param("proposalId");
-    if (!UUID_RE.test(proposalId)) return c.json({ error: "invalid proposal id" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      action?: string;
-      edits?: { content?: string; label?: string | null; details?: Json };
-      note?: string | null;
-    };
-    if (body.action !== "approve" && body.action !== "reject") {
-      return c.json({ error: "'action' must be approve or reject" }, 400);
-    }
-    const decision: CoverLetterVersionDecision =
-      body.action === "approve"
-        ? { action: "approve", edits: body.edits, note: body.note }
-        : { action: "reject", note: body.note };
-    const result = await applyCoverLetterVersionProposal(getDb(), proposalId, decision);
-    return c.json({ proposalId, ...result });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/cover-letters/proposals/{proposalId}/decide",
+      security: OWNER_SECURITY,
+      request: {
+        params: z.object({ proposalId: Uuid }),
+        // `action` is validated in the handler so the owner gate (401) runs first.
+        body: jsonBody(z.looseObject({}), "Decision"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { proposalId } = c.req.valid("param");
+      const body = c.req.valid("json") as {
+        action?: string;
+        edits?: { content?: string; label?: string | null; details?: Json };
+        note?: string | null;
+      };
+      if (body.action !== "approve" && body.action !== "reject") {
+        return c.json({ error: "'action' must be approve or reject" }, 400);
+      }
+      const decision: CoverLetterVersionDecision =
+        body.action === "approve"
+          ? { action: "approve", edits: body.edits, note: body.note }
+          : { action: "reject", note: body.note };
+      const result = await applyCoverLetterVersionProposal(getDb(), proposalId, decision);
+      return c.json({ proposalId, ...result });
+    },
+  )
   // ── Spoken-note generation (ARC-39) ────────────────────────────────────────
   // Generate Archer's spoken note for a cover-letter version: synthesise the audio
   // (stubbed ElevenLabs TTS boundary, ./tts.ts) inside a `spoken_note` activity and
   // record the artifact (audio URL + provider) on the version's `details` jsonb —
   // so the note is produced on demand, never assumed to pre-exist on the client.
   // The version owner is resolved from the thread (not trusted from the caller).
-  .post("/cover-letters/spoken-note", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      threadId?: string;
-      versionId?: string;
-    };
-    const threadId = body.threadId;
-    const versionId = body.versionId;
-    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    if (!versionId || !UUID_RE.test(versionId)) return c.json({ error: "invalid versionId" }, 400);
-    const db = getDb();
-    const userId = await getThreadOwner(db, threadId);
-    if (!userId) return c.json({ error: "unknown thread" }, 404);
-    const version = await getCoverLetterVersion(db, versionId);
-    if (!version) return c.json({ error: "unknown cover-letter version" }, 404);
-    if (version.user_id !== userId) {
-      return c.json({ error: "cover-letter version not owned by thread owner" }, 403);
-    }
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/cover-letters/spoken-note",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(z.object({ threadId: Uuid, versionId: Uuid }), "Spoken-note request"),
+      },
+      responses: {
+        200: ok(),
+        400: ERR[400],
+        401: ERR[401],
+        403: ERR[403],
+        404: ERR[404],
+        500: ERR[500],
+      },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { threadId, versionId } = c.req.valid("json");
+      const db = getDb();
+      const userId = await getThreadOwner(db, threadId);
+      if (!userId) return c.json({ error: "unknown thread" }, 404);
+      const version = await getCoverLetterVersion(db, versionId);
+      if (!version) return c.json({ error: "unknown cover-letter version" }, 404);
+      if (version.user_id !== userId) {
+        return c.json({ error: "cover-letter version not owned by thread owner" }, 403);
+      }
 
-    // Stubbed TTS boundary: the letter text → a spoken-note audio artifact ref.
-    const activity = await startActivity(db, {
-      type: "spoken_note",
-      userId,
-      candidacyId: version.candidacy_id,
-      detail: { versionId },
-    });
-    try {
-      const note = stubSynthesizer({ versionId, text: version.content });
-      await recordCoverLetterSpokenNote(db, versionId, note);
-      await succeedActivity(db, activity.id, { audioUrl: note.audioUrl, provider: note.provider });
-      return c.json({
-        threadId,
+      // Stubbed TTS boundary: the letter text → a spoken-note audio artifact ref.
+      const activity = await startActivity(db, {
+        type: "spoken_note",
+        userId,
         candidacyId: version.candidacy_id,
-        versionId,
-        activityId: activity.id,
-        spokenNote: note,
+        detail: { versionId },
       });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "spoken-note generation failed";
-      await failActivity(db, activity.id, message);
-      return c.json({ error: message }, 500);
-    }
-  })
+      try {
+        const note = stubSynthesizer({ versionId, text: version.content });
+        await recordCoverLetterSpokenNote(db, versionId, note);
+        await succeedActivity(db, activity.id, {
+          audioUrl: note.audioUrl,
+          provider: note.provider,
+        });
+        return c.json({
+          threadId,
+          candidacyId: version.candidacy_id,
+          versionId,
+          activityId: activity.id,
+          spokenNote: note,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "spoken-note generation failed";
+        await failActivity(db, activity.id, message);
+        return c.json({ error: message }, 500);
+      }
+    },
+  );
+
+const gIngest = mk()
   // Resume / portfolio ingest (ARC-29): an uploaded file is extracted into a
   // PROPOSED profile version — never the live profile. The file→content extraction
   // is the stubbed CLI boundary (./ingest.ts); this records a proposal_exec activity
   // with the raw-file storage reference, then submits the extracted content through
   // the same proposals/apply-executor path onboarding uses. The caller then approves
   // it via /onboarding/proposals/:id/decide, exactly like a shared-state draft.
-  .post("/onboarding/resume", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      userId?: string;
-      storageRef?: string;
-      filename?: string;
-      kind?: string;
-    };
-    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const storageRef = body.storageRef;
-    if (typeof storageRef !== "string" || storageRef.length === 0 || storageRef.length > 1024) {
-      return c.json({ error: "storageRef must be a non-empty string (≤1024 chars)" }, 400);
-    }
-    // Inferred as the literal union "resume" | "portfolio" (not the named IngestKind
-    // alias) so the response type stays portable across the hc<AppType> CLI client.
-    const kind = body.kind === "portfolio" ? "portfolio" : "resume";
-    const filename = typeof body.filename === "string" ? body.filename : undefined;
-    // Stubbed CLI boundary: file → structured profile content (deterministic stub).
-    const extraction = stubResumeExtractor({ kind, storageRef, filename });
-    const result = await ingestProposedVersion(getDb(), {
-      userId: user,
-      source: kind,
-      storageRef,
-      filename,
-      attributes: extraction.attributes as Json,
-      details: extraction.details as Json,
-    });
-    return c.json({ user, kind, status: "proposed", ...result });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/resume",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({
+            userId: Uuid.optional(),
+            storageRef: z.string(),
+            filename: z.string().optional(),
+            kind: z.string().optional(),
+          }),
+          "Ingest request",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as {
+        userId?: string;
+        storageRef?: string;
+        filename?: string;
+        kind?: string;
+      };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const storageRef = body.storageRef;
+      if (typeof storageRef !== "string" || storageRef.length === 0 || storageRef.length > 1024) {
+        return c.json({ error: "storageRef must be a non-empty string (≤1024 chars)" }, 400);
+      }
+      // Inferred as the literal union "resume" | "portfolio" (not the named IngestKind
+      // alias) so the response type stays portable across the hc<AppType> CLI client.
+      const kind = body.kind === "portfolio" ? "portfolio" : "resume";
+      const filename = typeof body.filename === "string" ? body.filename : undefined;
+      // Stubbed CLI boundary: file → structured profile content (deterministic stub).
+      const extraction = stubResumeExtractor({ kind, storageRef, filename });
+      const result = await ingestProposedVersion(getDb(), {
+        userId: user,
+        source: kind,
+        storageRef,
+        filename,
+        attributes: extraction.attributes as Json,
+        details: extraction.details as Json,
+      });
+      return c.json({ user, kind, status: "proposed", ...result });
+    },
+  )
   // Voicenote ingest (ARC-30, edge STT per ARC-53): the transcript text is
   // persisted as a tier-2 message on the thread — the deep source the Scribe later
   // reads, never a profile mutation. Transcription happens at the edge (the
@@ -693,212 +956,402 @@ const app = new Hono()
   // activity (provider/filename provenance, no audio reference), then stores the
   // transcript message. The thread owner (not the caller) resolves the activity's
   // user, mirroring the onboarding routes.
-  .post("/onboarding/voicenote", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      threadId?: string;
-      transcript?: string;
-      filename?: string;
-      provider?: string;
-    };
-    const threadId = body.threadId;
-    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
-    const transcript = body.transcript;
-    if (
-      typeof transcript !== "string" ||
-      transcript.trim().length === 0 ||
-      transcript.length > 100_000
-    ) {
-      return c.json({ error: "transcript must be a non-empty string (≤100000 chars)" }, 400);
-    }
-    const filename = typeof body.filename === "string" ? body.filename : undefined;
-    const provider = typeof body.provider === "string" ? body.provider : "elevenlabs";
-    const db = getDb();
-    const userId = await getThreadOwner(db, threadId);
-    if (!userId) return c.json({ error: "unknown thread" }, 404);
-    const result = await ingestVoicenote(db, { threadId, userId, filename, transcript, provider });
-    return c.json({ threadId, status: "transcribed", transcript, ...result });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/voicenote",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({
+            threadId: Uuid,
+            transcript: z.string(),
+            filename: z.string().optional(),
+            provider: z.string().optional(),
+          }),
+          "Voicenote transcript",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as {
+        threadId?: string;
+        transcript?: string;
+        filename?: string;
+        provider?: string;
+      };
+      const threadId = body.threadId;
+      if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
+      const transcript = body.transcript;
+      if (
+        typeof transcript !== "string" ||
+        transcript.trim().length === 0 ||
+        transcript.length > 100_000
+      ) {
+        return c.json({ error: "transcript must be a non-empty string (≤100000 chars)" }, 400);
+      }
+      const filename = typeof body.filename === "string" ? body.filename : undefined;
+      const provider = typeof body.provider === "string" ? body.provider : "elevenlabs";
+      const db = getDb();
+      const userId = await getThreadOwner(db, threadId);
+      if (!userId) return c.json({ error: "unknown thread" }, 404);
+      const result = await ingestVoicenote(db, {
+        threadId,
+        userId,
+        filename,
+        transcript,
+        provider,
+      });
+      return c.json({ threadId, status: "transcribed", transcript, ...result });
+    },
+  );
+
+const gAccount = mk()
   // ── Acceptance gate (ARC-31) ────────────────────────────────────────────────
   // The first human gate: an account lifecycle (onboarding → submitted →
   // under_review → accepted | rejected). Read a user's gate state + the mechanical
   // readiness check (1–5 target titles + negative criteria + an approved profile
   // version) the owner's acceptance requires.
-  .get("/accounts/state", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const db = getDb();
-    const account = await getAccount(db, user);
-    const readiness = await checkReadiness(db, user);
-    return c.json({ user, status: account?.status ?? "onboarding", readiness });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/accounts/state",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const db = getDb();
+      const account = await getAccount(db, user);
+      const readiness = await checkReadiness(db, user);
+      return c.json({ user, status: account?.status ?? "onboarding", readiness });
+    },
+  )
   // A user submits their account for review (just-in-time provisions the row).
-  .post("/accounts/submit", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as { userId?: string };
-    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const account = await submitAccountForReview(getDb(), user);
-    return c.json({ user, status: account.status });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/accounts/submit",
+      security: SERVICE_SECURITY,
+      request: { body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Submit account") },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as { userId?: string };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const account = await submitAccountForReview(getDb(), user);
+      return c.json({ user, status: account.status });
+    },
+  )
   // The owner's ≤24h review decision: start review, accept (requires readiness),
   // or reject with a note. Owner-facing (the service-role path) like the
   // profile-version decide route; RLS has no client write policy on accounts.
-  .post("/accounts/:userId/decide", async (c) => {
-    if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.param("userId");
-    if (!UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      action?: string;
-      note?: string | null;
-    };
-    if (body.action !== "review" && body.action !== "accept" && body.action !== "reject") {
-      return c.json({ error: "'action' must be review, accept, or reject" }, 400);
-    }
-    const decision =
-      body.action === "review"
-        ? ({ action: "review" } as AccountDecision)
-        : ({ action: body.action, note: body.note } as AccountDecision);
-    const result = await decideAccount(getDb(), user, decision);
-    // A refused decision (not ready, or not awaiting review) is a 409 conflict.
-    if (result.error) return c.json({ user, ...result }, 409);
-    return c.json({ user, ...result });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/accounts/{userId}/decide",
+      security: OWNER_SECURITY,
+      request: {
+        params: z.object({ userId: Uuid }),
+        // `action` is validated in the handler so the owner gate (401) runs first.
+        body: jsonBody(z.looseObject({}), "Account decision"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+    }),
+    async (c) => {
+      if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("param").userId;
+      const body = c.req.valid("json") as { action?: string; note?: string | null };
+      if (body.action !== "review" && body.action !== "accept" && body.action !== "reject") {
+        return c.json({ error: "'action' must be review, accept, or reject" }, 400);
+      }
+      const decision =
+        body.action === "review"
+          ? ({ action: "review" } as AccountDecision)
+          : ({ action: body.action, note: body.note } as AccountDecision);
+      const result = await decideAccount(getDb(), user, decision);
+      // A refused decision (not ready, or not awaiting review) is a 409 conflict.
+      if (result.error) return c.json({ user, ...result }, 409);
+      return c.json({ user, ...result });
+    },
+  );
+
+const gProfile = mk()
   // ── Profile / version surface (ARC-32) ──────────────────────────────────────
   // Round out the thin read / draft / submit / cycle surface over the profile
   // spine the onboarding + ingest flows already write to. approve/reject/edit
   // stays on the existing apply-executor route (/onboarding/proposals/:id/decide)
   // — reused, not duplicated. Same fail-closed auth; tables are RLS own-rows-only.
-  .get("/profile", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const profile = await getProfile(getDb(), user);
-    return c.json({ user, profile: profile ?? null });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/profile",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const profile = await getProfile(getDb(), user);
+      return c.json({ user, profile: profile ?? null });
+    },
+  )
   // The whole version history (timeline) + which one is live.
-  .get("/profile/versions", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const versions = await listProfileVersions(getDb(), user);
-    const live = versions.find((v) => v.status === "approved");
-    return c.json({ user, versions, liveVersionId: live?.id ?? null });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/profile/versions",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const versions = await listProfileVersions(getDb(), user);
+      const live = versions.find((v) => v.status === "approved");
+      return c.json({ user, versions, liveVersionId: live?.id ?? null });
+    },
+  )
   // Draft a new version directly (the non-conversational path; onboarding/run is
   // the conversational one). Left 'draft' until explicitly submitted + approved.
-  .post("/profile/versions", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      userId?: string;
-      attributes?: Json;
-      label?: string | null;
-    };
-    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const version = await createProfileVersion(getDb(), {
-      userId: user,
-      attributes: body.attributes,
-      label: body.label,
-    });
-    return c.json({ user, versionId: version.id, status: version.status, version });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/profile/versions",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({
+            userId: Uuid.optional(),
+            attributes: z.any().optional(),
+            label: z.string().nullish(),
+          }),
+          "New profile version",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as {
+        userId?: string;
+        attributes?: Json;
+        label?: string | null;
+      };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const version = await createProfileVersion(getDb(), {
+        userId: user,
+        attributes: body.attributes,
+        label: body.label,
+      });
+      return c.json({ user, versionId: version.id, status: version.status, version });
+    },
+  )
   // Read a single version (scoped to the user so it can't read another's).
-  .get("/profile/versions/:id", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const id = c.req.param("id");
-    if (!UUID_RE.test(id)) return c.json({ error: "invalid version id" }, 400);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const version = await getProfileVersion(getDb(), user, id);
-    if (!version) return c.json({ error: "unknown version" }, 404);
-    return c.json({ user, version });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/profile/versions/{id}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ id: Uuid }), query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const version = await getProfileVersion(getDb(), user, id);
+      if (!version) return c.json({ error: "unknown version" }, 404);
+      return c.json({ user, version });
+    },
+  )
   // Submit a draft version for approval (opens a profile_version proposal). The
   // caller then decides it via /onboarding/proposals/:id/decide.
-  .post("/profile/versions/:id/submit", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const id = c.req.param("id");
-    if (!UUID_RE.test(id)) return c.json({ error: "invalid version id" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as { userId?: string; title?: string };
-    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const proposal = await submitVersionProposal(getDb(), {
-      userId: user,
-      versionId: id,
-      title: body.title ?? "Approve your profile",
-    });
-    return c.json({ user, versionId: id, proposalId: proposal.id });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/profile/versions/{id}/submit",
+      security: SERVICE_SECURITY,
+      request: {
+        params: z.object({ id: Uuid }),
+        body: jsonBody(
+          z.looseObject({ userId: Uuid.optional(), title: z.string().optional() }),
+          "Submit version",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json") as { userId?: string; title?: string };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const proposal = await submitVersionProposal(getDb(), {
+        userId: user,
+        versionId: id,
+        title: body.title ?? "Approve your profile",
+      });
+      return c.json({ user, versionId: id, proposalId: proposal.id });
+    },
+  )
   // Cycle/rollback: re-make an earlier ('approved'|'superseded') version live.
-  .post("/profile/versions/:id/rollback", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const id = c.req.param("id");
-    if (!UUID_RE.test(id)) return c.json({ error: "invalid version id" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as { userId?: string };
-    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const result = await rollbackToVersion(getDb(), user, id);
-    if (result.error) return c.json({ user, ...result }, 409);
-    return c.json({ user, ...result });
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/profile/versions/{id}/rollback",
+      security: SERVICE_SECURITY,
+      request: {
+        params: z.object({ id: Uuid }),
+        body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Rollback"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json") as { userId?: string };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const result = await rollbackToVersion(getDb(), user, id);
+      if (result.error) return c.json({ user, ...result }, 409);
+      return c.json({ user, ...result });
+    },
+  );
+
+const gPrefs = mk()
   // ── Target titles (the collect search keys) ─────────────────────────────────
-  .get("/titles", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const titles = await listTargetTitles(getDb(), user, {
-      activeOnly: c.req.query("all") !== "1",
-    });
-    return c.json({ user, titles });
-  })
-  .post("/titles", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as { userId?: string; title?: string };
-    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const title = typeof body.title === "string" ? body.title.trim() : "";
-    if (!title || title.length > 256) {
-      return c.json({ error: "title must be a non-empty string (≤256 chars)" }, 400);
-    }
-    const created = await addTargetTitle(getDb(), user, title);
-    return c.json({ user, title: created });
-  })
-  .delete("/titles/:id", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const id = c.req.param("id");
-    if (!UUID_RE.test(id)) return c.json({ error: "invalid title id" }, 400);
-    await removeTargetTitle(getDb(), id);
-    return c.json({ removed: id });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/titles",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional(), all: z.string().optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const q = c.req.valid("query");
+      const user = q.user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const titles = await listTargetTitles(getDb(), user, { activeOnly: q.all !== "1" });
+      return c.json({ user, titles });
+    },
+  )
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/titles",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({ userId: Uuid.optional(), title: z.string().optional() }),
+          "New target title",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as { userId?: string; title?: string };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const title = typeof body.title === "string" ? body.title.trim() : "";
+      if (!title || title.length > 256) {
+        return c.json({ error: "title must be a non-empty string (≤256 chars)" }, 400);
+      }
+      const created = await addTargetTitle(getDb(), user, title);
+      return c.json({ user, title: created });
+    },
+  )
+  .openapi(
+    createRoute({
+      method: "delete",
+      path: "/titles/{id}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ id: Uuid }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      await removeTargetTitle(getDb(), id);
+      return c.json({ removed: id });
+    },
+  )
   // ── Negative criteria (the deal-breakers) ───────────────────────────────────
-  .get("/criteria", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const user = c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const criteria = await listNegativeCriteria(getDb(), user);
-    return c.json({ user, criteria });
-  })
-  .post("/criteria", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as { userId?: string; text?: string };
-    const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-    if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
-    const text = typeof body.text === "string" ? body.text.trim() : "";
-    if (!text || text.length > 512) {
-      return c.json({ error: "text must be a non-empty string (≤512 chars)" }, 400);
-    }
-    const created = await addNegativeCriterion(getDb(), user, text);
-    return c.json({ user, criterion: created });
-  })
-  .delete("/criteria/:id", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const id = c.req.param("id");
-    if (!UUID_RE.test(id)) return c.json({ error: "invalid criterion id" }, 400);
-    await removeNegativeCriterion(getDb(), id);
-    return c.json({ removed: id });
-  })
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/criteria",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const criteria = await listNegativeCriteria(getDb(), user);
+      return c.json({ user, criteria });
+    },
+  )
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/criteria",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({ userId: Uuid.optional(), text: z.string().optional() }),
+          "New negative criterion",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as { userId?: string; text?: string };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      if (!text || text.length > 512) {
+        return c.json({ error: "text must be a non-empty string (≤512 chars)" }, 400);
+      }
+      const created = await addNegativeCriterion(getDb(), user, text);
+      return c.json({ user, criterion: created });
+    },
+  )
+  .openapi(
+    createRoute({
+      method: "delete",
+      path: "/criteria/{id}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ id: Uuid }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      await removeNegativeCriterion(getDb(), id);
+      return c.json({ removed: id });
+    },
+  );
+
+const gHooks = mk()
   // Webhook: a candidacy entered external_pending (the redirect case) — wake the
   // external-fill agent by invoking the CLI (the Archer MCP reads + the stubbed
   // browser fill stay in the CLI process). Same "API runs the CLI" model as
@@ -906,29 +1359,79 @@ const app = new Hono()
   // (20260620180000_event_engine.sql). Defensive: a missing/invalid id is just
   // acknowledged (no-op), and a CLI failure still returns 202 — this is a fire-on-
   // state-change webhook, not a request the caller can retry, so it never 5xxs.
-  .post("/hooks/external-form", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    const body = (await c.req.json().catch(() => ({}))) as { record?: { id?: string } };
-    const candidacyId = body.record?.id;
-    if (!candidacyId || !UUID_RE.test(candidacyId)) {
-      return c.json({ received: true, ref: candidacyId ?? null }, 202);
-    }
-    const res = await runCli(["external-fill", candidacyId, "--json"]);
-    if (res.code !== 0) {
-      return c.json(
-        { received: true, ref: candidacyId, error: res.stderr.trim() || "external-fill failed" },
-        202,
-      );
-    }
-    return c.json({ received: true, ref: candidacyId, result: JSON.parse(res.stdout) }, 202);
-  })
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/hooks/external-form",
+      security: SERVICE_SECURITY,
+      responses: { 202: ok("Accepted"), 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = (await c.req.json().catch(() => ({}))) as { record?: { id?: string } };
+      const candidacyId = body.record?.id;
+      if (!candidacyId || !UUID_RE.test(candidacyId)) {
+        return c.json({ received: true, ref: candidacyId ?? null }, 202);
+      }
+      const res = await runCli(["external-fill", candidacyId, "--json"]);
+      if (res.code !== 0) {
+        return c.json(
+          { received: true, ref: candidacyId, error: res.stderr.trim() || "external-fill failed" },
+          202,
+        );
+      }
+      return c.json({ received: true, ref: candidacyId, result: JSON.parse(res.stdout) }, 202);
+    },
+  )
   // Webhook: an Activity failed -> the self-heal Mechanic should investigate.
-  .post("/hooks/activity-failed", async (c) => {
-    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-    await c.req.json().catch(() => ({}));
-    // TODO(M4): wake the Mechanic. For now, acknowledge.
-    return c.json({ received: true }, 202);
-  });
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/hooks/activity-failed",
+      security: SERVICE_SECURITY,
+      responses: { 202: ok("Accepted"), 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      await c.req.json().catch(() => ({}));
+      // TODO(M4): wake the Mechanic. For now, acknowledge.
+      return c.json({ received: true }, 202);
+    },
+  );
 
-export type AppType = typeof app;
-export default app;
+// Mount every route group onto the root app. `.route()` merges each group's
+// route schema into the parent type — so the single exported `AppType` carries
+// all routes for the `hc` client — and merges their OpenAPI definitions into the
+// root registry, so `/openapi.json` documents the whole surface.
+const root = mk();
+root.openAPIRegistry.registerComponent("securitySchemes", "serviceSecret", {
+  type: "apiKey",
+  in: "header",
+  name: "x-archer-secret",
+});
+root.openAPIRegistry.registerComponent("securitySchemes", "ownerSecret", {
+  type: "apiKey",
+  in: "header",
+  name: "x-archer-admin-secret",
+});
+
+const routes = root
+  .route("/", gCore)
+  .route("/", gFeed)
+  .route("/", gOnboard)
+  .route("/", gCover)
+  .route("/", gIngest)
+  .route("/", gAccount)
+  .route("/", gProfile)
+  .route("/", gPrefs)
+  .route("/", gHooks);
+
+// The published OpenAPI document + a self-hosted, browsable Scalar reference.
+routes.doc("/openapi.json", {
+  openapi: "3.0.0",
+  info: { title: "Archer API", version: "0.1.0" },
+});
+routes.get("/reference", Scalar({ url: "/openapi.json" }));
+
+export type AppType = typeof routes;
+export default routes;
