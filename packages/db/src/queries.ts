@@ -827,17 +827,25 @@ export interface ThreadInterrupt {
 }
 
 /** Every interrupt ever raised on a thread, oldest first — the route splits these
- *  into open (status 'submitted') vs decided to enforce the resume contract. */
+ *  into open (status 'submitted') vs decided to enforce the resume contract.
+ *
+ *  Covers every interrupt-bearing proposal kind: a 'tool_call' proposal keeps its
+ *  AG-UI interrupt locator at the top of plan jsonb, whereas a 'cover_letter_version'
+ *  (and any 'external_application') submit nests it one level deeper under
+ *  plan->'interrupt'. Reading both paths via coalesce means a cover-letter submit's
+ *  open interrupt is visible to the /agui/run gate — without it, a later run on the
+ *  same thread slips past pending-interrupts-block-new-input (ARC-48). */
 export async function loadThreadInterrupts(db: Db, threadId: string): Promise<ThreadInterrupt[]> {
   return await db<ThreadInterrupt[]>`
     select id as "proposalId",
-           plan->>'interruptId' as "interruptId",
-           plan->>'runId' as "runId",
-           plan->>'toolCallId' as "toolCallId",
+           coalesce(plan->>'interruptId', plan->'interrupt'->>'interruptId') as "interruptId",
+           coalesce(plan->>'runId', plan->'interrupt'->>'runId') as "runId",
+           coalesce(plan->>'toolCallId', plan->'interrupt'->>'toolCallId') as "toolCallId",
            plan->>'action' as action,
            status
     from proposals
-    where kind = 'tool_call' and plan->>'threadId' = ${threadId}
+    where kind in ('tool_call', 'cover_letter_version', 'external_application')
+      and coalesce(plan->>'threadId', plan->'interrupt'->>'threadId') = ${threadId}
     order by created_at asc`;
 }
 
