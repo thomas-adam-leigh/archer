@@ -13,11 +13,18 @@ BRANCH="scheduler-agent"
 CMD='claude -p "@./services/scheduler/prompt.md" --dangerously-skip-permissions'
 LOG_REL="services/scheduler/scheduler.log"
 
-# 1. Create the isolated worktree off origin/main if it isn't there yet.
+# 1. Ensure the isolated worktree exists AND is at the latest origin/main, so a
+#    (re)start always picks up merged prompt/code changes (the daemon reads
+#    prompt.md from this checkout at process start). We only refresh when no run
+#    is in flight, so we never move HEAD out from under a live agent run.
 if [ ! -d "$WORKTREE" ]; then
   echo "→ creating isolated worktree at $WORKTREE (off origin/main)…"
   git -C "$ROOT" fetch origin
   git -C "$ROOT" worktree add -B "$BRANCH" "$WORKTREE" origin/main
+elif ! pgrep -f "scheduler/dist/index.js" >/dev/null; then
+  echo "→ refreshing worktree to origin/main (no run in flight)…"
+  git -C "$WORKTREE" fetch origin --quiet
+  git -C "$WORKTREE" checkout -f -B "$BRANCH" origin/main
 fi
 
 cd "$WORKTREE"
