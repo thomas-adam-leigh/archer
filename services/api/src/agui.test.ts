@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   type AgUiEvent,
   applyStatePatch,
+  assembleCoverLetter,
   classifyRun,
   draftAttributes,
+  draftContent,
   interruptsFromEvents,
   onboardingRun,
   outcomeFromEvents,
   restoreThread,
   runError,
   runStub,
+  scribeRun,
   statusFromEvents,
 } from "./agui";
 
@@ -380,5 +383,61 @@ describe("onboardingRun — shared-state draft assembly → version proposal", (
     const events = onboardingRun(args);
     const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
     expect(Object.keys(draftAttributes(state) as object).length).toBeGreaterThan(0);
+  });
+});
+
+describe("assembleCoverLetter — deterministic Scribe stand-in", () => {
+  it("addresses the company and names the role, weaving in highlights", () => {
+    const letter = assembleCoverLetter({
+      roleTitle: "Staff Engineer",
+      companyName: "Acme Corp",
+      highlights: ["shipped product end to end", "comfortable with LLMs"],
+    });
+    expect(letter).toContain("Dear Acme Corp Hiring Team,");
+    expect(letter).toContain("Staff Engineer");
+    expect(letter).toContain("shipped product end to end; comfortable with LLMs");
+  });
+
+  it("is deterministic — same context yields the same letter", () => {
+    const ctx = { roleTitle: "Designer", companyName: "Globex", highlights: ["a"] };
+    expect(assembleCoverLetter(ctx)).toBe(assembleCoverLetter(ctx));
+  });
+
+  it("still produces a complete letter with no company or highlights", () => {
+    const letter = assembleCoverLetter({ roleTitle: "Analyst" });
+    expect(letter).toContain("Dear your team Hiring Team,");
+    expect(letter).toContain("Analyst");
+    expect(letter).toContain("Kind regards,");
+  });
+});
+
+describe("scribeRun — shared-state cover-letter draft assembly", () => {
+  const args = { threadId: THREAD, runId: RUN };
+
+  it("opens an empty draft snapshot then writes the letter with one delta", () => {
+    const events = scribeRun({
+      ...args,
+      context: { roleTitle: "Staff Engineer", companyName: "Acme" },
+    });
+    const seq = types(events);
+    expect(seq[0]).toBe("run_started");
+    expect(seq.at(-1)).toBe("run_finished");
+    expect(seq.filter((t) => t === "state_snapshot")).toHaveLength(1);
+    // one delta to write the content + one to flip the phase
+    expect(seq.filter((t) => t === "state_delta")).toHaveLength(2);
+    expect(statusFromEvents(events)).toBe("completed");
+  });
+
+  it("folds to the assembled letter in shared state (draft_ready)", () => {
+    const context = { roleTitle: "Staff Engineer", companyName: "Acme", highlights: ["impact"] };
+    const events = scribeRun({ ...args, context });
+    const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
+    expect((state as { phase: string }).phase).toBe("draft_ready");
+    expect(draftContent(state)).toBe(assembleCoverLetter(context));
+    expect(draftContent(state)).toContain("Acme");
+  });
+
+  it("draftContent is empty for state with no draft", () => {
+    expect(draftContent({})).toBe("");
   });
 });

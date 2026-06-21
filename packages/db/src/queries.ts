@@ -248,6 +248,32 @@ export async function setCandidacyStatus(
   return rows[0];
 }
 
+/** A candidacy joined with the role/company context the Scribe drafts a cover
+ *  letter against, plus the owner + status the cover-letter routes gate on. */
+export interface CandidacyContext {
+  id: string;
+  user_id: string;
+  status: Enum<"candidacy_status">;
+  posting_title: string;
+  company_name: string | null;
+}
+
+/** One candidacy with its posting title + company name — the context the Scribe
+ *  assembles a draft against, and the owner/status a cover-letter run checks.
+ *  Undefined if the candidacy does not exist. */
+export async function getCandidacyContext(
+  db: Db,
+  id: string,
+): Promise<CandidacyContext | undefined> {
+  const rows = await db<CandidacyContext[]>`
+    select c.id, c.user_id, c.status, p.title as posting_title, co.name as company_name
+    from candidacies c
+    join postings p on p.id = c.posting_id
+    left join companies co on co.id = p.company_id
+    where c.id = ${id}`;
+  return rows[0];
+}
+
 /** One `new` candidacy with the posting context the Matchmaker judges it against
  *  (title/company/location/work mode/description). Returned oldest first so a run
  *  triages in arrival order. Only status `new` rows are returned, which is what
@@ -1412,4 +1438,23 @@ export async function setActiveCoverLetterVersion(
     }
     return rows[0];
   });
+}
+
+/** Submit a draft cover-letter version for review: flip `draft → proposed` (the
+ *  "submitted" state the Scribe leaves a freshly assembled letter in). The full
+ *  proposal/interrupt approve-edit-reject loop is layered on later; this is the
+ *  minimal submit the draft-assembly path needs. Throws if the version does not
+ *  exist or is not a draft. */
+export async function submitCoverLetterVersion(
+  db: Db,
+  versionId: string,
+): Promise<CoverLetterVersion> {
+  const rows = await db<CoverLetterVersion[]>`
+    update cover_letter_versions set status = 'proposed'
+    where id = ${versionId} and status = 'draft'
+    returning *`;
+  if (!rows[0]) {
+    throw new Error(`cover-letter version ${versionId} not found or not a draft`);
+  }
+  return rows[0];
 }
