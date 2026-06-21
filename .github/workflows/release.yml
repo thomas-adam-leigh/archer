@@ -44,7 +44,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned: `latest` resolution intermittently 504s (Gateway Time-out) and
+          # is non-reproducible. Bump deliberately.
+          version: 2.107.0
       # `db push` connects directly to Postgres, so it needs the linked project
       # (via `supabase link`) plus the DB password — `--project-ref` is NOT a
       # `db push` flag. SUPABASE_DB_PASSWORD is read from the env by the CLI.
@@ -149,6 +151,9 @@ jobs:
           KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET }}
           KOMODO_PROCEDURE: ${{ vars.KOMODO_PROCEDURE }}
           SHA: ${{ github.sha }}
+          # Pin the stack to the exact image this release built + signed, so the
+          # redeploy is deterministic instead of re-pulling a stale tag.
+          ARCHER_API_IMAGE_REF: ghcr.io/${{ github.repository_owner }}/archer-api:sha-${{ github.sha }}
         run: bash infra/komodo/scripts/redeploy.sh
       - name: Record deploy as an Activity (best-effort)
         if: always()
