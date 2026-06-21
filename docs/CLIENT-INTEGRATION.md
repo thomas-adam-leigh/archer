@@ -25,18 +25,18 @@ Three ideas carry the whole architecture:
 
 ### Stubbed vs real — the seams
 
-The **run loop is real; the brain and the outside-world I/O are stubbed.** These are deliberate, swappable seams (a typed interface + a deterministic stand-in), not missing features:
+The **run loop, the brain, and STT are now real; the remaining outside-world I/O is stubbed.** Each stub is a deliberate, swappable seam (a typed interface + a deterministic stand-in), not a missing feature:
 
 | Seam | What's real today | What's stubbed |
 |---|---|---|
-| **Agent brain** (Guide/Scribe/Matchmaker) | The run lifecycle, event ordering, persistence, interrupt/resume contract | The agent itself is a deterministic scripted stub (`services/api/src/agui.ts`); the Matchmaker is keyword rules (`services/cli/src/commands/match.ts` `stubJudge`) |
+| **Agent brain** (Guide/Scribe/Matchmaker) | The run lifecycle, event ordering, persistence, interrupt/resume contract — **plus a real, swappable LLM** behind every call-site (`packages/llm`, default MiniMax M3; OpenRouter BYOK swap). The brain (`services/api/src/brain.ts`), Matchmaker judge (`commands/match.ts` `createLlmJudge`), and Scribe (`services/api/src/scribe.ts`) all call it | Nothing in the path — but a deterministic stub stays **injectable for tests** (`setBrain`/`setScribe`, `stubJudge`, or `LLM_PROVIDER=mock`) so CI never calls a live model |
+| **STT** (voicenote → transcript) | **Real** ElevenLabs Scribe via a Supabase Edge Function (`packages/db/supabase/functions/transcribe/`); the ingest path, `transcribe` Activity, transcript-message persistence. **Audio is never persisted** | Nothing — the edge function's core is unit-tested with a mocked fetch (CI never calls ElevenLabs) |
 | **Browser automation** (board collect / apply / external-form fill) | The Activity orchestration, status machine, idempotency, notifications | The actual Patchright/Chrome-DevTools scraping & form-filling (`services/cli/src/adapters/careerjunction.ts` throws `NotIntegratedError`; `commands/apply.ts` `stubApplier`; `commands/external-fill.ts` `stubFiller`) |
 | **Company enrichment** (LinkedIn MCP + Firecrawl) | The enrich Activity, the writes into `companies`, the candidacy gate | The research tools (`commands/enrich.ts` `stubEnricher`) |
-| **STT** (voicenote → transcript) | The ingest path, `transcribe` Activity, transcript message persistence | The transcription provider (`services/api/src/stt.ts` `stubTranscriber`) |
 | **TTS** (cover-letter → spoken note) | The `spoken_note` Activity, artifact recorded on the version | The ElevenLabs synthesis (`services/api/src/tts.ts` `stubSynthesizer`) |
 | **Resume/portfolio extraction** | The proposed-version path, `proposal_exec` Activity | The file → structured-content extraction (`services/api/src/ingest.ts` `stubResumeExtractor`) |
 
-Because every stub is deterministic and pure, the full end-to-end paths run and are tested offline. A client author can treat these paths as working — the data they produce is real, the content is canned.
+Every remaining stub is deterministic and pure, so the full end-to-end paths run and are tested offline. A client author can treat these paths as working — the data they produce is real, the content is canned. See `docs/SECURITY-OPS-RUNBOOK.md` §5–§6 for the STT flow and the LLM provider switch.
 
 ---
 
@@ -138,7 +138,7 @@ The **live profile** = the spine rows of the `profile_versions` row whose `statu
 
 ## 3. The AG-UI contract
 
-All agent interaction goes through **`POST /agui/run`** (`app.ts:240-322`). The run loop is real; the agent is a deterministic stub (`agui.ts`).
+All agent interaction goes through **`POST /agui/run`**. The run loop is real, and the conversational reply is now produced by a **real, swappable LLM** (`services/api/src/brain.ts` → `packages/llm`; default MiniMax M3, OpenRouter BYOK swap). A deterministic stub stays injectable for tests (`setBrain`, or `LLM_PROVIDER=mock`), so the event ordering below is identical whether a live model or the stub produced the text. See `docs/SECURITY-OPS-RUNBOOK.md` §6.
 
 ### `RunAgentInput` (request body)
 
@@ -392,7 +392,7 @@ Optional spoken note: `POST /cover-letters/spoken-note { threadId, versionId }` 
 
 ## 8. Full API endpoint catalog
 
-All routes require the `x-archer-secret` header (or dev-open). All take/return JSON. `user` defaults to `process.env.ARCHER_USER_ID` when omitted. Source: `services/api/src/app.ts`.
+All routes require the `x-archer-secret` header (`ARCHER_API_SECRET`), or dev-open in non-prod. The **three owner-gated `/decide` routes** additionally require the `x-archer-admin-secret` header (`ARCHER_API_ADMIN_SECRET`) — they are flagged below. All take/return JSON. `user` defaults to `process.env.ARCHER_USER_ID` when omitted. Source: `services/api/src/app.ts` (now an `OpenAPIHono` app). The live, machine-readable spec is at **`GET /openapi.json`** and a self-hosted **Scalar** reference UI at **`GET /reference`** (`docs/SECURITY-OPS-RUNBOOK.md` §4); both declare the `serviceSecret`/`ownerSecret` schemes.
 
 ### Agent commands (API → CLI subprocess)
 
@@ -417,6 +417,8 @@ All routes require the `x-archer-secret` header (or dev-open). All take/return J
 |---|---|---|---|
 | GET | `/` | — | `{ name, status }` |
 | GET | `/health` | — | `{ status:"ok" }` (no DB needed) |
+| GET | `/openapi.json` | — | OpenAPI 3.0 document (generated; declares `serviceSecret`/`ownerSecret`) |
+| GET | `/reference` | — | self-hosted Scalar API reference UI over `/openapi.json` |
 | GET | `/jobs` | `user`, `status?` | `{ user, jobs:[CandidacyListItem] }` |
 | GET | `/activities` | `user`, `type?`, `status?` | `{ user, activities:[…] }` |
 | GET | `/onboarding/state` | `user` | `{ user, onboarding:boolean, liveVersionId }` |
@@ -439,9 +441,9 @@ All routes require the `x-archer-secret` header (or dev-open). All take/return J
 | Method | Path | Request | Response |
 |---|---|---|---|
 | POST | `/onboarding/run` | `{ threadId, draft? }` | `{ runId, versionId, proposalId, attributes, events }` |
-| POST | `/onboarding/proposals/:proposalId/decide` | `{ action:"approve"\|"reject", edits?, note? }` | `{ proposalStatus, versionStatus, error? }` |
+| POST | `/onboarding/proposals/:proposalId/decide` | `{ action:"approve"\|"reject", edits?, note? }` | `{ proposalStatus, versionStatus, error? }` — **owner-gated** (`x-archer-admin-secret`) |
 | POST | `/onboarding/resume` | `{ userId, storageRef, filename?, kind?:"resume"\|"portfolio" }` | `{ user, kind, status:"proposed", versionId, proposalId, … }` — resume/portfolio ingest (stub extractor) |
-| POST | `/onboarding/voicenote` | `{ threadId, storageRef, filename? }` | `{ threadId, status:"transcribed", transcript, … }` — `transcribe` Activity + transcript message (stub STT) |
+| POST | `/onboarding/voicenote` | `{ threadId, transcript, provider?, filename? }` | `{ threadId, status:"transcribed", transcript, … }` — persists an already-transcribed note: `transcribe` Activity + transcript message. The client transcribes **first** via the `transcribe` Edge Function (real STT, audio never persisted — runbook §5); `provider` defaults to `"elevenlabs"` |
 | POST | `/profile/versions` | `{ userId?, attributes?, label? }` | `{ versionId, status:"draft", version }` |
 | POST | `/profile/versions/:id/submit` | `{ userId?, title? }` | `{ versionId, proposalId }` |
 | POST | `/profile/versions/:id/rollback` | `{ userId? }` | `{ versionId, versionStatus, error? }` (**409** on bad target) |
@@ -452,7 +454,7 @@ All routes require the `x-archer-secret` header (or dev-open). All take/return J
 |---|---|---|---|
 | POST | `/cover-letters/run` | `{ threadId, candidacyId, highlights? }` | `{ runId, versionId, versionStatus, content, events }` — Scribe draft; candidacy → `drafting`. **409** if candidacy not `awaiting_cover_letter`/`drafting`; **403** if not owned |
 | POST | `/cover-letters/submit` | `{ threadId, candidacyId }` | `{ runId, versionId, proposalId, interruptId, events }` — ends on interrupt; candidacy → `in_review`. **409** if not `drafting` or no proposed draft |
-| POST | `/cover-letters/proposals/:proposalId/decide` | `{ action:"approve"\|"reject", edits?, note? }` | `{ proposalStatus, … }` — approve → version active + candidacy `approved`; reject → back to `drafting` |
+| POST | `/cover-letters/proposals/:proposalId/decide` | `{ action:"approve"\|"reject", edits?, note? }` | `{ proposalStatus, … }` — **owner-gated** (`x-archer-admin-secret`); approve → version active + candidacy `approved`; reject → back to `drafting` |
 | POST | `/cover-letters/spoken-note` | `{ threadId, versionId }` | `{ activityId, spokenNote:{ audioUrl, provider, durationMs } }` (stub TTS); **403** if not owned |
 
 ### Targeting & accounts
@@ -464,7 +466,7 @@ All routes require the `x-archer-secret` header (or dev-open). All take/return J
 | POST | `/criteria` | `{ userId?, text }` (≤512) | `{ user, criterion }` |
 | DELETE | `/criteria/:id` | — | `{ removed }` |
 | POST | `/accounts/submit` | `{ userId? }` | `{ user, status }` — provisions row JIT |
-| POST | `/accounts/:userId/decide` | `{ action:"review"\|"accept"\|"reject", note? }` | `{ user, status, readiness? }` — **owner-facing**; **409** if refused. `accept` re-checks readiness atomically |
+| POST | `/accounts/:userId/decide` | `{ action:"review"\|"accept"\|"reject", note? }` | `{ user, status, readiness? }` — **owner-gated** (`x-archer-admin-secret`); **409** if refused. `accept` re-checks readiness atomically |
 
 > Validation: every path/query id is checked against a UUID regex; bad input → **400**. Unknown candidacy/thread/version → **404**. Unauthorized → **401**.
 
@@ -474,12 +476,12 @@ All routes require the `x-archer-secret` header (or dev-open). All take/return J
 
 | Seam | Interface in code | What's needed to go live |
 |---|---|---|
-| **Agent brain** | `runStub`/`onboardingRun`/`scribeRun`/`coverLetterSubmitRun` (`agui.ts`); `Judge`/`stubJudge` (`commands/match.ts`) | Real LLM calls behind the same pure-function signatures; the run loop, persistence, and interrupt contract are already real. Provider creds (Anthropic, etc.) |
+| **Agent brain** ✅ *real* | `getBrain`/`llmBrain` (`brain.ts`), `getScribe`/`llmScribe` (`scribe.ts`), `createLlmJudge`/`resolveJudge` (`commands/match.ts`) → `packages/llm` | **Done.** Real, swappable LLM (MiniMax M3 default; OpenRouter BYOK). Stub stays injectable for tests. Keys in Supabase secrets (`MINIMAX_API_KEY`/`OPENROUTER_API_KEY`) |
+| **STT (voicenote)** ✅ *real* | `transcribe` Edge Function (`packages/db/supabase/functions/transcribe/`) | **Done.** Real ElevenLabs Scribe; audio never persisted; `ELEVENLABS_API_KEY` in Supabase secrets |
 | **Board collect** | `BoardAdapter.collect` (`adapters/types.ts`); `careerjunction` throws `NotIntegratedError` | Per-board Patchright/Chromium scraping via residential proxy + VNC; map selectors; then flip `boards.collect_status` to `integrated`. Creds: `<PREFIX>_EMAIL/_PASSWORD`, `DECODO_PROXY` |
 | **Board apply** | `Applier`/`stubApplier` (`commands/apply.ts`) | Browser form-fill returning `submitted\|redirect\|failed`; same creds/proxy; flip `boards.apply_status` |
 | **External-form fill** | `Filler`/`stubFiller` + `ArcherMcp` (`commands/external-fill.ts`, `archer-mcp.ts`) | Browser agent driving the off-site form, reading the candidate only through the least-privilege Archer MCP surface |
 | **Company enrichment** | `Enricher`/`stubEnricher` (`commands/enrich.ts`) | LinkedIn MCP + Firecrawl calls; the writes into `companies`/`contacts` and the candidacy gate are already real |
-| **STT (voicenote)** | `Transcriber`/`stubTranscriber` (`stt.ts`) | An STT provider that reads `storageRef` from storage → transcript text |
 | **TTS (spoken note)** | `Synthesizer`/`stubSynthesizer` (`tts.ts`) | ElevenLabs streaming audio into storage, returning the artifact ref |
 | **Resume/portfolio extraction** | `ResumeExtractor`/`stubResumeExtractor` (`ingest.ts`) | CLI/parser that reads the uploaded file → structured `attributes`/`details` |
 | **Event-engine webhooks** | `archer_event_post` + triggers/cron (`20260620180000_event_engine.sql`) | Set Vault secrets `archer_api_base_url` + `archer_api_secret` per environment; pg_cron fires in **UTC** (13:00 = 13:00 UTC — see the migration note) |
@@ -517,5 +519,5 @@ Each stub is a one-line swap at the call site behind a typed interface (`fixture
 - Only `events` is in the Realtime publication — `notifications`/`candidacies`/`activities` updates are not pushed, so those screens must poll. Likely a gap vs. the intended "live feed."
 - `/hooks/activity-failed` is a stub acknowledgment (TODO: wake the Mechanic) — failed activities are recorded but nothing reacts yet.
 - The profile-spine item tables (`work_experiences`, `skills`, etc.) have no API write path; only the profile-wide `attributes` jsonb is assembled/approved today. Versioned spine items are schema-ready but not yet populated by any endpoint.
-- The API trusts the caller-supplied `user` for read scoping (no JWT verification) — a security gap for any untrusted client deployment.
+- Owner/human-decision routes are now gated behind a **separate admin secret** (`x-archer-admin-secret`, ARC-51) and the API **fails closed in production** if `ARCHER_API_SECRET` is unset (ARC-55). The remaining gap: the API still trusts the caller-supplied `user` for **read scoping** (no JWT verification), so it must stay behind a trusted gateway / not be exposed to untrusted clients directly (runbook §1–§3).
 - pg_cron schedules fire in **UTC**; `0 13 * * 1-5` is 13:00 UTC, not 13:00 SAST as the surrounding "13:00 weekday" comments might imply (the migration flags this explicitly).
