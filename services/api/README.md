@@ -14,6 +14,26 @@ Every route except `/` and `/health` is fail-closed. Send the shared secret as
 `x-archer-secret: $ARCHER_API_SECRET`. With no secret configured, routes are
 denied unless `ARCHER_API_DEV_OPEN=1` (non-production only).
 
+### Owner/admin identity (the human-gate routes)
+
+The routes that resolve a **human decision** — account acceptance and the
+profile/cover-letter version approvals — require a **separate owner credential**,
+not the general service secret, so that holding the service secret alone cannot
+accept accounts or approve any user's versions (ARC-51):
+
+| Route | Gate |
+| --- | --- |
+| `POST /accounts/:userId/decide` | owner |
+| `POST /onboarding/proposals/:proposalId/decide` | owner |
+| `POST /cover-letters/proposals/:proposalId/decide` | owner |
+
+Send the owner secret as `x-archer-admin-secret: $ARCHER_API_ADMIN_SECRET`
+(constant-time compared, distinct from `ARCHER_API_SECRET`). It is fail-closed in
+the same shape as the service secret: when `ARCHER_API_ADMIN_SECRET` is set the
+header must match; with none configured these routes are denied unless
+`ARCHER_API_DEV_OPEN=1` (non-production only). **`ARCHER_API_ADMIN_SECRET` must
+be provisioned in production** or the human gate cannot be resolved.
+
 ## Command triggers — the orchestrating agent's surface
 
 The pipeline stages an external orchestrator (the scheduler/agent) pokes. Each is
