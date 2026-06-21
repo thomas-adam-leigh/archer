@@ -57,6 +57,9 @@ importers:
       '@archer/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@archer/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@hono/node-server':
         specifier: ^2.0.5
         version: 2.0.5(hono@4.12.26)
