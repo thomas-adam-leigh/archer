@@ -9,6 +9,7 @@
       "!**/.next",
       "!**/coverage",
       "!agent",
+      "!apps/mobile",
       "!pnpm-lock.yaml",
       "!packages/db/supabase",
       "!**/*.generated.ts",

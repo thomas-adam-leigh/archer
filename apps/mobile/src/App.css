@@ -1,0 +1,121 @@
+:root {
+  background-color: #000;
+  --color-text: #fff;
+}
+
+text {
+  color: var(--color-text);
+}
+
+.Root {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.Background {
+  position: fixed;
+  background: radial-gradient(
+    71.43% 62.3% at 46.43% 36.43%,
+    rgba(18, 229, 229, 0) 15%,
+    rgba(239, 155, 255, 0.3) 56.35%,
+    #ff6448 100%
+  );
+  box-shadow: 0px 12.93px 28.74px 0px #ffd28db2 inset;
+  border-radius: 50%;
+  width: 200vw;
+  height: 200vw;
+  top: -60vw;
+  left: -14.27vw;
+  transform: rotate(15.25deg);
+}
+
+.Auth {
+  position: relative;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 24px;
+}
+
+.Auth__card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 360px;
+  padding: 24px;
+  border-radius: 20px;
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+.Auth__title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.Auth__subtitle {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 20px;
+}
+
+.Field {
+  height: 48px;
+  font-size: 16px;
+  color: #fff;
+  padding: 0 14px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.Auth__error {
+  font-size: 14px;
+  color: #ffd0c4;
+  margin-bottom: 12px;
+}
+
+.Auth__notice {
+  font-size: 14px;
+  color: #c4ffe0;
+  margin-bottom: 12px;
+}
+
+.Button {
+  height: 50px;
+  margin-top: 4px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #ff6448;
+}
+
+.Button--busy {
+  opacity: 0.6;
+}
+
+.Button__label {
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.Auth__switch {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.Auth__switchText {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+}
