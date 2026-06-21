@@ -9,8 +9,17 @@ import {
   upsertCompany,
   upsertPosting,
 } from "@archer/db";
+import { createMockProvider } from "@archer/llm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type Judge, type MatchProfile, runMatch, stubJudge } from "./commands/match.js";
+import {
+  createLlmJudge,
+  type Judge,
+  type MatchPosting,
+  type MatchProfile,
+  resolveJudge,
+  runMatch,
+  stubJudge,
+} from "./commands/match.js";
 
 // Proves the Matchmaker triage (ARC-9): a `match` Activity processes every `new`
 // candidacy against the user's target titles + negative criteria, setting status +
@@ -89,6 +98,69 @@ describe("stubJudge — deterministic Matchmaker stand-in", () => {
       PROFILE,
     );
     expect(v.decision).toBe("dismissed");
+  });
+});
+
+const POSTING: MatchPosting = {
+  title: "Senior Platform Engineer",
+  companyName: "Acme",
+  location: "Remote",
+  workMode: "remote",
+  description: "platform team",
+};
+
+// The real-model seam (ARC-61): the LLM judge over the @archer/llm provider
+// abstraction. Pure (a mock provider, no DB, no network), so these run in the
+// default CI vitest pass alongside the stubJudge tests.
+describe("createLlmJudge — the real Matchmaker brain over a provider", () => {
+  /** A mock provider whose reply is a canned model output (verbatim or fenced). */
+  const judgeReturning = (raw: string): Judge =>
+    createLlmJudge(createMockProvider({ reply: () => raw }));
+
+  it("parses a clean JSON verdict from the model", async () => {
+    const v = await judgeReturning(
+      '{"decision":"shortlisted","score":92,"reason":"direct title match"}',
+    )(POSTING, PROFILE);
+    expect(v).toEqual({ decision: "shortlisted", score: 92, reason: "direct title match" });
+  });
+
+  it("tolerates ```json fences and surrounding prose", async () => {
+    const v = await judgeReturning(
+      'Here is my call:\n```json\n{"decision":"dismissed","score":5,"reason":"agency"}\n```\n',
+    )(POSTING, PROFILE);
+    expect(v.decision).toBe("dismissed");
+    expect(v.score).toBe(5);
+  });
+
+  it("defaults a missing reason and a non-numeric score (runMatch clamps the score)", async () => {
+    const v = await judgeReturning('{"decision":"alternative_outreach"}')(POSTING, PROFILE);
+    expect(v.decision).toBe("alternative_outreach");
+    expect(v.score).toBe(0);
+    expect(v.reason).toBe("no reason given");
+  });
+
+  it("throws on an invalid decision so a malformed judgment fails the run", async () => {
+    await expect(
+      judgeReturning('{"decision":"maybe","score":50}')(POSTING, PROFILE),
+    ).rejects.toThrow(/invalid decision/);
+  });
+
+  it("throws when the reply carries no JSON object", async () => {
+    await expect(judgeReturning("I think it's a great fit!")(POSTING, PROFILE)).rejects.toThrow(
+      /no JSON object/,
+    );
+  });
+});
+
+describe("resolveJudge — real model when keyed, deterministic stub otherwise", () => {
+  it("falls back to stubJudge when no provider key is configured", () => {
+    expect(resolveJudge({})).toBe(stubJudge);
+  });
+
+  it("returns a real LLM judge when a provider is configured (mock in tests)", () => {
+    const judge = resolveJudge({ LLM_PROVIDER: "mock" });
+    expect(judge).not.toBe(stubJudge);
+    expect(typeof judge).toBe("function");
   });
 });
 
