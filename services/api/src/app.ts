@@ -114,6 +114,22 @@ function ownerAuthorized(c: AuthCtx): boolean {
   return process.env.NODE_ENV !== "production" && process.env.ARCHER_API_DEV_OPEN === "1";
 }
 
+// Fail-closed-in-prod startup invariant (ARC-55). `authorized`/`ownerAuthorized`
+// only fall back to the dev-open bypass when `NODE_ENV !== "production"`, so a
+// production deploy that simply forgot `ARCHER_API_SECRET` would boot and serve a
+// uselessly locked (every request 401) — or, if NODE_ENV were also wrong, an open —
+// API. Assert the high-value service secret is present in production and crash
+// loudly at boot instead, so the misconfiguration is caught before traffic. Pure
+// and env-injectable so it's unit-testable; `index.ts` calls it before `serve`.
+export function assertSecureStartup(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV === "production" && !env.ARCHER_API_SECRET) {
+    throw new Error(
+      "Refusing to start: ARCHER_API_SECRET must be set in production (fail-closed). " +
+        "The Hono API is a server-to-server control plane; see docs/SECURITY-OPS-RUNBOOK.md.",
+    );
+  }
+}
+
 // ── Shared zod schemas ──────────────────────────────────────────────────────
 // A UUID string, and the board slug guard, both surfaced in the OpenAPI doc and
 // enforced as real request validation (a failure becomes a 400 via defaultHook).
