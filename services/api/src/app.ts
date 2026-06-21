@@ -73,7 +73,7 @@ import {
 import { getBrain } from "./brain.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
-import { stubResumeExtractor } from "./ingest.js";
+import { extractResume } from "./ingest.js";
 import { getScribe } from "./scribe.js";
 import { stubSynthesizer } from "./tts.js";
 
@@ -941,12 +941,13 @@ const gCover = mk()
   );
 
 const gIngest = mk()
-  // Resume / portfolio ingest (ARC-29): an uploaded file is extracted into a
-  // PROPOSED profile version — never the live profile. The file→content extraction
-  // is the stubbed CLI boundary (./ingest.ts); this records a proposal_exec activity
-  // with the raw-file storage reference, then submits the extracted content through
-  // the same proposals/apply-executor path onboarding uses. The caller then approves
-  // it via /onboarding/proposals/:id/decide, exactly like a shared-state draft.
+  // Resume / portfolio ingest (ARC-29/63/64): an uploaded file is extracted into a
+  // PROPOSED profile version — never the live profile. Real extraction (./ingest.ts)
+  // downloads the file from the private bucket, pulls its text, and structures it
+  // into attributes + spine via the LLM; this records a proposal_exec activity with
+  // the raw-file storage reference, then submits the structured content (incl. spine)
+  // through the same proposals/apply-executor path onboarding uses. The caller then
+  // approves it via /onboarding/proposals/:id/decide, exactly like a shared-state draft.
   .openapi(
     createRoute({
       method: "post",
@@ -983,14 +984,15 @@ const gIngest = mk()
       // alias) so the response type stays portable across the hc<AppType> CLI client.
       const kind = body.kind === "portfolio" ? "portfolio" : "resume";
       const filename = typeof body.filename === "string" ? body.filename : undefined;
-      // Stubbed CLI boundary: file → structured profile content (deterministic stub).
-      const extraction = stubResumeExtractor({ kind, storageRef, filename });
+      // Real extraction: file → text (ARC-63) → structured draft incl. spine (ARC-64).
+      const extraction = await extractResume({ kind, storageRef, filename });
       const result = await ingestProposedVersion(getDb(), {
         userId: user,
         source: kind,
         storageRef,
         filename,
         attributes: extraction.attributes as Json,
+        spine: extraction.spine,
         details: extraction.details as Json,
       });
       return c.json({ user, kind, status: "proposed", ...result });

@@ -1,64 +1,77 @@
-// Resume / portfolio ingest: the file → structured-profile extraction boundary.
+// Résumé / portfolio ingest: the file → structured-profile-draft boundary.
 //
-// The real extraction is the assumed-working/stubbed CLI boundary (the `archer`
-// CLI parses an uploaded file into structured profile content). This module is
-// the seam: `ResumeExtractor` is the interface the real extractor drops in behind,
-// and `stubResumeExtractor` is a deterministic stand-in so the whole ingest path
-// (route → proposed version → approval) is testable offline with no CLI/file IO.
-//
-// Like agui.ts's runStub, the stub is a pure function: same input → same payload.
-import type { Json } from "@archer/db";
+// This composes the two real halves of ingestion, replacing the old deterministic
+// stub:
+//   1. ARC-63 — download the uploaded file from the private `resumes` bucket and
+//      extract plain text (./ingest/extract.ts).
+//   2. ARC-64 — structure that text into a profile DRAFT (profile-wide `attributes`
+//      + the typed spine) with the real, swappable LLM (./ingest/structure.ts).
+// The result is a PROPOSED profile_version's content; the route persists it through
+// ingestProposedVersion → the existing proposal/apply path (never the live profile).
+// Both halves are mockable at their own seams (an injected downloader / LLM
+// provider), so CI never reaches Supabase Storage or a live model.
+import type { Json, ProfileSpineDraft } from "@archer/db";
+import type { LlmProvider } from "@archer/llm";
+import { extractResumeText, type ResumeDownloader } from "./ingest/extract.js";
+import { structureResume } from "./ingest/structure.js";
 
 /** What kind of upload is being ingested. Both flow through the same path. */
 export type IngestKind = "resume" | "portfolio";
 
-/** The structured content an extractor pulls out of a file. `attributes` becomes
- *  the proposed version's profile-wide snapshot; `details` carries provenance. */
+/** The structured content extracted from an uploaded file. `attributes` becomes the
+ *  proposed version's profile-wide snapshot, `spine` its version-scoped child rows,
+ *  and `details` carries extraction provenance. */
 export interface Extraction {
-  /** Profile-wide attributes (ideal_job, your-story, …) the version snapshots. */
+  /** Profile-wide attributes (full_name, email, links, summary, …) the version snapshots. */
   attributes: Record<string, Json>;
+  /** The reconstructed structured spine (work_experiences, education, skills, …). */
+  spine: ProfileSpineDraft;
   /** Extractor provenance + metadata, stored on the version's `details` jsonb. */
   details: Record<string, Json>;
 }
 
-/** A reference to the already-uploaded raw file (a storage path/URL), not bytes —
- *  bytes never reach this service; the CLI extractor reads them out of storage. */
+/** A reference to the already-uploaded raw file (a storage path), not bytes — the
+ *  bytes are pulled server-side from the private bucket by the extractor (ARC-63). */
 export interface ExtractorInput {
   kind: IngestKind;
   storageRef: string;
   filename?: string | null;
 }
 
-/** The extraction interface. The real CLI extractor implements this; the stub
- *  below stands in until it lands. Keeping it a plain function type makes the
- *  swap a one-line change in the route with no contract churn. */
-export type ResumeExtractor = (input: ExtractorInput) => Extraction;
+export interface ResumeExtractOptions {
+  /** Override the Storage downloader (tests feed fixture bytes; default hits Storage). */
+  download?: ResumeDownloader;
+  /** Override the LLM provider (tests inject a deterministic mock). */
+  llm?: LlmProvider;
+}
 
 /**
- * A deterministic stub extractor. It does NOT read the file — it produces a fixed,
- * input-echoing payload so the ingest orchestration (activity + proposed version +
- * proposal) can be exercised end to end without the CLI or any file IO. Swap in the
- * real CLI extractor behind `ResumeExtractor` later; the rest of the path is unchanged.
+ * Extract an uploaded résumé/portfolio into a structured profile draft: pull plain
+ * text from the file (ARC-63), then structure it into attributes + spine via the
+ * LLM (ARC-64). Both extraction failures (download/parse) and structuring failures
+ * surface as their typed errors; the caller (the ingest run, ARC-65) handles them.
  */
-export const stubResumeExtractor: ResumeExtractor = ({ kind, storageRef, filename }) => {
-  const attributes: Record<string, Json> =
-    kind === "portfolio"
-      ? {
-          your_story: "Portfolio of shipped work spanning product and engineering.",
-          ideal_job: "A role where I own outcomes end to end.",
-        }
-      : {
-          ideal_job: "A role where I ship product end to end.",
-          why: "I do my best work close to users, owning outcomes.",
-          ai_fluency: "Comfortable building with LLMs and agentic tools day to day.",
-        };
+export async function extractResume(
+  input: ExtractorInput,
+  opts: ResumeExtractOptions = {},
+): Promise<Extraction> {
+  const { text, meta } = await extractResumeText(input.storageRef, {
+    download: opts.download,
+    filename: input.filename,
+  });
+  const { attributes, spine, model } = await structureResume(text, { llm: opts.llm });
   return {
     attributes,
+    spine,
     details: {
-      source: kind,
-      storageRef,
-      filename: filename ?? null,
-      extractor: "stub",
+      source: input.kind,
+      storageRef: input.storageRef,
+      filename: input.filename ?? null,
+      extractor: "llm",
+      model,
+      format: meta.format,
+      pages: meta.pages ?? null,
+      bytes: meta.bytes,
     },
   };
-};
+}
