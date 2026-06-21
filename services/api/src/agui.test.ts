@@ -4,6 +4,7 @@ import {
   applyStatePatch,
   assembleCoverLetter,
   classifyRun,
+  coverLetterSubmitRun,
   draftAttributes,
   draftContent,
   interruptsFromEvents,
@@ -439,5 +440,37 @@ describe("scribeRun — shared-state cover-letter draft assembly", () => {
 
   it("draftContent is empty for state with no draft", () => {
     expect(draftContent({})).toBe("");
+  });
+});
+
+describe("coverLetterSubmitRun — submit a draft for approve/edit/reject", () => {
+  const VERSION = "33333333-3333-3333-3333-333333333333";
+  const args = { threadId: THREAD, runId: RUN, versionId: VERSION, content: "Dear team," };
+
+  it("ends on a tool_call interrupt bound to the version", () => {
+    const events = coverLetterSubmitRun(args);
+    expect(types(events)[0]).toBe("run_started");
+    expect(types(events).at(-1)).toBe("run_finished");
+    expect(statusFromEvents(events)).toBe("interrupted");
+    const [it0] = interruptsFromEvents(events);
+    expect(it0.action).toBe("approveCoverLetter");
+    expect(it0.toolCallId).toBe(`${RUN}:tc1`);
+  });
+
+  it("carries a responseSchema supporting approve + full-replacement editedArgs", () => {
+    const outcome = outcomeFromEvents(coverLetterSubmitRun(args)) as {
+      interrupts: Array<{ responseSchema: { required: string[]; properties: object } }>;
+    };
+    const schema = outcome.interrupts[0].responseSchema;
+    expect(schema.required).toContain("approved");
+    expect(schema.properties).toHaveProperty("editedArgs");
+  });
+
+  it("re-presents the letter in shared state awaiting approval", () => {
+    const events = coverLetterSubmitRun(args);
+    const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
+    expect((state as { phase: string }).phase).toBe("awaiting_approval");
+    expect(draftContent(state)).toBe("Dear team,");
+    expect((state as { versionId: string }).versionId).toBe(VERSION);
   });
 });

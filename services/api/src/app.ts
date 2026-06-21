@@ -4,8 +4,10 @@ import {
   addNegativeCriterion,
   addTargetTitle,
   appendEvents,
+  applyCoverLetterVersionProposal,
   applyVersionProposal,
   Constants,
+  type CoverLetterVersionDecision,
   checkReadiness,
   createCoverLetterVersion,
   createInterruptProposal,
@@ -25,6 +27,7 @@ import {
   isAccepted,
   type Json,
   listCandidacies,
+  listCoverLetterVersions,
   listNegativeCriteria,
   listProfileVersions,
   listTargetTitles,
@@ -36,6 +39,7 @@ import {
   setCandidacyStatus,
   submitAccountForReview,
   submitCoverLetterVersion,
+  submitCoverLetterVersionProposal,
   submitVersionProposal,
   type VersionDecision,
 } from "@archer/db";
@@ -43,6 +47,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import {
   classifyRun,
+  coverLetterSubmitRun,
   draftAttributes,
   draftContent,
   interruptsFromEvents,
@@ -427,6 +432,100 @@ const app = new Hono()
       content,
       events,
     });
+  })
+  // ── Cover-letter revision loop (ARC-38) ────────────────────────────────────
+  // Submit the candidacy's proposed draft for review: drive a run that re-presents
+  // the assembled letter and ENDS ON A tool_call INTERRUPT (approve / reject /
+  // approve-with-edits), back that interrupt with a 'cover_letter_version' proposal,
+  // and advance the candidacy drafting → in_review. The owner is resolved from the
+  // thread (not trusted from the caller). The owner then resolves the proposal via
+  // /cover-letters/proposals/:id/decide from any client.
+  .post("/cover-letters/submit", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      threadId?: string;
+      candidacyId?: string;
+    };
+    const threadId = body.threadId;
+    const candidacyId = body.candidacyId;
+    if (!threadId || !UUID_RE.test(threadId)) return c.json({ error: "invalid threadId" }, 400);
+    if (!candidacyId || !UUID_RE.test(candidacyId)) {
+      return c.json({ error: "invalid candidacyId" }, 400);
+    }
+    const db = getDb();
+    const userId = await getThreadOwner(db, threadId);
+    if (!userId) return c.json({ error: "unknown thread" }, 404);
+    const candidacy = await getCandidacyContext(db, candidacyId);
+    if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+    if (candidacy.user_id !== userId) {
+      return c.json({ error: "candidacy not owned by thread owner" }, 403);
+    }
+    if (candidacy.status !== "drafting") {
+      return c.json(
+        { error: `candidacy is not ready to submit (status: ${candidacy.status})` },
+        409,
+      );
+    }
+    // The proposed draft the Scribe left for this candidacy (newest wins).
+    const proposed = (await listCoverLetterVersions(db, candidacyId))
+      .filter((v) => v.status === "proposed")
+      .at(-1);
+    if (!proposed) return c.json({ error: "no proposed cover-letter version to submit" }, 409);
+
+    const run = await createRun(db, { threadId, input: body as unknown as Json });
+    const events = coverLetterSubmitRun({
+      threadId,
+      runId: run.id,
+      versionId: proposed.id,
+      content: proposed.content,
+    });
+    await appendEvents(db, threadId, run.id, events);
+    const status = statusFromEvents(events);
+    await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });
+
+    // Back the interrupt with a cover_letter_version proposal + advance to in_review.
+    const [interrupt] = interruptsFromEvents(events);
+    const proposal = await submitCoverLetterVersionProposal(db, {
+      candidacyId,
+      userId,
+      versionId: proposed.id,
+      title: "Approve your cover letter",
+      interrupt: interrupt
+        ? { threadId, runId: run.id, interruptId: interrupt.id, toolCallId: interrupt.toolCallId }
+        : undefined,
+    });
+    return c.json({
+      threadId,
+      runId: run.id,
+      status,
+      candidacyId,
+      versionId: proposed.id,
+      proposalId: proposal.id,
+      interruptId: interrupt?.id ?? null,
+      events,
+    });
+  })
+  // Decide a submitted cover-letter version proposal: approve (optionally with
+  // edits) makes the version the candidacy's active letter and advances it to
+  // approved; reject returns it to drafting with the feedback captured. Idempotent.
+  .post("/cover-letters/proposals/:proposalId/decide", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const proposalId = c.req.param("proposalId");
+    if (!UUID_RE.test(proposalId)) return c.json({ error: "invalid proposal id" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      action?: string;
+      edits?: { content?: string; label?: string | null; details?: Json };
+      note?: string | null;
+    };
+    if (body.action !== "approve" && body.action !== "reject") {
+      return c.json({ error: "'action' must be approve or reject" }, 400);
+    }
+    const decision: CoverLetterVersionDecision =
+      body.action === "approve"
+        ? { action: "approve", edits: body.edits, note: body.note }
+        : { action: "reject", note: body.note };
+    const result = await applyCoverLetterVersionProposal(getDb(), proposalId, decision);
+    return c.json({ proposalId, ...result });
   })
   // Resume / portfolio ingest (ARC-29): an uploaded file is extracted into a
   // PROPOSED profile version — never the live profile. The file→content extraction

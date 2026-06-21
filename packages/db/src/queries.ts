@@ -1458,3 +1458,226 @@ export async function submitCoverLetterVersion(
   }
   return rows[0];
 }
+
+// ── cover-letter revision loop (proposal-driven approve / edit / reject) ───────
+// The cover-letter analogue of submitVersionProposal/applyVersionProposal (ARC-38).
+// A proposed draft is submitted for review (a kind 'cover_letter_version' proposal,
+// candidacy drafting → in_review); the owner then approves (optionally with edits),
+// which materialises the version as the candidacy's one active letter (the prior
+// active one superseded) and advances in_review → approved, or rejects, which
+// returns the candidacy to drafting with the feedback captured. Provenance — the
+// {candidacyId, userId, versionId} locator and the AG-UI interrupt it backs — rides
+// on the proposal's plan jsonb; the candidacy FK ties it durably to the candidacy.
+
+/** The AG-UI interrupt a submit run emitted, recorded on the proposal so any client
+ *  can resolve the same proposal it surfaces. */
+export interface CoverLetterInterruptRef {
+  threadId: string;
+  runId: string;
+  interruptId: string;
+  toolCallId: string;
+}
+
+export interface CoverLetterProposalInput {
+  candidacyId: string;
+  userId: string;
+  versionId: string;
+  title: string;
+  rationale?: string | null;
+  interrupt?: CoverLetterInterruptRef;
+}
+
+/** Submit a proposed cover-letter version for review: open a kind
+ *  'cover_letter_version' proposal and advance the candidacy drafting → in_review,
+ *  atomically. The draft is flipped to 'proposed' if it is still a draft (so submit
+ *  is robust whether or not the Scribe already proposed it). Returns the proposal id. */
+export async function submitCoverLetterVersionProposal(
+  db: Db,
+  p: CoverLetterProposalInput,
+): Promise<{ id: string }> {
+  return await db.begin(async (tx) => {
+    const plan = {
+      kind: "cover_letter_version",
+      candidacyId: p.candidacyId,
+      userId: p.userId,
+      versionId: p.versionId,
+      ...(p.interrupt ? { interrupt: p.interrupt } : {}),
+    };
+    const rows = await tx<{ id: string }[]>`
+      insert into proposals (kind, title, rationale, plan, status, created_by, candidacy_id)
+      values ('cover_letter_version', ${p.title}, ${p.rationale ?? null},
+              ${tx.json(plan as never)}, 'submitted', 'agent', ${p.candidacyId})
+      returning id`;
+    await tx`
+      update cover_letter_versions set status = 'proposed'
+      where id = ${p.versionId} and candidacy_id = ${p.candidacyId} and status = 'draft'`;
+    await tx`
+      update candidacies set status = 'in_review', status_changed_at = now()
+      where id = ${p.candidacyId} and status = 'drafting'`;
+    return rows[0];
+  });
+}
+
+/** A human's decision on a submitted cover-letter version proposal. `approve`
+ *  (optionally with `edits` = approve-with-edits, a full replacement of the
+ *  letter's fields) makes the version the candidacy's active letter; `reject`
+ *  returns the candidacy to drafting with the feedback captured. */
+export type CoverLetterVersionDecision =
+  | {
+      action: "approve";
+      edits?: { content?: string; label?: string | null; details?: Json };
+      note?: string | null;
+    }
+  | { action: "reject"; note?: string | null };
+
+export interface CoverLetterApplyResult {
+  /** Terminal proposal status: 'completed' | 'rejected' | 'failed' (or the prior
+   *  terminal status on an idempotent replay of an already-decided proposal). */
+  proposalStatus: Enum<"proposal_status">;
+  /** The target version's status after the decision, if it still exists. */
+  versionStatus: Enum<"cover_letter_version_status"> | null;
+  /** The candidacy's status after the decision (approved / drafting / unchanged). */
+  candidacyStatus: Enum<"candidacy_status"> | null;
+  /** Set when the apply failed: the candidacy's active letter was left untouched. */
+  error?: string;
+}
+
+/**
+ * The cover-letter version apply executor. Decides a submitted
+ * 'cover_letter_version' proposal:
+ *  - approve / approve-with-edits: in ONE transaction, optionally apply the edited
+ *    payload, supersede the prior active version, flip the target version to
+ *    'approved', and advance the candidacy in_review → approved. The proposal
+ *    becomes 'completed'. Any failure rolls the transaction back (the active letter
+ *    is untouched) and the proposal is marked 'failed'.
+ *  - reject: mark the proposal 'rejected' and the version 'rejected', and return the
+ *    candidacy in_review → drafting so a fresh draft can be assembled and resubmitted.
+ * Idempotent: only a still-'submitted' proposal is acted on, so a replay is a no-op
+ * that returns the proposal's existing terminal state.
+ */
+export async function applyCoverLetterVersionProposal(
+  db: Db,
+  proposalId: string,
+  decision: CoverLetterVersionDecision,
+): Promise<CoverLetterApplyResult> {
+  if (decision.action === "reject") {
+    const claimed = await db<{ plan: { candidacyId: string; versionId: string } }[]>`
+      update proposals set
+        status = 'rejected', decided_at = now(),
+        decision_note = coalesce(${decision.note ?? null}, decision_note)
+      where id = ${proposalId} and kind = 'cover_letter_version' and status = 'submitted'
+      returning plan`;
+    if (!claimed[0]) return await coverLetterReplayedOutcome(db, proposalId);
+    const { candidacyId, versionId } = claimed[0].plan;
+    await db.begin(async (tx) => {
+      await tx`
+        update cover_letter_versions set status = 'rejected'
+        where id = ${versionId} and candidacy_id = ${candidacyId} and status in ('proposed', 'draft')`;
+      await tx`
+        update candidacies set status = 'drafting', status_changed_at = now()
+        where id = ${candidacyId} and status = 'in_review'`;
+    });
+    return await coverLetterOutcome(db, proposalId, candidacyId, versionId);
+  }
+
+  // approve / approve-with-edits. Claim the proposal to 'in_progress' first
+  // (idempotent on 'submitted'); a concurrent or replayed call sees no row.
+  const claimed = await db<{ plan: { candidacyId: string; versionId: string } }[]>`
+    update proposals set status = 'in_progress', decided_at = now(),
+      decision_note = coalesce(${decision.note ?? null}, decision_note)
+    where id = ${proposalId} and kind = 'cover_letter_version' and status = 'submitted'
+    returning plan`;
+  if (!claimed[0]) return await coverLetterReplayedOutcome(db, proposalId);
+  const { candidacyId, versionId } = claimed[0].plan;
+  const edits = decision.edits;
+
+  try {
+    await db.begin(async (tx) => {
+      if (edits) {
+        await tx`
+          update cover_letter_versions set
+            content = coalesce(${edits.content ?? null}, content),
+            label = coalesce(${edits.label ?? null}, label),
+            details = coalesce(${edits.details != null ? tx.json(edits.details as never) : null}::jsonb, details)
+          where id = ${versionId} and candidacy_id = ${candidacyId}`;
+      }
+      // Supersede the prior active version so the partial unique index never clashes.
+      await tx`
+        update cover_letter_versions set status = 'superseded'
+        where candidacy_id = ${candidacyId} and status = 'approved' and id <> ${versionId}`;
+      // Flip the target version active — only a still-proposable version qualifies.
+      const approved = await tx<{ id: string }[]>`
+        update cover_letter_versions set status = 'approved'
+        where id = ${versionId} and candidacy_id = ${candidacyId} and status in ('proposed', 'draft')
+        returning id`;
+      if (!approved[0]) {
+        throw new Error(`cover-letter version ${versionId} is not in a proposable state`);
+      }
+      await tx`
+        update candidacies set status = 'approved', status_changed_at = now()
+        where id = ${candidacyId} and status = 'in_review'`;
+      await tx`update proposals set status = 'completed' where id = ${proposalId}`;
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db`
+      update proposals set status = 'failed', decision_note = ${message}
+      where id = ${proposalId}`;
+    return {
+      ...(await coverLetterOutcome(db, proposalId, candidacyId, versionId)),
+      error: message,
+    };
+  }
+
+  return await coverLetterOutcome(db, proposalId, candidacyId, versionId);
+}
+
+/** The current status of a cover-letter version, or null if it no longer exists. */
+async function coverLetterVersionStatus(
+  db: Db,
+  versionId: string,
+): Promise<Enum<"cover_letter_version_status"> | null> {
+  const rows = await db<{ status: Enum<"cover_letter_version_status"> }[]>`
+    select status from cover_letter_versions where id = ${versionId}`;
+  return rows[0]?.status ?? null;
+}
+
+/** The proposal/version/candidacy status triple after a decision (read back from
+ *  the proposal's current status, not assumed from the action). */
+async function coverLetterOutcome(
+  db: Db,
+  proposalId: string,
+  candidacyId: string,
+  versionId: string,
+): Promise<CoverLetterApplyResult> {
+  const rows = await db<{ status: Enum<"proposal_status"> }[]>`
+    select status from proposals where id = ${proposalId}`;
+  return {
+    proposalStatus: rows[0]?.status ?? "submitted",
+    versionStatus: await coverLetterVersionStatus(db, versionId),
+    candidacyStatus: (await getCandidacy(db, candidacyId))?.status ?? null,
+  };
+}
+
+/** The outcome of a replay (the proposal was already decided): report its current
+ *  status and the version/candidacy status without mutating anything. */
+async function coverLetterReplayedOutcome(
+  db: Db,
+  proposalId: string,
+): Promise<CoverLetterApplyResult> {
+  const rows = await db<
+    { status: Enum<"proposal_status">; plan: { candidacyId?: string; versionId?: string } }[]
+  >`
+    select status, plan from proposals where id = ${proposalId}`;
+  const proposal = rows[0];
+  if (!proposal) throw new Error(`proposal ${proposalId} not found`);
+  return {
+    proposalStatus: proposal.status,
+    versionStatus: proposal.plan?.versionId
+      ? await coverLetterVersionStatus(db, proposal.plan.versionId)
+      : null,
+    candidacyStatus: proposal.plan?.candidacyId
+      ? ((await getCandidacy(db, proposal.plan.candidacyId))?.status ?? null)
+      : null,
+  };
+}
