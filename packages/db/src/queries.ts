@@ -103,6 +103,38 @@ export async function failActivity(
     where id = ${id}`;
 }
 
+/** An activity row projected for the observability feed (newest first). */
+export interface ActivityListItem {
+  id: string;
+  type: Enum<"activity_type">;
+  status: Enum<"activity_status">;
+  detail: Json | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+/** A user's own activities for the observability read surface (ARC-43), newest
+ *  first, optionally filtered by type/status. RLS own-rows-only (scoped on
+ *  user_id); system-level rows (user_id null, e.g. deploy) are out of scope. */
+export async function listActivities(
+  db: Db,
+  userId: string,
+  opts: { type?: Enum<"activity_type">; status?: Enum<"activity_status">; limit?: number } = {},
+): Promise<ActivityListItem[]> {
+  const limit = opts.limit ?? 50;
+  return await db<ActivityListItem[]>`
+    select id, type, status, detail, error, started_at, finished_at, created_at
+    from activities
+    where user_id = ${userId}
+      and (${opts.type ?? null}::activity_type is null or type = ${opts.type ?? null}::activity_type)
+      and (${opts.status ?? null}::activity_status is null
+           or status = ${opts.status ?? null}::activity_status)
+    order by created_at desc
+    limit ${limit}`;
+}
+
 // ── target titles (the collect search keys) ───────────────────────────────
 export async function listTargetTitles(
   db: Db,
