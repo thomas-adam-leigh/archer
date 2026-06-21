@@ -62,15 +62,23 @@ Linear is the source of truth, so it must never drift from `main`. On every run:
 - **Build only what the issue's acceptance criteria and the Vision/roadmap define.**
   No features, endpoints, tables, or abstractions nobody asked for. When the DoD is
   met, the issue is **done** — do not gold-plate or add "nice to haves."
-- **Honour the stubbed seams — with one exception.** Browser automation (board
-  scrape/apply), **TTS**, and the real agent brain remain deliberately stubbed: never
-  wire in a real provider, credentials, or external calls for those — keep them
-  stub/fixture-driven. **STT is now in scope** (issue ARC-53): build the real
-  ElevenLabs **Supabase Edge Function** (audio → text, audio **never persisted**) and
-  the AG-UI voice-input wiring. The `ELEVENLABS_API_KEY` is provisioned by a human in
-  Supabase secrets, so write the code + tests with the **provider mocked**, and treat
-  the secret provisioning + edge deploy as the human/provisioning step (note it on the
-  issue; don't block the PR on it).
+- **Honour the stubbed seams — with exceptions.** Browser automation (board
+  scrape/apply) and **TTS** remain deliberately stubbed: never wire in a real provider,
+  credentials, or external calls for those — keep them stub/fixture-driven. **Now in
+  scope:**
+  - **STT** (ARC-53): the real ElevenLabs **Supabase Edge Function** (audio → text,
+    audio **never persisted**) + AG-UI voice input.
+  - **The real, swappable LLM** (ARC-59/60/61): a provider abstraction (default
+    **MiniMax M3** via the MiniMax API; swappable; **OpenRouter** BYOK for any model),
+    wired into the **AG-UI run loop** (replacing the deterministic stub brain) and the
+    existing mockable LLM seams (Matchmaker triage, Scribe).
+
+  For both: write code + tests with the **provider mocked** (CI never calls a live
+  model/service). The keys (`ELEVENLABS_API_KEY`, `MINIMAX_API_KEY`, `OPENROUTER_API_KEY`)
+  are **provisioned in Supabase secrets**, so don't block PRs on secrets. **Still out of
+  scope:** the full **Mission Agent** (planning, autonomy-in-action, tool registry,
+  Mechanic self-heal) — that stays `vision_later`; only the LLM *behind the run loop +
+  task seams* is in scope here.
 - **Smallest correct change.** Match existing conventions; touch only what the issue
   needs; no opportunistic refactors of code that already works.
 - **If anything is ambiguous, blocked, or needs a human decision / credential / secret,
@@ -99,8 +107,8 @@ remains, and there is nothing left to break down:
   code to look busy.
 - Make sure the board is clean (statuses synced, no stale duplicates), then end the run
   with exactly: *"build_now scope complete — all milestones Done. Awaiting human for
-  vision_later (UI, real agent brain), the remaining stubbed seams (browser automation,
-  TTS, real provider credentials), and any human-gated provisioning/decisions."*
+  vision_later (UI, the full Mission Agent), the remaining stubbed seams (browser
+  automation, TTS), and any human-gated provisioning/decisions."*
 - Every later run repeats this check and idles the same way until a human changes the
   plan. **Idling safely is the correct outcome — never manufacture work to fill a run.**
 
