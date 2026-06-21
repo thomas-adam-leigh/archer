@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
   type Db,
   type Enums,
@@ -15,7 +14,14 @@ import {
 import type { Command } from "commander";
 import { getAdapter } from "../adapters/index.js";
 import { NotIntegratedError, type ScrapedPosting } from "../adapters/types.js";
-import { CliError, type GlobalOpts, output, requireUser, run } from "../context.js";
+import {
+  CliError,
+  type GlobalOpts,
+  output,
+  readJsonFixture,
+  requireUser,
+  run,
+} from "../context.js";
 import { pushHeartbeat } from "../heartbeat.js";
 
 /** The structured detail a collect run records on its Activity and prints. */
@@ -164,7 +170,7 @@ export function registerCollect(program: Command): void {
 
         const gather = async (): Promise<ScrapedPosting[]> => {
           if (opts.fixture) {
-            return JSON.parse(readFileSync(opts.fixture, "utf8")) as ScrapedPosting[];
+            return readJsonFixture<ScrapedPosting[]>(opts.fixture, "--fixture");
           }
           const adapter = getAdapter(board);
           if (!adapter) {

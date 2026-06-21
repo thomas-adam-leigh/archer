@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
   advanceCandidaciesToCoverLetter,
   companyHasShortlistedCandidacy,
@@ -15,7 +14,7 @@ import {
   upsertContacts,
 } from "@archer/db";
 import type { Command } from "commander";
-import { CliError, type GlobalOpts, output, run } from "../context.js";
+import { CliError, type GlobalOpts, output, readJsonFixture, run } from "../context.js";
 
 /** One person found at a company (phone omitted — the contacts schema omits it). */
 export interface FoundContact {
@@ -146,7 +145,9 @@ export async function runEnrich(
     );
   }
 
-  await setCompanyStatus(db, company.id, "researching");
+  // Open the Activity FIRST, then move the company in-flight INSIDE the try (ARC-58
+  // M4): a throw from startActivity leaves the company un-moved (nothing stranded),
+  // and any later throw lands in the catch that records the failed Activity.
   const activity = await startActivity(db, {
     type: "enrich",
     userId: args.userId ?? null,
@@ -154,6 +155,7 @@ export async function runEnrich(
     detail: { company: company.name },
   });
   try {
+    await setCompanyStatus(db, company.id, "researching");
     const result = await enrich({
       company: {
         id: company.id,
@@ -236,7 +238,7 @@ export function registerEnrich(program: Command): void {
         let enrich: Enricher | undefined;
         if (opts.fixture) {
           const path = opts.fixture;
-          enrich = () => JSON.parse(readFileSync(path, "utf8")) as EnrichmentResult;
+          enrich = () => readJsonFixture<EnrichmentResult>(path, "--fixture");
         }
         const summary = await runEnrich(ctx.db, {
           companyId,
