@@ -1,4 +1,4 @@
-/goal Make continuous, mergeable progress through the Archer **build_now** projects in Linear (team ARC), built in **sequence** — one self-contained issue per run — until **every milestone of every build_now project is Done**, then **STOP and idle safely** (see "When you're out of planned work"). Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
+/goal Make continuous, mergeable progress through the Archer **build_now** work in Linear (team ARC) — currently the **Mobile Onboarding** project (Lynx app `apps/mobile`; see `docs/MOBILE-ONBOARDING.md`) — one self-contained issue per run — until **every milestone of every build_now project is Done**, then **STOP and idle safely** (see "When you're out of planned work"). Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
 
 ---
 
@@ -14,12 +14,16 @@ discipline).
 ## 1. Orient (every run, in order)
 
 1. Open **Linear**, team **Archer** (key `ARC`). Work is organised as
-   **projects → milestones → issues**, built in project **sequence**:
-   *Platform/CI · AG-UI Interaction Substrate · Candidate Profile & Onboarding ·
-   Job Collection & Matching · Company Enrichment · Applications & Cover Letters.*
-   Identify the **current project**: the earliest `build_now` project that still has
-   unfinished milestones. **Never touch the `vision_later` projects** (Clients apps,
-   The Mission Agent) — they are off-limits to this loop.
+   **projects → milestones → issues**. The **current active `build_now` project is
+   "Mobile Onboarding"** — the candidate onboarding flow in the Lynx mobile app
+   (`apps/mobile`), issues **ARC-62→82**. **Read `docs/MOBILE-ONBOARDING.md` first**
+   for the full brief: the journey, what already exists vs the gaps, the milestone/issue
+   map, and how to build/verify the Lynx app. The earlier app/backend projects (AG-UI
+   Substrate, Candidate Profile & Onboarding, Job Collection, Company Enrichment,
+   Applications & Cover Letters) are **Complete**; Platform/CI has only human-gated
+   issues left. Identify the **current project** as the earliest `build_now` project with
+   an unfinished, *unblocked* milestone — that is Mobile Onboarding. **Never touch the one
+   remaining `vision_later` project** (The Mission Agent, ARC-16) — it is off-limits.
 2. Read the current project's **full description and all its milestones**, and **read
    the relevant existing code on `main`** until you genuinely understand what already
    exists and what this project must add. Understanding before issues; issues before
@@ -80,6 +84,10 @@ Linear is the source of truth, so it must never drift from `main`. On every run:
     **MiniMax M3** via the MiniMax API; swappable; **OpenRouter** BYOK for any model),
     wired into the **AG-UI run loop** (replacing the deterministic stub brain) and the
     existing mockable LLM seams (Matchmaker triage, Scribe).
+  - **Real résumé ingestion** (Mobile Onboarding, ARC-63/64): real PDF/DOCX text
+    extraction + LLM structuring into the profile **spine**, replacing
+    `stubResumeExtractor` (`services/api/src/ingest.ts`), wrapped in a streamed AG-UI
+    run. (Browser automation + TTS stay stubbed; résumé *extraction* does not.)
 
   For both: write code + tests with the **provider mocked** (CI never calls a live
   model/service). The keys (`ELEVENLABS_API_KEY`, `MINIMAX_API_KEY`, `OPENROUTER_API_KEY`)
@@ -114,9 +122,10 @@ remains, and there is nothing left to break down:
   **not** invent features/issues/projects, and do **not** refactor or "improve" merged
   code to look busy.
 - Make sure the board is clean (statuses synced, no stale duplicates), then end the run
-  with exactly: *"build_now scope complete — all milestones Done. Awaiting human for
-  vision_later (UI, the full Mission Agent), the remaining stubbed seams (browser
-  automation, TTS), and any human-gated provisioning/decisions."*
+  with exactly: *"build_now scope complete — Mobile Onboarding and all earlier milestones
+  Done. Awaiting human for vision_later (The Mission Agent), the remaining stubbed seams
+  (browser automation, TTS), mobile-app deployment, and any human-gated
+  provisioning/decisions."*
 - Every later run repeats this check and idles the same way until a human changes the
   plan. **Idling safely is the correct outcome — never manufacture work to fill a run.**
 
@@ -130,6 +139,22 @@ remains, and there is nothing left to break down:
   Follow the repo's conventions and gates (`CONTRIBUTING.md`): Conventional Commit
   messages, Biome/Ruff clean, `pnpm typecheck` and `pnpm test` green before you push.
 - Move the Linear issue to **In Progress** when you start and link the branch/PR.
+
+## 3a. Mobile app specifics (`apps/mobile`)
+
+`apps/mobile` is a **Lynx (ReactLynx + Rspeedy)** app, **excluded from the root pnpm
+workspace** and **not covered by root CI**. For any issue that touches it:
+
+- **Verify it standalone before merging** — root `ci-ok` passes *trivially* for a
+  mobile-only PR (CI ignores `apps/mobile`), so this is the real quality gate:
+  `cd apps/mobile && pnpm install --ignore-workspace && pnpm check && pnpm build && pnpm test`.
+- Respect the Lynx runtime: `<view>`/`<text>` (not `<div>`); uncontrolled inputs via
+  `bindinput` + `e.detail.value`; `bindtap`; **no `window`/`localStorage`/DOM** (dual-thread)
+  — use a Lynx-compatible store for the persisted session; auth is GoTrue REST over the
+  global `fetch`; config via `import.meta.env.PUBLIC_*`.
+- **Never commit** `apps/mobile/.env`, `node_modules`, `dist`, or the `ios/` native dir.
+- Backend issues (ARC-62→69, 79) follow the normal migration + CI-green-merge path below.
+  Full detail: `docs/MOBILE-ONBOARDING.md`.
 
 ## 4. Database changes must reach Supabase
 
