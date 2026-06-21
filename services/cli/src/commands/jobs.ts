@@ -1,8 +1,54 @@
-import { type Enums, getCandidacy, listCandidacies, setCandidacyStatus } from "@archer/db";
+import {
+  type Candidacy,
+  type Db,
+  type Enums,
+  getCandidacy,
+  IllegalCandidacyTransitionError,
+  listCandidacies,
+  setCandidacyStatus,
+  transitionCandidacy,
+} from "@archer/db";
 import type { Command } from "commander";
 import { CliError, type GlobalOpts, output, requireUser, run } from "../context.js";
 
 type CStatus = Enums<"candidacy_status">;
+
+/**
+ * Move a candidacy through the status machine for a kanban command (`shortlist` /
+ * `dismiss`), so the CLI honours the same legal-move rules the API's transition route
+ * enforces — a hand-set illegal status can otherwise wedge the pipeline (apply gates on
+ * `approved`, enrich on the shortlist set). Mirrors apply.ts's use of
+ * `transitionCandidacy`; the deliberate raw escape hatch stays `jobs status`. The two
+ * expected failures become clean CliErrors (exit 2): an unknown id, and an illegal move
+ * — the same rejection the API returns 409 for.
+ */
+async function moveCandidacy(
+  db: Db,
+  id: string,
+  to: CStatus,
+  opts: { triageDecision?: Enums<"triage_decision">; reason?: string },
+): Promise<Candidacy> {
+  let c: Candidacy | undefined;
+  try {
+    c = await transitionCandidacy(db, id, to, opts);
+  } catch (err) {
+    if (err instanceof IllegalCandidacyTransitionError) throw new CliError(err.message);
+    throw err;
+  }
+  if (!c) throw new CliError(`unknown candidacy: ${id}`);
+  return c;
+}
+
+/** Shortlist a candidacy (triage decision: shortlisted), through the status machine. */
+export function runShortlist(db: Db, id: string): Promise<Candidacy> {
+  return moveCandidacy(db, id, "shortlisted", { triageDecision: "shortlisted" });
+}
+
+/** Dismiss a candidacy with an optional reason, through the status machine. */
+export function runDismiss(db: Db, id: string, reason?: string): Promise<Candidacy> {
+  return moveCandidacy(db, id, "dismissed", { triageDecision: "dismissed", reason });
+}
+
 const CANDIDACY_STATUSES: readonly string[] = [
   "new",
   "dismissed",
@@ -65,10 +111,7 @@ export function registerJobs(program: Command): void {
     .argument("<id>", "candidacy id")
     .action(async (id: string, _opts, cmd) => {
       await run(cmd.optsWithGlobals() as GlobalOpts, async (ctx) => {
-        const c = await setCandidacyStatus(ctx.db, id, "shortlisted", {
-          triageDecision: "shortlisted",
-        });
-        if (!c) throw new CliError(`unknown candidacy: ${id}`);
+        const c = await runShortlist(ctx.db, id);
         output(ctx, c, (x) => console.log(`${x.id}: ${x.status}`));
       });
     });
@@ -80,11 +123,7 @@ export function registerJobs(program: Command): void {
     .option("--reason <reason>", "why it was dismissed")
     .action(async (id: string, opts: { reason?: string }, cmd) => {
       await run(cmd.optsWithGlobals() as GlobalOpts, async (ctx) => {
-        const c = await setCandidacyStatus(ctx.db, id, "dismissed", {
-          triageDecision: "dismissed",
-          reason: opts.reason,
-        });
-        if (!c) throw new CliError(`unknown candidacy: ${id}`);
+        const c = await runDismiss(ctx.db, id, opts.reason);
         output(ctx, c, (x) =>
           console.log(`${x.id}: ${x.status}${opts.reason ? ` (${opts.reason})` : ""}`),
         );
