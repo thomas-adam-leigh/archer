@@ -1,6 +1,12 @@
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { failActivity, listActivities, startActivity, succeedActivity } from "./queries.js";
+import {
+  failActivity,
+  listActivities,
+  listAllActivities,
+  startActivity,
+  succeedActivity,
+} from "./queries.js";
 
 // Integration test for the activities observability read surface (ARC-43):
 //   listActivities() over public.activities (20260619101500_archer_core.sql).
@@ -24,6 +30,8 @@ describe.skipIf(!TEST_DB_URL)("activities read surface", () => {
     // public.users → activities cascade (user_id references users on delete cascade).
     await db`delete from public.users where id in (${userA}, ${userB})`;
     await db`delete from auth.users where id in (${userA}, ${userB})`;
+    // The system-level deploy row has no user to cascade from — clear our marker.
+    await db`delete from public.activities where user_id is null and type = 'deploy' and detail->>'who' = 'deploy'`;
   };
 
   beforeAll(async () => {
@@ -44,6 +52,15 @@ describe.skipIf(!TEST_DB_URL)("activities read surface", () => {
 
     // Ben has one run: an in-progress collect that must never surface for Ada.
     await startActivity(sql, { type: "collect", userId: userB, detail: { who: "B-collect" } });
+
+    // A system-level deploy run (user_id null) — written by the deploy rail, owned
+    // by no user; only the operator surface (listAllActivities) may see it.
+    const deploy = await startActivity(sql, {
+      type: "deploy",
+      userId: null,
+      detail: { who: "deploy" },
+    });
+    await succeedActivity(sql, deploy.id, { who: "deploy" });
   });
 
   afterAll(async () => {
@@ -89,5 +106,33 @@ describe.skipIf(!TEST_DB_URL)("activities read surface", () => {
   it("honours the limit", async () => {
     const one = await listActivities(sql, userA, { limit: 1 });
     expect(one).toHaveLength(1);
+  });
+
+  // ── operator/admin read surface (ARC-44) ──────────────────────────────────
+  it("operator sees the system-level deploy row a normal user never does", async () => {
+    const all = await listAllActivities(sql);
+    const deploy = all.find((r) => r.type === "deploy");
+    expect(deploy).toBeDefined();
+    expect(deploy?.user_id).toBeNull();
+    expect(deploy?.status).toBe("succeeded");
+
+    // The same deploy row is invisible on every user's own-rows-only feed.
+    const asA = await listActivities(sql, userA);
+    const asB = await listActivities(sql, userB);
+    expect([...asA, ...asB].some((r) => r.type === "deploy")).toBe(false);
+  });
+
+  it("operator sees all users' runs plus the system row", async () => {
+    const all = await listAllActivities(sql);
+    const whos = all
+      .map((r) => (r.detail as { who?: string } | null)?.who)
+      .filter((w): w is string => w !== undefined);
+    expect(whos).toEqual(expect.arrayContaining(["A-collect", "A-apply", "B-collect", "deploy"]));
+  });
+
+  it("operator view filters by type", async () => {
+    const deploys = await listAllActivities(sql, { type: "deploy" });
+    expect(deploys).toHaveLength(1);
+    expect(deploys[0].user_id).toBeNull();
   });
 });

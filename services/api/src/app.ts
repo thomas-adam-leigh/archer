@@ -30,6 +30,7 @@ import {
   isAccepted,
   type Json,
   listActivities,
+  listAllActivities,
   listCandidacies,
   listCoverLetterVersions,
   listNegativeCriteria,
@@ -330,7 +331,8 @@ const gFeed = mk()
   // apply/external_fill/proposal_exec/transcribe) — the observability read surface
   // over the universal Activity primitive, newest first, optionally filtered by
   // type/status. RLS own-rows-only (scoped on user_id); system-level rows (e.g.
-  // `deploy`, user_id null) need an admin access decision and are out of scope here.
+  // `deploy`, user_id null) are deliberately hidden here — the operator surfaces
+  // them via the owner-gated GET /admin/activities below.
   .openapi(
     createRoute({
       method: "get",
@@ -355,6 +357,35 @@ const gFeed = mk()
         status: q.status as never,
       });
       return c.json({ user, activities });
+    },
+  )
+  // Operator/admin activity view (ARC-44): the same observability feed, but across
+  // ALL users *and* system-level rows (user_id null, e.g. `deploy`) that the
+  // per-user /activities surface hides. Owner-gated (ARCHER_API_ADMIN_SECRET, the
+  // ARC-51 identity) — not the general service secret — so a normal caller never
+  // sees system or other users' runs. Each row carries `user_id` so the operator
+  // can attribute it (null = a system run).
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/activities",
+      security: OWNER_SECURITY,
+      request: {
+        query: z.object({
+          type: activityType.optional(),
+          status: activityStatus.optional(),
+        }),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const q = c.req.valid("query");
+      const activities = await listAllActivities(getDb(), {
+        type: q.type as never,
+        status: q.status as never,
+      });
+      return c.json({ activities });
     },
   )
   // DB-only command: move a candidacy through the kanban (in-process, no CLI). The
