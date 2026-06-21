@@ -16,7 +16,10 @@ FROM base AS build
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
-RUN pnpm --filter @archer/api build
+# `...` builds @archer/api AND its workspace deps (@archer/db, @archer/llm) — without
+# it their dist/ is missing in the deployed image and the container crash-loops with
+# ERR_MODULE_NOT_FOUND. (The cli Dockerfile already uses `...`.)
+RUN pnpm --filter @archer/api... build
 # Produce an isolated, prod-only deployment of just this service.
 RUN pnpm --filter @archer/api deploy --prod --legacy /prod/api
 
