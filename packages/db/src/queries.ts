@@ -1125,6 +1125,140 @@ export async function rollbackToVersion(
   });
 }
 
+// ── profile spine writer (shared: résumé ingest + conversational onboarding) ─
+// A version's spine is the structured tier-1 memory (work_experiences, education,
+// skills, certifications, courses, projects). Both the résumé-structuring path
+// (ARC-64) and the conversational onboarding path (Milestone 7) reconstruct a draft
+// and attach its spine rows to a freshly-created version via this writer — they
+// produce the same ProfileSpineDraft shape so the persistence stays in one place.
+
+export interface NewWorkExperience {
+  title: string;
+  organization?: string | null;
+  employmentType?: string | null;
+  location?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  isCurrent?: boolean | null;
+  description?: string | null;
+  details?: Json;
+}
+export interface NewEducation {
+  institution: string;
+  degree?: string | null;
+  fieldOfStudy?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  grade?: string | null;
+  details?: Json;
+}
+export interface NewSkill {
+  name: string;
+  category?: string | null;
+  proficiency?: string | null;
+  yearsExperience?: number | null;
+  details?: Json;
+}
+export interface NewCertification {
+  name: string;
+  issuer?: string | null;
+  issuedOn?: string | null;
+  expiresOn?: string | null;
+  credentialId?: string | null;
+  url?: string | null;
+  details?: Json;
+}
+export interface NewCourse {
+  name: string;
+  provider?: string | null;
+  completedOn?: string | null;
+  url?: string | null;
+  details?: Json;
+}
+export interface NewProject {
+  name: string;
+  role?: string | null;
+  url?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  description?: string | null;
+  details?: Json;
+}
+
+/** A reconstructed profile's structured spine — every list optional, each item one
+ *  spine row. The empty draft (all absent) writes nothing. */
+export interface ProfileSpineDraft {
+  workExperiences?: NewWorkExperience[];
+  education?: NewEducation[];
+  skills?: NewSkill[];
+  certifications?: NewCertification[];
+  courses?: NewCourse[];
+  projects?: NewProject[];
+}
+
+const asJson = (db: Db, v: Json | undefined) => db.json((v ?? {}) as never);
+
+/**
+ * Attach a draft's spine rows to a version (`versionId`), all user-scoped for RLS.
+ * Hand-written per-table inserts (résumés carry few rows); a `null`/absent field
+ * leaves the column at its default. Call on a freshly-created draft version before
+ * it is submitted for approval; idempotency is the caller's (one writer per version).
+ */
+export async function writeProfileSpine(
+  db: Db,
+  userId: string,
+  versionId: string,
+  spine: ProfileSpineDraft,
+): Promise<void> {
+  for (const w of spine.workExperiences ?? []) {
+    await db`
+      insert into work_experiences
+        (user_id, version_id, title, organization, employment_type, location,
+         start_date, end_date, is_current, description, details)
+      values (${userId}, ${versionId}, ${w.title}, ${w.organization ?? null},
+              ${w.employmentType ?? null}, ${w.location ?? null}, ${w.startDate ?? null},
+              ${w.endDate ?? null}, ${w.isCurrent ?? false}, ${w.description ?? null},
+              ${asJson(db, w.details)})`;
+  }
+  for (const e of spine.education ?? []) {
+    await db`
+      insert into education
+        (user_id, version_id, institution, degree, field_of_study, start_date,
+         end_date, grade, details)
+      values (${userId}, ${versionId}, ${e.institution}, ${e.degree ?? null},
+              ${e.fieldOfStudy ?? null}, ${e.startDate ?? null}, ${e.endDate ?? null},
+              ${e.grade ?? null}, ${asJson(db, e.details)})`;
+  }
+  for (const s of spine.skills ?? []) {
+    await db`
+      insert into skills (user_id, version_id, name, category, proficiency, years_experience, details)
+      values (${userId}, ${versionId}, ${s.name}, ${s.category ?? null},
+              ${s.proficiency ?? null}, ${s.yearsExperience ?? null}, ${asJson(db, s.details)})`;
+  }
+  for (const cert of spine.certifications ?? []) {
+    await db`
+      insert into certifications
+        (user_id, version_id, name, issuer, issued_on, expires_on, credential_id, url, details)
+      values (${userId}, ${versionId}, ${cert.name}, ${cert.issuer ?? null},
+              ${cert.issuedOn ?? null}, ${cert.expiresOn ?? null}, ${cert.credentialId ?? null},
+              ${cert.url ?? null}, ${asJson(db, cert.details)})`;
+  }
+  for (const co of spine.courses ?? []) {
+    await db`
+      insert into courses (user_id, version_id, name, provider, completed_on, url, details)
+      values (${userId}, ${versionId}, ${co.name}, ${co.provider ?? null},
+              ${co.completedOn ?? null}, ${co.url ?? null}, ${asJson(db, co.details)})`;
+  }
+  for (const p of spine.projects ?? []) {
+    await db`
+      insert into projects
+        (user_id, version_id, name, role, url, start_date, end_date, description, details)
+      values (${userId}, ${versionId}, ${p.name}, ${p.role ?? null}, ${p.url ?? null},
+              ${p.startDate ?? null}, ${p.endDate ?? null}, ${p.description ?? null},
+              ${asJson(db, p.details)})`;
+  }
+}
+
 // ── resume / portfolio ingest → proposed version ──────────────────────────
 // A resume/portfolio upload must never touch the live profile: its extracted
 // content becomes a PROPOSED version that flows through the exact same proposals
@@ -1141,6 +1275,9 @@ export interface IngestVersionInput {
   filename?: string | null;
   /** The extractor's profile-wide attributes snapshot for the proposed version. */
   attributes: Json;
+  /** The structured spine (work_experiences, education, skills, …) reconstructed
+   *  from the upload, attached version-scoped to the proposed version. */
+  spine?: ProfileSpineDraft;
   /** The extractor's provenance/details for the proposed version. */
   details?: Json;
   /** Proposal title shown to the human reviewer (defaults to a sensible prompt). */
@@ -1183,6 +1320,7 @@ export async function ingestProposedVersion(
     attributes: input.attributes,
     details: input.details,
   });
+  if (input.spine) await writeProfileSpine(db, input.userId, version.id, input.spine);
   const proposal = await submitVersionProposal(db, {
     userId: input.userId,
     versionId: version.id,
