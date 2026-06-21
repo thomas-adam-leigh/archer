@@ -20,7 +20,10 @@
     "@archer/db": "workspace:*",
     "@archer/llm": "workspace:*",
     "@hono/node-server": "^2.0.5",
-    "hono": "^4.12.26"
+    "@hono/zod-openapi": "^1.4.0",
+    "@scalar/hono-api-reference": "^0.11.4",
+    "hono": "^4.12.26",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
