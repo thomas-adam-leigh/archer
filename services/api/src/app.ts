@@ -146,6 +146,21 @@ const app = new Hono()
     }
     return c.json(JSON.parse(res.stdout));
   })
+  // Trigger an apply by invoking the CLI (the apply adapter's browser automation
+  // stays in the CLI process, stubbed for now). Same "API runs the CLI" model as
+  // collect/match/enrich — the run is real, the browser work is faked. The CLI
+  // gates on an `approved` cover letter, so this fires the one irreversible action
+  // only on a candidacy whose letter the owner already approved (ARC-38).
+  .post("/commands/apply/:candidacyId", async (c) => {
+    if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+    const candidacyId = c.req.param("candidacyId");
+    if (!UUID_RE.test(candidacyId)) return c.json({ error: "invalid candidacy id" }, 400);
+    const res = await runCli(["apply", candidacyId, "--json"]);
+    if (res.code !== 0) {
+      return c.json({ error: res.stderr.trim() || "apply failed", code: res.code }, 502);
+    }
+    return c.json(JSON.parse(res.stdout));
+  })
   // Jobs feed (ARC-11): a user's candidacies joined to their posting/company —
   // title, board, company, status, triage decision, match score — optionally
   // filtered by status. RLS own-rows-only (scoped on user_id); the thin clients
