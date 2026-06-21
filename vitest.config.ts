@@ -15,7 +15,12 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["{apps,services,packages}/**/src/**/*.test.ts"],
+    include: [
+      "{apps,services,packages}/**/src/**/*.test.ts",
+      // The STT edge function (ARC-53) lives outside src/ (Supabase deploys the
+      // functions dir); its provider-call core is tested here with fetch mocked.
+      "packages/db/supabase/functions/**/*.test.ts",
+    ],
     passWithNoTests: true,
   },
 });
