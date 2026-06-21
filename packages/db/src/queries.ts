@@ -1453,6 +1453,103 @@ export async function checkReadiness(db: Db, userId: string): Promise<Readiness>
   return readinessFromCounts(titles, criteria, live);
 }
 
+// ── onboarding progress (the resumable step the mobile router restores) ─────
+/** Where to resume the onboarding flow on launch. Monotonic:
+ *  intro → processing → review → titles → submitting → done. */
+export type OnboardingStep = "intro" | "processing" | "review" | "titles" | "submitting" | "done";
+
+/** The precise, resumable onboarding state — the booleans the spec's five
+ *  resumability questions key on, plus the derived `step`/`completed`. Extends the
+ *  coarse /onboarding/state (live-or-not) with the full step machine the mobile
+ *  router (Milestone 3) + resumability (Milestone 8) restore. */
+export interface OnboardingProgress {
+  /** Any profile version exists — résumé ingestion / conversation has started. */
+  hasProfileData: boolean;
+  /** A draft has been generated and submitted (a proposed-or-approved version). */
+  draftGenerated: boolean;
+  /** The profile draft has been approved (a live version exists). */
+  draftApproved: boolean;
+  /** At least one target title has been captured. */
+  titlesGenerated: boolean;
+  /** An active target-title set has been approved. */
+  titlesApproved: boolean;
+  /** At least one negative criterion (deal-breaker) has been captured. */
+  negativeCriteriaCaptured: boolean;
+  /** The account has left onboarding — submitted for the Acceptance Gate (or
+   *  decided since): the user is on home, not in the onboarding wizard. */
+  completed: boolean;
+  step: OnboardingStep;
+}
+
+export interface OnboardingFlags {
+  hasProfileData: boolean;
+  draftGenerated: boolean;
+  draftApproved: boolean;
+  titlesGenerated: boolean;
+  titlesApproved: boolean;
+  negativeCriteriaCaptured: boolean;
+  /** The account row exists with a status other than 'onboarding'. */
+  accountSubmitted: boolean;
+}
+
+/** Pure: fold the substrate flags into the resumable step + completed flag. The
+ *  step machine is monotonic — each stage gates on the prior one being done. */
+export function onboardingProgressFrom(flags: OnboardingFlags): OnboardingProgress {
+  const {
+    hasProfileData,
+    draftGenerated,
+    draftApproved,
+    titlesGenerated,
+    titlesApproved,
+    negativeCriteriaCaptured,
+    accountSubmitted,
+  } = flags;
+  const step: OnboardingStep = accountSubmitted
+    ? "done"
+    : draftApproved && titlesApproved && negativeCriteriaCaptured
+      ? "submitting"
+      : draftApproved
+        ? "titles"
+        : draftGenerated
+          ? "review"
+          : hasProfileData
+            ? "processing"
+            : "intro";
+  return {
+    hasProfileData,
+    draftGenerated,
+    draftApproved,
+    titlesGenerated,
+    titlesApproved,
+    negativeCriteriaCaptured,
+    completed: accountSubmitted,
+    step,
+  };
+}
+
+/** The resumable onboarding step for the mobile router (ARC-66). A pure read over
+ *  profile_versions + target_titles + negative_criteria + accounts: gathers the
+ *  stage flags in one round trip and folds them into the step machine. */
+export async function getOnboardingProgress(db: Db, userId: string): Promise<OnboardingProgress> {
+  const rows = await db<(OnboardingFlags & { negativeCriteriaCaptured: boolean })[]>`
+    select
+      exists (select 1 from profile_versions where user_id = ${userId})
+        as "hasProfileData",
+      exists (select 1 from profile_versions where user_id = ${userId}
+              and status in ('proposed', 'approved')) as "draftGenerated",
+      exists (select 1 from profile_versions where user_id = ${userId}
+              and status = 'approved') as "draftApproved",
+      exists (select 1 from target_titles where user_id = ${userId})
+        as "titlesGenerated",
+      exists (select 1 from target_titles where user_id = ${userId} and is_active)
+        as "titlesApproved",
+      exists (select 1 from negative_criteria where user_id = ${userId})
+        as "negativeCriteriaCaptured",
+      exists (select 1 from accounts where user_id = ${userId}
+              and status <> 'onboarding') as "accountSubmitted"`;
+  return onboardingProgressFrom(rows[0]);
+}
+
 /** Submit the account for review. Provisions the row just-in-time and moves it to
  *  'submitted' from 'onboarding' or 'rejected' (a rejected user may resubmit);
  *  idempotent / a no-op for an already submitted/under_review/accepted account. */
