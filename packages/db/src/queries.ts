@@ -1707,3 +1707,143 @@ async function coverLetterReplayedOutcome(
       : null,
   };
 }
+
+// ── external application forms: the off-board redirect record (ARC-41) ──────
+// When the apply adapter reports a `redirect`, the application must be completed
+// on an external site. One row per redirect (see
+// 20260620210000_external_application_forms.sql) carries the URL and walks
+// pending → in_progress → completed | failed as the external-fill agent works it.
+export type ExternalApplicationForm = Row<"external_application_forms">;
+export type ExternalFormStatus = Enum<"external_form_status">;
+
+export interface NewExternalApplicationForm {
+  candidacyId: string;
+  userId: string;
+  url: string;
+  /** The approved letter the form is filled from (provenance). */
+  coverLetterVersionId?: string | null;
+  detail?: Json;
+}
+
+/** Insert a `pending` external application form for a redirected application. */
+export async function createExternalApplicationForm(
+  db: Db,
+  f: NewExternalApplicationForm,
+): Promise<ExternalApplicationForm> {
+  const rows = await db<ExternalApplicationForm[]>`
+    insert into external_application_forms (candidacy_id, user_id, cover_letter_version_id, url, detail)
+    values (${f.candidacyId}, ${f.userId}, ${f.coverLetterVersionId ?? null}, ${f.url},
+            ${db.json((f.detail ?? {}) as never)})
+    returning *`;
+  return rows[0];
+}
+
+/** Read one external application form by id (undefined if it does not exist). */
+export async function getExternalApplicationForm(
+  db: Db,
+  id: string,
+): Promise<ExternalApplicationForm | undefined> {
+  const rows = await db<ExternalApplicationForm[]>`
+    select * from external_application_forms where id = ${id}`;
+  return rows[0];
+}
+
+/** The candidacy's one OPEN (pending/in_progress) external form, newest first —
+ *  what the external-fill Activity picks up. Undefined when none is open. */
+export async function getOpenExternalApplicationForm(
+  db: Db,
+  candidacyId: string,
+): Promise<ExternalApplicationForm | undefined> {
+  const rows = await db<ExternalApplicationForm[]>`
+    select * from external_application_forms
+    where candidacy_id = ${candidacyId} and status in ('pending', 'in_progress')
+    order by created_at desc limit 1`;
+  return rows[0];
+}
+
+/** Advance an external form's status. Stamps started_at on the move to
+ *  in_progress and finished_at on completed|failed; merges detail and sets the
+ *  error (on failure). Mirrors the Activity lifecycle helpers above. */
+export async function setExternalApplicationFormStatus(
+  db: Db,
+  id: string,
+  status: ExternalFormStatus,
+  opts: { detail?: Json; error?: string | null } = {},
+): Promise<void> {
+  await db`
+    update external_application_forms set
+      status = ${status}::external_form_status,
+      detail = detail || ${db.json((opts.detail ?? {}) as never)},
+      error = coalesce(${opts.error ?? null}, error),
+      started_at = case when ${status} = 'in_progress' then now() else started_at end,
+      finished_at = case when ${status} in ('completed', 'failed') then now() else finished_at end
+    where id = ${id}`;
+}
+
+export interface OpenExternalFormInput extends NewExternalApplicationForm {
+  /** The owner-facing proposal title (the agent→owner control channel). */
+  title?: string;
+}
+
+/** Raise an off-board redirect: insert the pending external form, open an
+ *  owner-facing proposal carrying the URL (the durable "interrupt" — the
+ *  agent→owner control channel), and push the owner a notification — all in one
+ *  transaction. Returns the form + proposal ids. The caller then transitions the
+ *  candidacy to external_pending, which webhooks the external-fill path. */
+export async function openExternalApplicationForm(
+  db: Db,
+  f: OpenExternalFormInput,
+): Promise<{ formId: string; proposalId: string }> {
+  return await db.begin(async (tx) => {
+    const [form] = await tx<{ id: string }[]>`
+      insert into external_application_forms (candidacy_id, user_id, cover_letter_version_id, url, detail)
+      values (${f.candidacyId}, ${f.userId}, ${f.coverLetterVersionId ?? null}, ${f.url},
+              ${tx.json((f.detail ?? {}) as never)})
+      returning id`;
+    const plan = {
+      kind: "external_application",
+      candidacyId: f.candidacyId,
+      userId: f.userId,
+      formId: form.id,
+      url: f.url,
+    };
+    const [proposal] = await tx<{ id: string }[]>`
+      insert into proposals (kind, title, rationale, plan, status, created_by, candidacy_id)
+      values ('external_application', ${f.title ?? "Complete your external application"},
+              ${`This role redirected to an external application form: ${f.url}`},
+              ${tx.json(plan as never)}, 'submitted', 'agent', ${f.candidacyId})
+      returning id`;
+    await tx`
+      insert into notifications (user_id, kind, title, body, ref)
+      values (${f.userId}, 'application', 'An external application needs completing',
+              ${`This role redirected off-board — the application form at ${f.url} is being completed.`},
+              ${tx.json({ candidacyId: f.candidacyId, formId: form.id, url: f.url } as never)})`;
+    return { formId: form.id, proposalId: proposal.id };
+  });
+}
+
+/** The enriched company behind a candidacy (via its posting), for the external
+ *  fill surface's company read. Undefined when the candidacy has no company. */
+export async function getCandidacyCompany(
+  db: Db,
+  candidacyId: string,
+): Promise<Company | undefined> {
+  const rows = await db<Company[]>`
+    select co.* from candidacies c
+    join postings p on p.id = c.posting_id
+    join companies co on co.id = p.company_id
+    where c.id = ${candidacyId}`;
+  return rows[0];
+}
+
+export type Project = Row<"projects">;
+
+/** A user's portfolio: the projects on their live (approved) profile version.
+ *  Empty when there is no approved version or it carries no projects. */
+export async function listPortfolioProjects(db: Db, userId: string): Promise<Project[]> {
+  return await db<Project[]>`
+    select pr.* from projects pr
+    join profile_versions v on v.id = pr.version_id
+    where v.user_id = ${userId} and v.status = 'approved'
+    order by pr.created_at asc`;
+}

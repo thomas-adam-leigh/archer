@@ -4,6 +4,7 @@ import {
   type Db,
   type Enums,
   getCandidacy,
+  getOpenExternalApplicationForm,
   insertCandidacy,
   setActiveCoverLetterVersion,
   setCandidacyStatus,
@@ -50,6 +51,10 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
   let sql: Db;
 
   const purge = async (db: Db) => {
+    await db`delete from public.external_application_forms where user_id = ${USER}`;
+    await db`delete from public.notifications where user_id = ${USER}`;
+    await db`delete from public.proposals where candidacy_id in (
+      select id from public.candidacies where user_id = ${USER})`;
     await db`delete from public.activities where user_id = ${USER}`;
     await db`delete from public.candidacies where user_id = ${USER}`;
     await db`delete from public.postings where url like ${`${URL_PREFIX}%`}`;
@@ -142,6 +147,19 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
     expect((act.detail as { redirectUrl?: string }).redirectUrl).toBe(
       "https://apply.example/form/123",
     );
+
+    // ARC-41: the redirect raises the durable external-form record + an owner-facing
+    // proposal carrying the URL + a notification — the hand-off into external-fill.
+    const form = await getOpenExternalApplicationForm(sql, id);
+    expect(form?.status).toBe("pending");
+    expect(form?.url).toBe("https://apply.example/form/123");
+    const [proposal] = await sql<{ kind: string; plan: { url?: string } }[]>`
+      select kind, plan from public.proposals where candidacy_id = ${id} order by created_at desc limit 1`;
+    expect(proposal.kind).toBe("external_application");
+    expect(proposal.plan.url).toBe("https://apply.example/form/123");
+    const [{ n }] = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications where user_id = ${USER} and kind = 'application'`;
+    expect(n).toBe(1);
   });
 
   it("structured failure: application_failed, with a failed Activity + error", async () => {

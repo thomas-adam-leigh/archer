@@ -5,6 +5,7 @@ import {
   failActivity,
   getActiveCoverLetterVersion,
   getCandidacyContext,
+  openExternalApplicationForm,
   setCandidacyStatus,
   startActivity,
   succeedActivity,
@@ -161,6 +162,23 @@ export async function runApply(
 
     const status: Enums<"candidacy_status"> =
       outcome.kind === "submitted" ? "applied" : "external_pending";
+    if (outcome.kind === "redirect") {
+      // Off-board redirect: record the durable external-form row, raise an
+      // owner-facing proposal carrying the URL (the agent→owner control channel),
+      // and push a notification — all before the candidacy enters external_pending,
+      // whose status-change trigger webhooks the external-fill path (ARC-41).
+      await openExternalApplicationForm(db, {
+        candidacyId: candidacy.id,
+        userId: candidacy.user_id,
+        url: outcome.url,
+        coverLetterVersionId: version.id,
+        detail: {
+          board: candidacy.board_slug,
+          role: candidacy.posting_title,
+          company: candidacy.company_name,
+        },
+      });
+    }
     await setCandidacyStatus(db, candidacy.id, status);
     await succeedActivity(db, activity.id, {
       outcome: outcome.kind,

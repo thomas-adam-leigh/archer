@@ -848,12 +848,28 @@ const app = new Hono()
     await removeNegativeCriterion(getDb(), id);
     return c.json({ removed: id });
   })
-  // Webhook: a redirected (external) application form was inserted.
+  // Webhook: a candidacy entered external_pending (the redirect case) — wake the
+  // external-fill agent by invoking the CLI (the Archer MCP reads + the stubbed
+  // browser fill stay in the CLI process). Same "API runs the CLI" model as
+  // collect/match/enrich/apply. The trigger posts the candidacy id as record.id
+  // (20260620180000_event_engine.sql). Defensive: a missing/invalid id is just
+  // acknowledged (no-op), and a CLI failure still returns 202 — this is a fire-on-
+  // state-change webhook, not a request the caller can retry, so it never 5xxs.
   .post("/hooks/external-form", async (c) => {
     if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
     const body = (await c.req.json().catch(() => ({}))) as { record?: { id?: string } };
-    // TODO(M3): wake the external-form-filling agent. For now, acknowledge.
-    return c.json({ received: true, ref: body.record?.id ?? null }, 202);
+    const candidacyId = body.record?.id;
+    if (!candidacyId || !UUID_RE.test(candidacyId)) {
+      return c.json({ received: true, ref: candidacyId ?? null }, 202);
+    }
+    const res = await runCli(["external-fill", candidacyId, "--json"]);
+    if (res.code !== 0) {
+      return c.json(
+        { received: true, ref: candidacyId, error: res.stderr.trim() || "external-fill failed" },
+        202,
+      );
+    }
+    return c.json({ received: true, ref: candidacyId, result: JSON.parse(res.stdout) }, 202);
   })
   // Webhook: an Activity failed -> the self-heal Mechanic should investigate.
   .post("/hooks/activity-failed", async (c) => {
