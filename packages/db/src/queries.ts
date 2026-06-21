@@ -1,6 +1,7 @@
 // Typed data-access layer over the Archer schema. Thin, hand-written queries so
 // the rest of the tool layer never embeds SQL. Grows one helper at a time as the
 // CLI / API need it. All functions take a `Db` from createDb().
+import { assertCandidacyTransition } from "./candidacy-status.js";
 import type { Db } from "./client.js";
 import type { Database, Json } from "./database.types.js";
 
@@ -246,6 +247,27 @@ export async function setCandidacyStatus(
     where id = ${id}
     returning *`;
   return rows[0];
+}
+
+/**
+ * Move a candidacy `to` a new status THROUGH the status machine: load its current
+ * status, assert the move is legal (else throw IllegalCandidacyTransitionError), then
+ * apply it. This is the guarded entry point the apply phase and the kanban-move API
+ * use, so the documented machine (see candidacy-status.ts) is actually enforced —
+ * illegal jumps like new → applied are rejected. Raw setCandidacyStatus stays the
+ * unguarded primitive for seeding + the deliberate `jobs status` escape hatch.
+ * Returns undefined for an unknown candidacy (the caller 404s).
+ */
+export async function transitionCandidacy(
+  db: Db,
+  id: string,
+  to: Enum<"candidacy_status">,
+  opts: { reason?: string; triageDecision?: Enum<"triage_decision">; score?: number } = {},
+): Promise<Candidacy | undefined> {
+  const current = await getCandidacy(db, id);
+  if (!current) return undefined;
+  assertCandidacyTransition(current.status, to);
+  return await setCandidacyStatus(db, id, to, opts);
 }
 
 /** A candidacy joined with the role/company context the Scribe drafts a cover

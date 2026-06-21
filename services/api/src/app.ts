@@ -24,6 +24,7 @@ import {
   getProfile,
   getProfileVersion,
   getThreadOwner,
+  IllegalCandidacyTransitionError,
   ingestProposedVersion,
   ingestVoicenote,
   isAccepted,
@@ -46,6 +47,7 @@ import {
   submitCoverLetterVersionProposal,
   submitVersionProposal,
   succeedActivity,
+  transitionCandidacy,
   type VersionDecision,
 } from "@archer/db";
 import type { Context } from "hono";
@@ -177,7 +179,9 @@ const app = new Hono()
     const jobs = await listCandidacies(getDb(), user, { status: status as never });
     return c.json({ user, jobs });
   })
-  // DB-only command: move a candidacy through the kanban (in-process, no CLI).
+  // DB-only command: move a candidacy through the kanban (in-process, no CLI). The
+  // move goes through the status machine (transitionCandidacy), so an illegal jump
+  // (e.g. new → applied) is rejected 409 rather than silently corrupting the kanban.
   .post("/commands/candidacies/:id/transition", async (c) => {
     if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
     const id = c.req.param("id");
@@ -188,9 +192,16 @@ const app = new Hono()
       return c.json({ error: `'to' must be one of ${CANDIDACY_STATUSES.join(", ")}` }, 400);
     }
     const reason = typeof body.reason === "string" ? body.reason : undefined;
-    const updated = await setCandidacyStatus(getDb(), id, to as never, { reason });
-    if (!updated) return c.json({ error: "unknown candidacy" }, 404);
-    return c.json({ id: updated.id, status: updated.status });
+    try {
+      const updated = await transitionCandidacy(getDb(), id, to as never, { reason });
+      if (!updated) return c.json({ error: "unknown candidacy" }, 404);
+      return c.json({ id: updated.id, status: updated.status });
+    } catch (err) {
+      if (err instanceof IllegalCandidacyTransitionError) {
+        return c.json({ error: err.message, from: err.from, to: err.to }, 409);
+      }
+      throw err;
+    }
   })
   // AG-UI run lifecycle: open a run, drive the stubbed agent, persist its ordered
   // event log, then close the run with its terminal status/outcome. The agent is a

@@ -81,6 +81,12 @@ stateDiagram-v2
     applied --> [*]
 ```
 
+The candidacy machine above is enforced in code: `packages/db/src/candidacy-status.ts`
+is the single source of truth for which moves are legal, and `transitionCandidacy`
+(the apply phase + the kanban-move API) rejects illegal jumps with
+`IllegalCandidacyTransitionError`. Each apply-phase transition also lands one
+notification + one activity-feed event for the live UI.
+
 ### 2.4 Concept names
 
 - **The Acceptance Gate** — the OfferZen-style "request to go live": a ≤24h review where prompts judge depth, sincerity, and humanity, and confirm the two hard requirements (titles + profile completeness). Doubles as a cost/abuse filter.

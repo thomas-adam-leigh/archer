@@ -38,6 +38,7 @@ describe.skipIf(!TEST_DB_URL)("ARC-41 — external-fill orchestration (stubbed)"
 
   const purge = async (db: Db) => {
     await db`delete from public.external_application_forms where user_id = ${USER}`;
+    await db`delete from public.notifications where user_id = ${USER}`;
     await db`delete from public.activities where user_id = ${USER}`;
     await db`delete from public.candidacies where user_id = ${USER}`;
     await db`delete from public.postings where url like ${`${URL_PREFIX}%`}`;
@@ -93,6 +94,11 @@ describe.skipIf(!TEST_DB_URL)("ARC-41 — external-fill orchestration (stubbed)"
         select type, status, error, detail from public.activities where id = ${id}`
     )[0];
 
+  const notificationsFor = async (candidacyId: string) =>
+    await sql<{ title: string; body: string | null }[]>`
+      select title, body from public.notifications
+      where user_id = ${USER} and kind = 'application' and ref->>'candidacyId' = ${candidacyId}`;
+
   beforeAll(async () => {
     sql = createDb({ DATABASE_URL: TEST_DB_URL });
     await purge(sql);
@@ -124,6 +130,11 @@ describe.skipIf(!TEST_DB_URL)("ARC-41 — external-fill orchestration (stubbed)"
     expect((act.detail as { reference?: string }).reference).toBe(
       `stub-external-careerjunction-${candidacyId}`,
     );
+
+    // The external_pending → applied transition lands a notification too.
+    const notes = await notificationsFor(candidacyId);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].title).toBe("Applied to Fill Role done");
   });
 
   it("structured failure: application_failed, form failed with error, Activity failed", async () => {
@@ -140,6 +151,11 @@ describe.skipIf(!TEST_DB_URL)("ARC-41 — external-fill orchestration (stubbed)"
     const act = await activityFor(summary.activityId as string);
     expect(act.status).toBe("failed");
     expect(act.error).toContain("captcha blocked");
+
+    const notes = await notificationsFor(candidacyId);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].title).toContain("failed");
+    expect(notes[0].body).toContain("captcha blocked");
   });
 
   it("an unexpected thrown agent fails the form + Activity, sets application_failed, rethrows", async () => {
