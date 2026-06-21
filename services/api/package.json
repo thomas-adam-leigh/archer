@@ -23,6 +23,8 @@
     "@hono/zod-openapi": "^1.4.0",
     "@scalar/hono-api-reference": "^0.11.4",
     "hono": "^4.12.26",
+    "mammoth": "^1.12.0",
+    "unpdf": "^1.6.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
