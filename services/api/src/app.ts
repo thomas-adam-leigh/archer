@@ -69,6 +69,7 @@ import {
   scribeRun,
   statusFromEvents,
 } from "./agui.js";
+import { getBrain } from "./brain.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 import { stubResumeExtractor } from "./ingest.js";
@@ -311,9 +312,11 @@ const app = new Hono()
       return c.json({ threadId, runId: run.id, status, parentRunId, events });
     }
 
-    // Fresh run.
+    // Fresh run. The conversational reply is real LLM output (brain.ts); the run
+    // loop scaffolding (lifecycle, autonomy-gated tool proposal) stays deterministic.
     const run = await createRun(db, { threadId, input: asJson });
-    const events = runStub({ threadId, runId: run.id, input });
+    const reply = await getBrain()(input);
+    const events = runStub({ threadId, runId: run.id, input, reply });
     await appendEvents(db, threadId, run.id, events);
     const status = statusFromEvents(events);
     // An interrupt outcome durably backs each interrupt with a proposals row.

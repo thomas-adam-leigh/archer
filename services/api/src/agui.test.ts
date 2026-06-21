@@ -132,6 +132,47 @@ describe("runStub — AG-UI run lifecycle (stubbed agent)", () => {
   });
 });
 
+describe("runStub — injected reply text (the real LLM brain, ARC-60)", () => {
+  const REPLY = "Welcome back — where did we leave off?";
+  const contentOf = (events: AgUiEvent[]) =>
+    (events.find((e) => e.type === "text_message_content")?.data as { delta: string }).delta;
+
+  it("streams the injected reply as the assistant's text", () => {
+    const events = runStub({
+      threadId: THREAD,
+      runId: RUN,
+      input: { threadId: THREAD },
+      reply: REPLY,
+    });
+    expect(contentOf(events)).toBe(REPLY);
+  });
+
+  it("re-presents the injected reply in the interrupt messages_snapshot", () => {
+    const events = runStub({
+      threadId: THREAD,
+      runId: RUN,
+      input: { threadId: THREAD, forwardedProps: { outcome: "interrupt" } },
+      reply: REPLY,
+    });
+    const snap = events.find((e) => e.type === "messages_snapshot")?.data as {
+      messages: Array<{ content: string }>;
+    };
+    expect(snap.messages[0].content).toBe(REPLY);
+  });
+
+  it("falls back to the canned greeting when the reply is absent or blank", () => {
+    const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
+    expect(contentOf(success())).toBe(GREETING);
+    const blank = runStub({
+      threadId: THREAD,
+      runId: RUN,
+      input: { threadId: THREAD },
+      reply: "  ",
+    });
+    expect(contentOf(blank)).toBe(GREETING);
+  });
+});
+
 describe("restoreThread — history restore projection", () => {
   const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
 

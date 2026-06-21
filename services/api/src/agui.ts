@@ -1,10 +1,13 @@
-// The AG-UI run lifecycle, driven by a deterministic scripted stub agent.
+// The AG-UI run lifecycle: a pure, deterministic event-log builder whose
+// conversational text is injected by the caller.
 //
-// "The run loop is real, the brain is stubbed." runStub() is a pure function:
-// given a thread/run id and a RunAgentInput, it returns the ordered AG-UI event
-// log the run should emit — RunStarted -> step/text/tool-call/state -> RunFinished
-// (docs/docs/ag-ui/concepts/02-events.md). Keeping it pure (no DB, no IO) makes
-// the ordering contract unit-testable; the route persists what this returns.
+// "The run loop is real." runStub() is a pure function: given a thread/run id and
+// a RunAgentInput, it returns the ordered AG-UI event log the run should emit —
+// RunStarted -> step/text/tool-call/state -> RunFinished
+// (docs/docs/ag-ui/concepts/02-events.md). The assistant's reply text rides in on
+// `StubArgs.reply` — the route fills it with real LLM output (./brain.ts, ARC-60),
+// and it falls back to a canned greeting when absent so the ordering contract stays
+// unit-testable with no DB, no IO, and no live model.
 import type { Enums, Json } from "@archer/db";
 import { type AutonomyPolicy, needsApproval } from "./autonomy.js";
 
@@ -52,6 +55,10 @@ export interface StubArgs {
   policy?: AutonomyPolicy;
   /** Set on a resume run: the decisions the continuation consumes. */
   resolved?: ResolvedInterrupt[];
+  /** The assistant's reply text for this turn. The route injects real LLM output
+   *  here (see ./brain.ts); falls back to the canned GREETING when absent, so the
+   *  run loop stays a pure, deterministic stub for tests. */
+  reply?: string;
 }
 
 const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
@@ -71,13 +78,14 @@ export function runStub(args: StubArgs): AgUiEvent[] {
   if (args.input.resume && args.input.resume.length > 0) return resumeScript(args);
 
   const { threadId, runId, input, parentRunId = null, policy = {} } = args;
+  const greeting = args.reply?.trim() || GREETING;
   const wantInterrupt = input.forwardedProps?.outcome === "interrupt";
   const messageId = `${runId}:m1`;
   const events: AgUiEvent[] = [
     { type: "run_started", data: { threadId, runId, parentRunId } },
     { type: "step_started", data: { stepName: STEP } },
     { type: "text_message_start", data: { messageId, role: "assistant" } },
-    { type: "text_message_content", data: { messageId, delta: GREETING } },
+    { type: "text_message_content", data: { messageId, delta: greeting } },
     { type: "text_message_end", data: { messageId } },
   ];
 
@@ -121,7 +129,7 @@ export function runStub(args: StubArgs): AgUiEvent[] {
   events.push({ type: "state_snapshot", data: { snapshot: { phase: "awaiting_approval" } } });
   events.push({
     type: "messages_snapshot",
-    data: { messages: [{ id: messageId, role: "assistant", content: GREETING }] },
+    data: { messages: [{ id: messageId, role: "assistant", content: greeting }] },
   });
   events.push({ type: "step_finished", data: { stepName: STEP } });
   events.push({
