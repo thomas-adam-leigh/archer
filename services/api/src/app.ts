@@ -73,6 +73,7 @@ import { getBrain } from "./brain.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 import { stubResumeExtractor } from "./ingest.js";
+import { getScribe } from "./scribe.js";
 import { stubSynthesizer } from "./tts.js";
 
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
@@ -677,15 +678,15 @@ const gCover = mk()
             .slice(0, 3);
 
       const run = await createRun(db, { threadId, input: body as unknown as Json });
-      const events = scribeRun({
-        threadId,
-        runId: run.id,
-        context: {
-          roleTitle: candidacy.posting_title,
-          companyName: candidacy.company_name,
-          highlights,
-        },
-      });
+      // Draft the letter with the real, swappable LLM (mock in tests, deterministic
+      // assembler when no key); the run loop stays pure (see ./scribe.ts, ./agui.ts).
+      const context = {
+        roleTitle: candidacy.posting_title,
+        companyName: candidacy.company_name,
+        highlights,
+      };
+      const letter = await getScribe()(context);
+      const events = scribeRun({ threadId, runId: run.id, context, content: letter });
       await appendEvents(db, threadId, run.id, events);
       const status = statusFromEvents(events);
       await finishRun(db, run.id, { status, outcome: outcomeFromEvents(events) ?? null });

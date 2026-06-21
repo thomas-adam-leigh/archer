@@ -355,6 +355,10 @@ export interface ScribeArgs {
   parentRunId?: string | null;
   /** The context the Scribe drafts against (role/company/highlights). */
   context: ScribeContext;
+  /** The assembled letter for this run. The route injects real LLM output here
+   *  (see ./scribe.ts); falls back to the deterministic assembleCoverLetter when
+   *  absent, so the run loop stays a pure, testable stub. */
+  content?: string;
 }
 
 /**
@@ -369,8 +373,9 @@ export function scribeRun({
   runId,
   parentRunId = null,
   context,
+  content: injected,
 }: ScribeArgs): AgUiEvent[] {
-  const content = assembleCoverLetter(context);
+  const content = injected ?? assembleCoverLetter(context);
   const open = `${runId}:m1`;
   const close = `${runId}:m2`;
   return [
