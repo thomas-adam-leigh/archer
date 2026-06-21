@@ -23,6 +23,7 @@ export type TablesUpdate<T extends keyof Database["public"]["Tables"]> =
 /** A public enum, e.g. `Enums<"candidacy_status">`. */
 export type Enums<T extends keyof Database["public"]["Enums"]> = Database["public"]["Enums"][T];
 
+export * from "./candidacy-status.js";
 // Runtime: the service-level Postgres client + typed data-access layer.
 export { createDb, type Db, type DbEnv } from "./client.js";
 export * from "./queries.js";

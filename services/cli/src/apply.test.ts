@@ -103,6 +103,13 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
         select type, status, error, detail from public.activities where id = ${id}`
     )[0];
 
+  // Notifications for a candidacy (scoped by ref so the per-USER count is order-
+  // independent across the cases in this describe).
+  const notificationsFor = async (candidacyId: string) =>
+    await sql<{ title: string; body: string | null }[]>`
+      select title, body from public.notifications
+      where user_id = ${USER} and kind = 'application' and ref->>'candidacyId' = ${candidacyId}`;
+
   beforeAll(async () => {
     sql = createDb({ DATABASE_URL: TEST_DB_URL });
     await purge(sql);
@@ -132,6 +139,11 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
     expect(act.type).toBe("apply");
     expect(act.status).toBe("succeeded");
     expect((act.detail as { reference?: string }).reference).toBe(`stub-careerjunction-${id}`);
+
+    // Each apply-phase transition lands a notification + an activity-feed event.
+    const notes = await notificationsFor(id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].title).toBe(`Applied to Apply Role onboard`);
   });
 
   it("off-board redirect: external_pending, with a succeeded Activity carrying the URL", async () => {
@@ -157,9 +169,11 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
       select kind, plan from public.proposals where candidacy_id = ${id} order by created_at desc limit 1`;
     expect(proposal.kind).toBe("external_application");
     expect(proposal.plan.url).toBe("https://apply.example/form/123");
-    const [{ n }] = await sql<{ n: number }[]>`
-      select count(*)::int as n from public.notifications where user_id = ${USER} and kind = 'application'`;
-    expect(n).toBe(1);
+    // The redirect hand-off pushes exactly one application notification (apply itself
+    // does not double-notify on the redirect branch).
+    const notes = await notificationsFor(id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].title).toBe("An external application needs completing");
   });
 
   it("structured failure: application_failed, with a failed Activity + error", async () => {
@@ -174,6 +188,11 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
     const act = await activityFor(summary.activityId as string);
     expect(act.status).toBe("failed");
     expect(act.error).toContain("form fields not found");
+
+    const notes = await notificationsFor(id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].title).toContain("failed");
+    expect(notes[0].body).toContain("form fields not found");
   });
 
   it("an unexpected thrown adapter fails the Activity, sets application_failed, and rethrows", async () => {

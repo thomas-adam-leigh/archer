@@ -1,14 +1,15 @@
 import { readFileSync } from "node:fs";
 import {
+  createNotification,
   type Db,
   type Enums,
   failActivity,
   getCandidacyContext,
   getOpenExternalApplicationForm,
-  setCandidacyStatus,
   setExternalApplicationFormStatus,
   startActivity,
   succeedActivity,
+  transitionCandidacy,
 } from "@archer/db";
 import type { Command } from "commander";
 import { type ArcherMcp, createArcherMcp } from "../archer-mcp.js";
@@ -139,6 +140,7 @@ export async function runExternalFill(
     );
   }
 
+  const owner = args.userId ?? candidacy.user_id;
   await setExternalApplicationFormStatus(db, form.id, "in_progress");
   const activity = await startActivity(db, {
     type: "external_fill",
@@ -174,8 +176,13 @@ export async function runExternalFill(
         error: outcome.reason,
         detail: outcome.detail,
       });
-      await setCandidacyStatus(db, candidacy.id, "application_failed", { reason: outcome.reason });
+      await transitionCandidacy(db, candidacy.id, "application_failed", { reason: outcome.reason });
       await failActivity(db, activity.id, outcome.reason, { ...outcome.detail, url: form.url });
+      await notifyFill(db, owner, candidacy, {
+        title: `External application to ${candidacy.posting_title} failed`,
+        body: outcome.reason,
+        activityId: activity.id,
+      });
       return {
         ...base,
         status: "application_failed",
@@ -192,12 +199,19 @@ export async function runExternalFill(
       status: "completed",
       detail: { reference: outcome.reference ?? null, ...outcome.detail },
     });
-    await setCandidacyStatus(db, candidacy.id, "applied");
+    await transitionCandidacy(db, candidacy.id, "applied");
     await succeedActivity(db, activity.id, {
       outcome: "completed",
       url: form.url,
       reference: outcome.reference ?? null,
       ...outcome.detail,
+    });
+    await notifyFill(db, owner, candidacy, {
+      title: `Applied to ${candidacy.posting_title}`,
+      body: candidacy.company_name
+        ? `Your external application to ${candidacy.company_name} was completed.`
+        : "Your external application was completed.",
+      activityId: activity.id,
     });
     return {
       ...base,
@@ -213,10 +227,32 @@ export async function runExternalFill(
     // CLI exits non-zero. Write the form directly — the MCP call may be what threw.
     const msg = err instanceof Error ? err.message : String(err);
     await setExternalApplicationFormStatus(db, form.id, "failed", { error: msg });
-    await setCandidacyStatus(db, candidacy.id, "application_failed", { reason: msg });
+    await transitionCandidacy(db, candidacy.id, "application_failed", { reason: msg });
     await failActivity(db, activity.id, msg, { url: form.url });
+    await notifyFill(db, owner, candidacy, {
+      title: `External application to ${candidacy.posting_title} failed`,
+      body: msg,
+      activityId: activity.id,
+    });
     throw err;
   }
+}
+
+/** Push the owner a notification for an external-fill transition, scoped to the
+ *  candidacy (kind 'application', matching the apply + redirect hand-offs). */
+async function notifyFill(
+  db: Db,
+  userId: string,
+  candidacy: { id: string },
+  n: { title: string; body: string; activityId: string },
+): Promise<void> {
+  await createNotification(db, {
+    userId,
+    kind: "application",
+    title: n.title,
+    body: n.body,
+    ref: { candidacyId: candidacy.id, activityId: n.activityId },
+  });
 }
 
 interface ExternalFillOpts {

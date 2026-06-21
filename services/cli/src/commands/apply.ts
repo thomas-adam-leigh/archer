@@ -1,14 +1,15 @@
 import { readFileSync } from "node:fs";
 import {
+  createNotification,
   type Db,
   type Enums,
   failActivity,
   getActiveCoverLetterVersion,
   getCandidacyContext,
   openExternalApplicationForm,
-  setCandidacyStatus,
   startActivity,
   succeedActivity,
+  transitionCandidacy,
 } from "@archer/db";
 import type { Command } from "commander";
 import { CliError, type GlobalOpts, output, run } from "../context.js";
@@ -123,7 +124,8 @@ export async function runApply(
     throw new CliError(`no approved cover-letter version to apply for: ${candidacy.posting_title}`);
   }
 
-  await setCandidacyStatus(db, candidacy.id, "applying");
+  const owner = args.userId ?? candidacy.user_id;
+  await transitionCandidacy(db, candidacy.id, "applying");
   const activity = await startActivity(db, {
     type: "apply",
     userId: args.userId ?? candidacy.user_id,
@@ -146,10 +148,15 @@ export async function runApply(
       // A structured, expected failure: the candidacy lands on application_failed
       // and the Activity is marked failed (which wakes the Mechanic). Not thrown —
       // the orchestration itself completed; the application is what didn't.
-      await setCandidacyStatus(db, candidacy.id, "application_failed", { reason: outcome.reason });
+      await transitionCandidacy(db, candidacy.id, "application_failed", { reason: outcome.reason });
       await failActivity(db, activity.id, outcome.reason, {
         ...outcome.detail,
         board: candidacy.board_slug,
+      });
+      await notifyApply(db, owner, candidacy, {
+        title: `Application to ${candidacy.posting_title} failed`,
+        body: outcome.reason,
+        activityId: activity.id,
       });
       return {
         ...base,
@@ -179,7 +186,7 @@ export async function runApply(
         },
       });
     }
-    await setCandidacyStatus(db, candidacy.id, status);
+    await transitionCandidacy(db, candidacy.id, status);
     await succeedActivity(db, activity.id, {
       outcome: outcome.kind,
       board: candidacy.board_slug,
@@ -188,15 +195,50 @@ export async function runApply(
         : { redirectUrl: outcome.url }),
       ...outcome.detail,
     });
+    // On-board success notifies here; the redirect path already pushed the owner its
+    // notification via openExternalApplicationForm — so every apply-phase transition
+    // lands exactly one notification + one activity-feed event.
+    if (outcome.kind === "submitted") {
+      await notifyApply(db, owner, candidacy, {
+        title: `Applied to ${candidacy.posting_title}`,
+        body: candidacy.company_name
+          ? `Your application to ${candidacy.company_name} was submitted.`
+          : "Your application was submitted.",
+        activityId: activity.id,
+      });
+    }
     return { ...base, status, outcome: outcome.kind, skipped: false, activityId: activity.id };
   } catch (err) {
     // An unexpected crash (not a structured failure outcome): fail the Activity and
     // land the candidacy on application_failed, then rethrow so the CLI exits non-zero.
     const msg = err instanceof Error ? err.message : String(err);
-    await setCandidacyStatus(db, candidacy.id, "application_failed", { reason: msg });
+    await transitionCandidacy(db, candidacy.id, "application_failed", { reason: msg });
     await failActivity(db, activity.id, msg, { board: candidacy.board_slug });
+    await notifyApply(db, owner, candidacy, {
+      title: `Application to ${candidacy.posting_title} failed`,
+      body: msg,
+      activityId: activity.id,
+    });
     throw err;
   }
+}
+
+/** Push the owner a notification for an apply-phase transition, scoped to the
+ *  candidacy (kind 'application', matching the redirect hand-off) so the live feed
+ *  and the kanban can correlate it. */
+async function notifyApply(
+  db: Db,
+  userId: string,
+  candidacy: { id: string },
+  n: { title: string; body: string; activityId: string },
+): Promise<void> {
+  await createNotification(db, {
+    userId,
+    kind: "application",
+    title: n.title,
+    body: n.body,
+    ref: { candidacyId: candidacy.id, activityId: n.activityId },
+  });
 }
 
 interface ApplyOpts {
