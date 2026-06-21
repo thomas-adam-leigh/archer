@@ -301,6 +301,95 @@ export function draftAttributes(state: Json): Json {
   return draft?.attributes ?? {};
 }
 
+// ── The résumé-ingest run: streamed 3-phase progress → proposed version ───────
+// Wraps the file→draft ingestion (ARC-63 text extraction + ARC-64 LLM structuring)
+// in an AG-UI run so the client streams live status while Archer works. Unlike the
+// onboarding Guide it never interrupts — there's no mid-run approval; the candidate
+// approves the proposed version later on the review screen (Milestone 5). It emits
+// three ordered progress phases as `state.phase` flips (also carried as assistant
+// text), then finishes on a success outcome carrying the proposed version + proposal
+// ids (also folded into shared state so a reconnecting client can jump straight to
+// review from history). Pure + deterministic like the other runs: the route does the
+// real IO (download/extract/structure/persist), then persists this event log.
+
+const INGEST_STEP = "ingest";
+
+/** The three ordered progress phases an ingest run streams, in emission order —
+ *  the live status the mobile processing screen renders (Milestone 4). */
+export const INGEST_PHASES = [
+  { phase: "reading", message: "Reading your résumé." },
+  { phase: "extracting", message: "Extracting your experience." },
+  { phase: "building", message: "Building your profile." },
+] as const;
+
+export interface ResumeIngestArgs {
+  threadId: string;
+  runId: string;
+  parentRunId?: string | null;
+  /** The proposed version this run produced; rides on the terminal outcome + state. */
+  versionId: string;
+  /** The proposal awaiting the candidate's review; rides on the terminal outcome + state. */
+  proposalId: string;
+}
+
+/**
+ * Produce the ordered event log for one résumé-ingest run. Opens shared state at
+ * the first phase, then walks the three phases (each a `/phase` StateDelta plus an
+ * assistant status line), and finishes successfully — surfacing the proposed
+ * `versionId`/`proposalId` both in the terminal `run_finished` outcome and in
+ * shared state. The final folded shared state is
+ * `{ phase: "complete", versionId, proposalId }`.
+ */
+export function resumeIngestRun({
+  threadId,
+  runId,
+  parentRunId = null,
+  versionId,
+  proposalId,
+}: ResumeIngestArgs): AgUiEvent[] {
+  const [first, ...rest] = INGEST_PHASES;
+  const events: AgUiEvent[] = [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "step_started", data: { stepName: INGEST_STEP } },
+    { type: "state_snapshot", data: { snapshot: { phase: first.phase } } },
+  ];
+  const say = (n: number, text: string) => {
+    const id = `${runId}:m${n}`;
+    events.push({ type: "text_message_start", data: { messageId: id, role: "assistant" } });
+    events.push({ type: "text_message_content", data: { messageId: id, delta: text } });
+    events.push({ type: "text_message_end", data: { messageId: id } });
+  };
+  say(1, first.message);
+  // Each subsequent phase flips `state.phase` (a JSON-Patch delta) then narrates it.
+  rest.forEach((p, i) => {
+    events.push({
+      type: "state_delta",
+      data: { delta: [{ op: "replace", path: "/phase", value: p.phase }] },
+    });
+    say(i + 2, p.message);
+  });
+  events.push({
+    type: "state_delta",
+    data: {
+      delta: [
+        { op: "replace", path: "/phase", value: "complete" },
+        { op: "add", path: "/versionId", value: versionId },
+        { op: "add", path: "/proposalId", value: proposalId },
+      ],
+    },
+  });
+  events.push({ type: "step_finished", data: { stepName: INGEST_STEP } });
+  events.push({
+    type: "run_finished",
+    data: {
+      threadId,
+      runId,
+      outcome: { type: "success", phase: "complete", versionId, proposalId },
+    },
+  });
+  return events;
+}
+
 // ── The Scribe run: cover-letter draft assembly into shared state ─────────────
 // The Scribe drafts the one thing Archer puts in front of an employer in the
 // candidate's name. Like the onboarding Guide, it is a scripted, deterministic

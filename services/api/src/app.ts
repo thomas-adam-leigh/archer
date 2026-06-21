@@ -65,6 +65,7 @@ import {
   type ResolvedInterrupt,
   type RunAgentInput,
   restoreThread,
+  resumeIngestRun,
   runError,
   runStub,
   scribeRun,
@@ -941,13 +942,18 @@ const gCover = mk()
   );
 
 const gIngest = mk()
-  // Resume / portfolio ingest (ARC-29/63/64): an uploaded file is extracted into a
-  // PROPOSED profile version — never the live profile. Real extraction (./ingest.ts)
-  // downloads the file from the private bucket, pulls its text, and structures it
-  // into attributes + spine via the LLM; this records a proposal_exec activity with
-  // the raw-file storage reference, then submits the structured content (incl. spine)
-  // through the same proposals/apply-executor path onboarding uses. The caller then
-  // approves it via /onboarding/proposals/:id/decide, exactly like a shared-state draft.
+  // Resume / portfolio ingest (ARC-29/63/64/65): an uploaded file is extracted into
+  // a PROPOSED profile version — never the live profile — as a STREAMED AG-UI run so
+  // the client renders live status. The run emits three ordered progress phases
+  // ("reading your résumé" → "extracting your experience" → "building your profile")
+  // on the thread's `events` (Realtime-published, replayable via history) and finishes
+  // carrying the proposed `versionId`/`proposalId`. Real extraction (./ingest.ts)
+  // downloads the file from the private bucket, pulls its text, and structures it into
+  // attributes + spine via the LLM; ingestProposedVersion records a proposal_exec
+  // activity and submits the structured content (incl. spine) through the same
+  // proposals/apply-executor path onboarding uses. The owner is resolved from the
+  // thread (not trusted from the caller), like /onboarding/run. The candidate approves
+  // the proposal later on the review screen via /onboarding/proposals/:id/decide.
   .openapi(
     createRoute({
       method: "post",
@@ -956,7 +962,7 @@ const gIngest = mk()
       request: {
         body: jsonBody(
           z.looseObject({
-            userId: Uuid.optional(),
+            threadId: Uuid,
             storageRef: z.string(),
             filename: z.string().optional(),
             kind: z.string().optional(),
@@ -964,38 +970,69 @@ const gIngest = mk()
           "Ingest request",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404], 500: ERR[500] },
     }),
     async (c) => {
       if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as {
-        userId?: string;
+        threadId: string;
         storageRef?: string;
         filename?: string;
         kind?: string;
       };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
       const storageRef = body.storageRef;
       if (typeof storageRef !== "string" || storageRef.length === 0 || storageRef.length > 1024) {
         return c.json({ error: "storageRef must be a non-empty string (≤1024 chars)" }, 400);
       }
+      const db = getDb();
+      const threadId = body.threadId;
+      const user = await getThreadOwner(db, threadId);
+      if (!user) return c.json({ error: "unknown thread" }, 404);
       // Inferred as the literal union "resume" | "portfolio" (not the named IngestKind
       // alias) so the response type stays portable across the hc<AppType> CLI client.
       const kind = body.kind === "portfolio" ? "portfolio" : "resume";
       const filename = typeof body.filename === "string" ? body.filename : undefined;
-      // Real extraction: file → text (ARC-63) → structured draft incl. spine (ARC-64).
-      const extraction = await extractResume({ kind, storageRef, filename });
-      const result = await ingestProposedVersion(getDb(), {
-        userId: user,
-        source: kind,
-        storageRef,
-        filename,
-        attributes: extraction.attributes as Json,
-        spine: extraction.spine,
-        details: extraction.details as Json,
-      });
-      return c.json({ user, kind, status: "proposed", ...result });
+
+      const run = await createRun(db, { threadId, input: body as unknown as Json });
+      try {
+        // Real extraction: file → text (ARC-63) → structured draft incl. spine (ARC-64).
+        const extraction = await extractResume({ kind, storageRef, filename });
+        const result = await ingestProposedVersion(db, {
+          userId: user,
+          source: kind,
+          storageRef,
+          filename,
+          attributes: extraction.attributes as Json,
+          spine: extraction.spine,
+          details: extraction.details as Json,
+        });
+        const events = resumeIngestRun({
+          threadId,
+          runId: run.id,
+          versionId: result.versionId,
+          proposalId: result.proposalId,
+        });
+        await appendEvents(db, threadId, run.id, events);
+        await finishRun(db, run.id, {
+          status: statusFromEvents(events),
+          outcome: outcomeFromEvents(events) ?? null,
+        });
+        return c.json({
+          threadId,
+          runId: run.id,
+          kind,
+          status: "proposed",
+          ...result,
+        });
+      } catch (err) {
+        // Ingestion failed (download/parse/LLM): record it as an auditable, replayable
+        // run_error so the processing screen can surface a retry, then 500.
+        const message = err instanceof Error ? err.message : "résumé ingestion failed";
+        const events = runError(threadId, run.id, message);
+        await appendEvents(db, threadId, run.id, events);
+        await finishRun(db, run.id, { status: "error", error: message });
+        return c.json({ error: message }, 500);
+      }
     },
   )
   // Voicenote ingest (ARC-30, edge STT per ARC-53): the transcript text is
