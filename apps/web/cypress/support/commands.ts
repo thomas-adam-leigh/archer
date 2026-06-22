@@ -21,6 +21,30 @@ function sessionBody(email: string) {
 	};
 }
 
+// The localStorage key + shape the app persists the session under (session.ts).
+// Seeding it makes a guarded route (ARC-96) treat the visitor as already
+// signed-in, the way a returning user is restored on reload.
+export const SESSION_KEY = "archer.session";
+
+/** A persisted session payload (the `Session` shape `session.ts` rehydrates). */
+export function seededSession(email = "candidate@example.com") {
+	return {
+		accessToken: "test-access-token",
+		refreshToken: "test-refresh-token",
+		user: { id: "test-user-id", email },
+	};
+}
+
+Cypress.Commands.add("seedSession", (email = "candidate@example.com") => {
+	// Persist before the app boots so hydration restores it and the guard lets
+	// the visitor through. Pair with `cy.visit("/", { onBeforeLoad })` for the
+	// first load, or call before a later `cy.visit`/`cy.reload`.
+	const session = seededSession(email);
+	cy.window({ log: false }).then((win) => {
+		win.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+	});
+});
+
 // `**/auth/v1` matches GoTrue regardless of the Supabase host the app targets.
 const GOTRUE = "**/auth/v1";
 

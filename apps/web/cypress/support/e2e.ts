@@ -16,6 +16,11 @@ declare global {
 			 * so the router resumes the flow at that stage.
 			 */
 			onboardingState(step: string): Chainable<void>;
+			/**
+			 * Persist a session in `localStorage` so a guarded route treats the
+			 * visitor as signed-in (the way a returning user is restored on reload).
+			 */
+			seedSession(email?: string): Chainable<void>;
 		}
 	}
 }

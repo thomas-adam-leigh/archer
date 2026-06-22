@@ -11,9 +11,17 @@
 // any onboarding screen so it can stay green before the UI exists; this spec is
 // where that assertion now lives.
 
+import { SESSION_KEY, seededSession } from "../support/commands";
+
 describe("Onboarding smoke", () => {
 	it("boots the served app and renders the shell + stubbed intro", () => {
-		cy.visit("/");
+		// The onboarding root is guarded (ARC-96), so seed a session before boot
+		// to land on the intro rather than being redirected to /auth.
+		cy.visit("/", {
+			onBeforeLoad(win) {
+				win.localStorage.setItem(SESSION_KEY, JSON.stringify(seededSession()));
+			},
+		});
 		cy.document().its("readyState").should("eq", "complete");
 
 		// Persistent chrome from the app shell (ARC-91): logo top-left…
