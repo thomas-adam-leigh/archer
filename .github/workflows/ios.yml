@@ -52,9 +52,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: apps/mobile/ios/build/dd
-          key: ios-dd-${{ hashFiles('apps/mobile/ios/Podfile.lock') }}-${{ github.sha }}
+          key: ios-dd-device-${{ hashFiles('apps/mobile/ios/Podfile.lock') }}-${{ github.sha }}
           restore-keys: |
-            ios-dd-${{ hashFiles('apps/mobile/ios/Podfile.lock') }}-
+            ios-dd-device-${{ hashFiles('apps/mobile/ios/Podfile.lock') }}-
 
       - name: Build the Lynx JS bundle
         working-directory: apps/mobile
@@ -76,7 +76,7 @@ jobs:
           xcodegen generate
           pod install
 
-      - name: Build for the iOS Simulator
+      - name: Build for device (unsigned)
         working-directory: apps/mobile/ios
         run: |
           set -o pipefail
@@ -84,9 +84,9 @@ jobs:
             -workspace ArcherMobile.xcworkspace \
             -scheme ArcherMobile \
             -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build/dd \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             -quiet 2>&1 | tee /tmp/xcodebuild.log
 
       - name: Package the .app
@@ -95,14 +95,14 @@ jobs:
         run: |
           APP=$(find build/dd/Build/Products -maxdepth 2 -name "ArcherMobile.app" | head -1)
           echo "Built: $APP"
-          (cd "$(dirname "$APP")" && ditto -c -k --keepParent ArcherMobile.app /tmp/ArcherMobile-sim.zip)
+          (cd "$(dirname "$APP")" && ditto -c -k --keepParent ArcherMobile.app /tmp/ArcherMobile-device.zip)
 
-      - name: Upload the Simulator app
+      - name: Upload the device app (unsigned)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ArcherMobile-simulator-app
-          path: /tmp/ArcherMobile-sim.zip
+          name: ArcherMobile-device-app
+          path: /tmp/ArcherMobile-device.zip
           if-no-files-found: error
 
       - name: Upload build log on failure
