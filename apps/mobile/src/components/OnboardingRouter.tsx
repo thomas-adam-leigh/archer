@@ -7,6 +7,7 @@ import {
 } from '../lib/onboarding.js';
 import type { RevisionStarted } from '../lib/profile.js';
 import type { IngestStarted } from '../lib/resume.js';
+import { CompletionScreen } from './CompletionScreen.js';
 import { ConversationalOnboardingScreen } from './ConversationalOnboardingScreen.js';
 import { HomeScreen } from './HomeScreen.js';
 import { IntroScreen, type OnboardingPath } from './IntroScreen.js';
@@ -19,16 +20,15 @@ import { StageScreen } from './StageScreen.js';
 /** The label + blurb shown for a resumed step whose screen lands in a later
  *  milestone. Replaced by the real screen as each issue ships. */
 const RESUME_COPY: Record<
-  Exclude<OnboardingStep, 'intro' | 'review' | 'titles' | 'done'>,
+  Exclude<
+    OnboardingStep,
+    'intro' | 'review' | 'titles' | 'submitting' | 'done'
+  >,
   { title: string; subtitle: string }
 > = {
   processing: {
     title: 'Building your profile',
     subtitle: 'Archer is still working through your résumé. Hang tight.',
-  },
-  submitting: {
-    title: 'Submitting your profile',
-    subtitle: "You're all set — Archer is sending your profile for review.",
   },
 };
 
@@ -177,6 +177,14 @@ export function OnboardingRouter(props: {
   // re-read progress, which moves them on to submitting/done.
   if (status.step === 'titles') {
     return <JobPreferencesScreen session={session} onApproved={load} />;
+  }
+
+  // The completion step (ARC-81): profile + titles approved and a rule-out captured.
+  // Submit the account for the Acceptance Gate, then re-read progress (→ done) to
+  // land on the status-aware home. Reached after job-preferences approval, and on
+  // relaunch for a user who left off here before the submit landed.
+  if (status.step === 'submitting') {
+    return <CompletionScreen session={session} onComplete={load} />;
   }
 
   const copy = RESUME_COPY[status.step];
