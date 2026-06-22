@@ -1682,6 +1682,39 @@ export async function submitAccountForReview(db: Db, userId: string): Promise<Ac
   return rows[0];
 }
 
+/** The outcome of an onboarding-completion attempt (ARC-69): whether the account
+ *  was submitted, its resulting status, and the readiness verdict (with the unmet
+ *  reasons when refused). */
+export interface CompleteOnboardingResult {
+  /** True when onboarding was complete (ready) and the account moved to submitted. */
+  submitted: boolean;
+  /** The account status after the attempt, or null when no account row exists yet
+   *  (still onboarding — a refused completion never provisions one). */
+  status: AccountStatus | null;
+  readiness: Readiness;
+}
+
+/** Complete onboarding (ARC-69): the candidate's final action. Onboarding is
+ *  "complete" only when the readiness check passes — an approved profile version,
+ *  1–5 active target titles, and ≥1 negative criterion. When ready, submit the
+ *  account for the owner's Acceptance Gate (reusing {@link submitAccountForReview});
+ *  otherwise refuse and report the unmet reasons, leaving the account untouched.
+ *  Background search still starts only on owner acceptance — completion ends at
+ *  'submitted', not at live search, and the owner's {@link decideAccount} accept
+ *  re-checks readiness atomically, so this submit-time gate need not be its own
+ *  transaction (an incomplete onboarding can never slip past the accept gate). */
+export async function completeOnboarding(
+  db: Db,
+  userId: string,
+): Promise<CompleteOnboardingResult> {
+  const readiness = await checkReadiness(db, userId);
+  if (!readiness.ready) {
+    return { submitted: false, status: (await getAccount(db, userId))?.status ?? null, readiness };
+  }
+  const account = await submitAccountForReview(db, userId);
+  return { submitted: true, status: account.status, readiness };
+}
+
 /** An owner's decision on a submitted account:
  *   - 'review': move submitted → under_review (the owner starts the ≤24h review).
  *   - 'accept': REQUIRES the readiness check; moves submitted|under_review →
