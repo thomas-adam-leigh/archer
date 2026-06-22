@@ -1,4 +1,3 @@
-import Lynx
 import UIKit
 
 @main

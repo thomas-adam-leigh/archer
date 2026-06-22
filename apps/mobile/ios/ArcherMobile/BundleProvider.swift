@@ -1,5 +1,4 @@
 import Foundation
-import Lynx
 
 /// Loads the embedded `main.lynx.bundle` from the app's resources. `loadTemplate`
 /// receives the URL passed to `loadTemplate(fromURL:)` — here "main.lynx" — and

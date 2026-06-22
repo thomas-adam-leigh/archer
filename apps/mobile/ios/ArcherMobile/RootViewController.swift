@@ -1,4 +1,3 @@
-import Lynx
 import UIKit
 
 /// Hosts a full-screen LynxView that renders the embedded Archer bundle.
