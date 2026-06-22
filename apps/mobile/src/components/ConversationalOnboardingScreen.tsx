@@ -238,55 +238,55 @@ function Chat(props: {
   );
   const canFinalize = messages.some((m) => m.role === 'user') && !sending;
 
+  // Fixed-height chat: a pinned header, a flexing scroll area for the transcript,
+  // and a composer pinned to the bottom — so the input + actions are ALWAYS on
+  // screen no matter how long the conversation grows (they used to get pushed off
+  // the bottom of a single page-level scroll-view).
   return (
-    <scroll-view className="Resume" scroll-orientation="vertical">
-      <view className="Resume__inner">
-        <view className="Resume__header">
-          <text className="Resume__name">Tell Archer about you</text>
-          <text className="Resume__contact">
-            Chat about your work, skills and goals — type or use your voice.
-            When you're ready, Archer builds your profile.
-          </text>
-        </view>
+    <view className="Chat">
+      <view className="Chat__header">
+        <text className="Resume__name">Tell Archer about you</text>
+        <text className="Resume__contact">
+          Chat about your work, skills and goals — type or use your voice. When
+          you're ready, Archer builds your profile.
+        </text>
+      </view>
 
-        <view className="Chat__thread">
-          {messages.map((m) => (
-            <Bubble key={m.id} from={m.role} content={m.content} />
-          ))}
-          {pending ? <Bubble from="user" content={pending} /> : null}
-          {sending ? (
-            <view className="Chat__bubble Chat__bubble--archer">
-              <text className="Chat__bubbleText">Archer is thinking…</text>
-            </view>
-          ) : null}
-        </view>
+      <scroll-view className="Chat__thread" scroll-orientation="vertical">
+        {messages.map((m) => (
+          <Bubble key={m.id} from={m.role} content={m.content} />
+        ))}
+        {pending ? <Bubble from="user" content={pending} /> : null}
+        {sending ? (
+          <view className="Chat__bubble Chat__bubble--archer">
+            <text className="Chat__bubbleText">Archer is thinking…</text>
+          </view>
+        ) : null}
+      </scroll-view>
 
+      <view className="Chat__composer">
         {error ? <text className="Auth__error">{error}</text> : null}
-
-        <view className="Resume__section">
-          <input
-            className="Field"
-            placeholder="Tell Archer about your experience…"
-            bindinput={(e) => setDraft(e.detail.value)}
-          />
-          <view
-            className={sending ? 'Button Button--busy' : 'Button'}
-            bindtap={() => send(draft)}
-          >
-            <text className="Button__label">Send</text>
-          </view>
-          <view
-            className={
-              sending
-                ? 'Button Button--secondary Button--busy'
-                : 'Button Button--secondary'
-            }
-            bindtap={sendVoice}
-          >
-            <text className="Button__label">🎤 Answer by voice</text>
-          </view>
+        <input
+          className="Field"
+          placeholder="Tell Archer about your experience…"
+          bindinput={(e) => setDraft(e.detail.value)}
+        />
+        <view
+          className={sending ? 'Button Button--busy' : 'Button'}
+          bindtap={() => send(draft)}
+        >
+          <text className="Button__label">Send</text>
         </view>
-
+        <view
+          className={
+            sending
+              ? 'Button Button--secondary Button--busy'
+              : 'Button Button--secondary'
+          }
+          bindtap={sendVoice}
+        >
+          <text className="Button__label">🎤 Answer by voice</text>
+        </view>
         <view
           className={canFinalize ? 'Button' : 'Button Button--busy'}
           bindtap={onFinalize}
@@ -299,6 +299,6 @@ function Chat(props: {
           </view>
         ) : null}
       </view>
-    </scroll-view>
+    </view>
   );
 }
