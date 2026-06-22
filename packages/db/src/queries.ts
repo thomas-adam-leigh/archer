@@ -1291,6 +1291,88 @@ export async function writeProfileSpine(
   }
 }
 
+/**
+ * Read a version's structured spine back into the same {@link ProfileSpineDraft}
+ * shape {@link writeProfileSpine} writes (the symmetric reader). Used to feed a
+ * populated profile to downstream LLM steps — title suggestion (ARC-68) and the
+ * résumé-style review render. Only non-empty lists are present, so the empty draft
+ * (a version with no spine rows) reads back as `{}`. All reads are user-scoped.
+ */
+export async function readProfileSpine(
+  db: Db,
+  userId: string,
+  versionId: string,
+): Promise<ProfileSpineDraft> {
+  const spine: ProfileSpineDraft = {};
+
+  const work = await db<NewWorkExperience[]>`
+    select title, organization, employment_type as "employmentType", location,
+           start_date as "startDate", end_date as "endDate", is_current as "isCurrent",
+           description
+    from work_experiences where user_id = ${userId} and version_id = ${versionId}
+    order by start_date desc nulls last, created_at`;
+  if (work.length > 0) spine.workExperiences = work;
+
+  const education = await db<NewEducation[]>`
+    select institution, degree, field_of_study as "fieldOfStudy",
+           start_date as "startDate", end_date as "endDate", grade
+    from education where user_id = ${userId} and version_id = ${versionId}
+    order by start_date desc nulls last, created_at`;
+  if (education.length > 0) spine.education = education;
+
+  const skills = await db<NewSkill[]>`
+    select name, category, proficiency, years_experience as "yearsExperience"
+    from skills where user_id = ${userId} and version_id = ${versionId}
+    order by created_at`;
+  if (skills.length > 0) spine.skills = skills;
+
+  const certifications = await db<NewCertification[]>`
+    select name, issuer, issued_on as "issuedOn", expires_on as "expiresOn",
+           credential_id as "credentialId", url
+    from certifications where user_id = ${userId} and version_id = ${versionId}
+    order by issued_on desc nulls last, created_at`;
+  if (certifications.length > 0) spine.certifications = certifications;
+
+  const courses = await db<NewCourse[]>`
+    select name, provider, completed_on as "completedOn", url
+    from courses where user_id = ${userId} and version_id = ${versionId}
+    order by completed_on desc nulls last, created_at`;
+  if (courses.length > 0) spine.courses = courses;
+
+  const projects = await db<NewProject[]>`
+    select name, role, url, start_date as "startDate", end_date as "endDate", description
+    from projects where user_id = ${userId} and version_id = ${versionId}
+    order by start_date desc nulls last, created_at`;
+  if (projects.length > 0) spine.projects = projects;
+
+  return spine;
+}
+
+/**
+ * Replace the user's target-title set with `titles`, in order (ARC-68 approve). The
+ * onboarding job-preferences screen collects 1–5 approved titles and commits the
+ * whole set at once, so this hard-replaces in ONE transaction: clear the existing
+ * rows, then insert the new ordered list (insertion order = `created_at` order, the
+ * order {@link listTargetTitles} returns). Idempotent for a given list; titles are
+ * trimmed and empties dropped by the caller. Returns the persisted active set.
+ */
+export async function setTargetTitles(
+  db: Db,
+  userId: string,
+  titles: string[],
+): Promise<TargetTitle[]> {
+  return await db.begin(async (tx) => {
+    await tx`delete from target_titles where user_id = ${userId}`;
+    const out: TargetTitle[] = [];
+    for (const title of titles) {
+      const rows = await tx<TargetTitle[]>`
+        insert into target_titles (user_id, title) values (${userId}, ${title}) returning *`;
+      out.push(rows[0]);
+    }
+    return out;
+  });
+}
+
 // ── resume / portfolio ingest → proposed version ──────────────────────────
 // A resume/portfolio upload must never touch the live profile: its extracted
 // content becomes a PROPOSED version that flows through the exact same proposals

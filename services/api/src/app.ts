@@ -40,11 +40,13 @@ import {
   listTargetTitles,
   loadThreadEvents,
   loadThreadInterrupts,
+  readProfileSpine,
   recordCoverLetterSpokenNote,
   removeNegativeCriterion,
   removeTargetTitle,
   rollbackToVersion,
   setCandidacyStatus,
+  setTargetTitles,
   startActivity,
   submitAccountForReview,
   submitCoverLetterVersion,
@@ -78,6 +80,7 @@ import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 import { extractResume } from "./ingest.js";
 import { getScribe } from "./scribe.js";
+import { suggestTargetTitles } from "./titles.js";
 import { stubSynthesizer } from "./tts.js";
 
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
@@ -723,6 +726,78 @@ const gOnboard = mk()
       const result = await applyVersionProposalAsUser(getDb(), proposalId, user, decision);
       if ("forbidden" in result) return c.json({ error: "forbidden" }, 403);
       return c.json({ proposalId, ...result });
+    },
+  )
+  // Suggest target job titles from the candidate's approved profile (ARC-68): read
+  // the live version (attributes + spine) and ask the real LLM for ~5 ranked titles.
+  // A pure read — re-callable with `feedback`/`current` to re-rank/refine. Approving
+  // the chosen set is the separate write below. Needs a profile, so 409 before one.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/titles/suggest",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({
+            userId: Uuid.optional(),
+            feedback: z.string().optional(),
+            current: z.array(z.string()).optional(),
+          }),
+          "Title-suggestion request",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as {
+        userId?: string;
+        feedback?: string;
+        current?: string[];
+      };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const db = getDb();
+      const live = await getLiveProfileVersion(db, user);
+      if (!live) return c.json({ error: "no approved profile to suggest titles from" }, 409);
+      const spine = await readProfileSpine(db, user, live.id);
+      const { titles, model } = await suggestTargetTitles(
+        { attributes: live.attributes, spine },
+        { feedback: body.feedback, current: body.current },
+      );
+      return c.json({ user, suggestions: titles, model });
+    },
+  )
+  // Approve the chosen/ordered title set (ARC-68): replace target_titles with the
+  // 1–5 titles the candidate accepted, in order. The end of the suggest→re-rank
+  // loop; idempotent for a given list. Separate from the per-title /titles CRUD.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/titles/approve",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({ userId: Uuid.optional(), titles: z.array(z.string()).optional() }),
+          "Approved title set",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as { userId?: string; titles?: string[] };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const cleaned = (body.titles ?? [])
+        .map((t) => (typeof t === "string" ? t.trim() : ""))
+        .filter((t) => t.length > 0 && t.length <= 256);
+      if (cleaned.length < 1 || cleaned.length > 5) {
+        return c.json({ error: "titles must be 1–5 non-empty strings (≤256 chars)" }, 400);
+      }
+      const titles = await setTargetTitles(getDb(), user, cleaned);
+      return c.json({ user, titles });
     },
   );
 

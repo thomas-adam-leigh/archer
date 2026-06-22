@@ -315,6 +315,44 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  // ── Title suggestion + approval (ARC-68) ──────────────────────────────────
+  it("rejects title suggestion with no resolvable user", async () => {
+    delete process.env.ARCHER_USER_ID;
+    const res = await app.request("/onboarding/titles/suggest", post({}));
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies title suggestion with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request("/onboarding/titles/suggest", post({ userId: VALID_UUID }));
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects title approval with an empty title set", async () => {
+    const res = await app.request(
+      "/onboarding/titles/approve",
+      post({ userId: VALID_UUID, titles: ["  "] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects title approval with more than 5 titles", async () => {
+    const res = await app.request(
+      "/onboarding/titles/approve",
+      post({ userId: VALID_UUID, titles: ["a", "b", "c", "d", "e", "f"] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies title approval with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(
+      "/onboarding/titles/approve",
+      post({ userId: VALID_UUID, titles: ["Engineer"] }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   // ── Onboarding progress (ARC-66) ──────────────────────────────────────────
   it("rejects onboarding progress read with an invalid user", async () => {
     const res = await app.request("/onboarding/progress?user=not-a-uuid");
