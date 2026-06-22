@@ -1,5 +1,6 @@
 import { createMockProvider, type LlmMessage } from "@archer/llm";
 import { describe, expect, it } from "vitest";
+import { restoreThread, runStub } from "../agui.js";
 import { ResumeStructureError } from "../ingest/structure.js";
 import { buildTranscript, hasSpine, structureConversation } from "./converse.js";
 
@@ -72,5 +73,56 @@ describe("structureConversation", () => {
     await expect(
       structureConversation("text", { llm: replyWith("I cannot do that.") }),
     ).rejects.toThrow(ResumeStructureError);
+  });
+});
+
+describe("multi-turn onboarding → populated draft (ARC-84)", () => {
+  const THREAD = "33333333-3333-3333-3333-333333333333";
+
+  it("records both sides over /agui/run turns, yielding a non-empty structured draft", async () => {
+    // Two ASKING turns over the run loop: each runStub call records the candidate's
+    // answer + Archer's reply (the bug was that the answers were never recorded, so
+    // the finalize structured ONLY Archer's questions → an empty profile).
+    const turn1 = runStub({
+      threadId: THREAD,
+      runId: "run-1",
+      input: {
+        threadId: THREAD,
+        messages: [{ role: "user", content: "I'm a senior engineer at Acme building APIs." }],
+      },
+      reply: "Great — what are your top skills?",
+    });
+    const turn2 = runStub({
+      threadId: THREAD,
+      runId: "run-2",
+      input: {
+        threadId: THREAD,
+        messages: [
+          { role: "assistant", content: "Great — what are your top skills?" },
+          { role: "user", content: "TypeScript and Go." },
+        ],
+      },
+      reply: "Thanks — that's everything I need.",
+    });
+
+    // The finalize step folds the persisted event log back into the transcript.
+    const transcript = buildTranscript(restoreThread([...turn1, ...turn2]).messages);
+    expect(transcript).toContain("Candidate: I'm a senior engineer at Acme building APIs.");
+    expect(transcript).toContain("Candidate: TypeScript and Go.");
+
+    // Structure that transcript (LLM mocked) — a populated draft, not empty.
+    const llm = createMockProvider({
+      reply: () =>
+        JSON.stringify({
+          attributes: { fullName: "Ada Lovelace", summary: "Senior engineer." },
+          workExperiences: [{ title: "Senior Engineer", organization: "Acme", isCurrent: true }],
+          skills: [{ name: "TypeScript" }, { name: "Go" }],
+        }),
+    });
+    const { attributes, spine } = await structureConversation(transcript, { llm });
+    expect(attributes.full_name).toBe("Ada Lovelace");
+    expect(hasSpine(spine)).toBe(true);
+    expect(spine.workExperiences).toHaveLength(1);
+    expect(spine.skills).toHaveLength(2);
   });
 });

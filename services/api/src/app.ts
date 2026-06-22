@@ -584,6 +584,10 @@ const gFeed = mk()
 
       // Fresh run. The conversational reply is real LLM output (brain.ts); the run
       // loop scaffolding (lifecycle, autonomy-gated tool proposal) stays deterministic.
+      // The candidate's input turn is recorded to the event log too (runStub), so the
+      // restored transcript holds both sides — what /onboarding/guided structures the
+      // profile from (ARC-84). Conversational voice answers reach here as text
+      // (transcribed client-side), so spoken answers count identically.
       const run = await createRun(db, { threadId, input: asJson });
       const reply = await getBrain()(input);
       const events = runStub({ threadId, runId: run.id, input, reply });
