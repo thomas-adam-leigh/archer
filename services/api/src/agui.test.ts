@@ -12,8 +12,10 @@ import {
   interruptsFromEvents,
   onboardingRun,
   outcomeFromEvents,
+  REVISE_PHASES,
   restoreThread,
   resumeIngestRun,
+  reviseDraftRun,
   runError,
   runStub,
   scribeRun,
@@ -529,6 +531,36 @@ describe("resumeIngestRun — streamed 3-phase ingest → proposed version", () 
     const events = resumeIngestRun(args);
     const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
     expect(state).toEqual({ phase: "complete", versionId: "v-1", proposalId: "p-1" });
+  });
+});
+
+describe("reviseDraftRun — streamed feedback revise → revised proposed version", () => {
+  const args = { threadId: THREAD, runId: RUN, versionId: "v-2", proposalId: "p-2" };
+
+  it("streams the revise phases bounded by RunStarted/RunFinished, never interrupting", () => {
+    const events = reviseDraftRun(args);
+    const seq = types(events);
+    expect(seq[0]).toBe("run_started");
+    expect(seq.at(-1)).toBe("run_finished");
+    const lines = events
+      .filter((e) => e.type === "text_message_content")
+      .map((e) => (e.data as { delta: string }).delta);
+    expect(lines).toEqual(REVISE_PHASES.map((p) => p.message));
+    // One snapshot opens shared state; the rest of the phase flips are deltas.
+    expect(seq.filter((t) => t === "state_snapshot")).toHaveLength(1);
+    expect(statusFromEvents(events)).toBe("completed");
+  });
+
+  it("folds to the same completed shape as the ingest run (version + proposal)", () => {
+    const events = reviseDraftRun(args);
+    expect(outcomeFromEvents(events)).toEqual({
+      type: "success",
+      phase: "complete",
+      versionId: "v-2",
+      proposalId: "p-2",
+    });
+    const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
+    expect(state).toEqual({ phase: "complete", versionId: "v-2", proposalId: "p-2" });
   });
 });
 

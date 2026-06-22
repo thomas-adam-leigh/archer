@@ -304,6 +304,31 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects draft revision with an invalid threadId", async () => {
+    const res = await app.request(
+      "/onboarding/revise",
+      post({ threadId: "not-a-uuid", feedback: "add Go to my skills" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects draft revision with empty feedback", async () => {
+    const res = await app.request(
+      "/onboarding/revise",
+      post({ threadId: VALID_UUID, feedback: "" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies draft revision with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(
+      "/onboarding/revise",
+      post({ threadId: VALID_UUID, feedback: "add Go to my skills" }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("rejects voicenote ingest with an invalid threadId", async () => {
     const res = await app.request(
       "/onboarding/voicenote",

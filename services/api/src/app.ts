@@ -24,6 +24,7 @@ import {
   getCoverLetterVersion,
   getLiveProfileVersion,
   getOnboardingProgress,
+  getOpenProfileVersionProposal,
   getProfile,
   getProfileVersion,
   getThreadOwner,
@@ -73,6 +74,7 @@ import {
   type RunAgentInput,
   restoreThread,
   resumeIngestRun,
+  reviseDraftRun,
   runError,
   runStub,
   scribeRun,
@@ -84,6 +86,7 @@ import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 import { extractResume } from "./ingest.js";
 import { buildTranscript, hasSpine, structureConversation } from "./onboarding/converse.js";
+import { reviseDraft } from "./onboarding/revise.js";
 import { getScribe } from "./scribe.js";
 import { suggestTargetTitles } from "./titles.js";
 import { stubSynthesizer } from "./tts.js";
@@ -818,6 +821,126 @@ const gOnboard = mk()
         // Structuring failed (no/invalid model JSON): record an auditable run_error
         // so the client can retry, then 500 — mirroring the résumé-ingest failure path.
         const message = err instanceof Error ? err.message : "guided onboarding failed";
+        const events = runError(threadId, run.id, message);
+        await appendEvents(db, threadId, run.id, events);
+        await finishRun(db, run.id, { status: "error", error: message });
+        return c.json({ error: message }, 500);
+      }
+    },
+  )
+  // Revise the open proposed draft from the candidate's feedback (ARC-85, unblocking
+  // ARC-77's review feedback/redraft loop). Loads the user's open profile-version
+  // proposal + its draft (attributes + spine), re-uses the source it was built from —
+  // the retained résumé text (kept on the version's details by /onboarding/resume) or,
+  // for a conversation draft, the thread transcript — and asks the LLM to AMEND the
+  // draft per the feedback (never blanking it). Persists the result as a NEW proposed
+  // version, rejects the superseded one so exactly one proposal stays open (ARC-86),
+  // and emits a streamed run that converges on the shared review (phase:"complete" +
+  // versionId/proposalId, like /onboarding/resume). Owner resolved from the thread.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/revise",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.object({ threadId: Uuid, feedback: z.string().min(1).max(4000) }),
+          "Revise draft from feedback",
+        ),
+      },
+      responses: {
+        200: ok(),
+        400: ERR[400],
+        401: ERR[401],
+        403: ERR[403],
+        404: ERR[404],
+        500: ERR[500],
+      },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const { threadId, feedback } = c.req.valid("json");
+      const db = getDb();
+      const userId = await getThreadOwner(db, threadId);
+      if (!userId) return c.json({ error: "unknown thread" }, 404);
+      if (!principalOwns(principal, userId)) return c.json({ error: "forbidden" }, 403);
+
+      // The draft to revise is the user's currently-open proposed version.
+      const open = await getOpenProfileVersionProposal(db, userId);
+      if (!open) return c.json({ error: "no open draft to revise" }, 404);
+      const current = await getProfileVersion(db, userId, open.versionId);
+      if (!current) return c.json({ error: "no open draft to revise" }, 404);
+      const currentSpine = await readProfileSpine(db, userId, open.versionId);
+
+      // Re-use the draft's source so the revision keeps facts the feedback doesn't
+      // touch: the retained résumé text if this is a résumé draft, else the thread's
+      // conversation transcript (the résumé thread has no candidate turns to fold).
+      const details = (current.details ?? {}) as { resumeText?: unknown };
+      const resumeText = typeof details.resumeText === "string" ? details.resumeText : undefined;
+      const source =
+        resumeText ??
+        buildTranscript(restoreThread(await loadThreadEvents(db, threadId)).messages) ??
+        undefined;
+
+      const run = await createRun(db, {
+        threadId,
+        input: { threadId, feedback } as unknown as Json,
+      });
+      try {
+        const revised = await reviseDraft({
+          current: {
+            attributes: (current.attributes ?? {}) as Record<string, Json>,
+            spine: currentSpine,
+          },
+          feedback,
+          source: source || undefined,
+        });
+        const version = await createProfileVersion(db, {
+          userId,
+          label: "revised draft",
+          attributes: revised.attributes as Json,
+          // Carry the résumé text forward so a re-revision still has its source.
+          details: resumeText
+            ? { source: "revision", revisedFrom: open.versionId, model: revised.model, resumeText }
+            : { source: "revision", revisedFrom: open.versionId, model: revised.model },
+        });
+        if (hasSpine(revised.spine)) await writeProfileSpine(db, userId, version.id, revised.spine);
+        const proposal = await submitVersionProposal(db, {
+          userId,
+          versionId: version.id,
+          title: "Approve your profile",
+        });
+        // Supersede the prior draft so the review screen sees exactly one open
+        // proposal (ARC-86). Done only after the new one lands, so a structuring
+        // failure leaves the original draft intact for a retry.
+        await applyVersionProposal(db, open.proposalId, {
+          action: "reject",
+          note: "superseded by your revision",
+        });
+        const events = reviseDraftRun({
+          threadId,
+          runId: run.id,
+          versionId: version.id,
+          proposalId: proposal.id,
+        });
+        await appendEvents(db, threadId, run.id, events);
+        await finishRun(db, run.id, {
+          status: statusFromEvents(events),
+          outcome: outcomeFromEvents(events) ?? null,
+        });
+        return c.json({
+          threadId,
+          runId: run.id,
+          status: "proposed",
+          versionId: version.id,
+          proposalId: proposal.id,
+          attributes: revised.attributes,
+        } as Record<string, unknown>);
+      } catch (err) {
+        // Revision failed (no/invalid model JSON): record an auditable run_error so
+        // the client can retry, then 500 — mirroring the résumé-ingest failure path.
+        const message = err instanceof Error ? err.message : "draft revision failed";
         const events = runError(threadId, run.id, message);
         await appendEvents(db, threadId, run.id, events);
         await finishRun(db, run.id, { status: "error", error: message });
