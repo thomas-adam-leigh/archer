@@ -6,6 +6,7 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { AppShell } from "#/components/app-shell.tsx";
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import appCss from "../styles.css?url";
 
@@ -24,7 +25,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 				content: "width=device-width, initial-scale=1",
 			},
 			{
-				title: "TanStack Start Starter",
+				title: "Archer",
 			},
 		],
 		links: [
@@ -44,7 +45,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<HeadContent />
 			</head>
 			<body>
-				{children}
+				{/* step wiring (route-driven progress) lands in ARC-99 */}
+				<AppShell step={1}>{children}</AppShell>
 				<TanStackDevtools
 					config={{
 						position: "bottom-right",
