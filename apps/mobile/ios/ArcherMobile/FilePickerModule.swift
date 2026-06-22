@@ -26,6 +26,11 @@ public final class FilePickerModule: NSObject, LynxModule {
 
   public override init() { super.init() }
 
+  // LynxModule declares init / initWithParam: — Swift treats a protocol initializer as
+  // required even though it's @optional in Obj-C. We register without a param, so this
+  // just forwards to the default init.
+  @objc public init(param: Any) { super.init() }
+
   @objc public func pickFile(_ callback: @escaping LynxCallbackBlock) {
     DispatchQueue.main.async {
       guard let presenter = FilePickerModule.topViewController() else {

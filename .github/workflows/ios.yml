@@ -46,6 +46,16 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/mobile/pnpm-lock.yaml
 
+      # Cache the compiled Lynx engine (DerivedData) so only changed app code recompiles.
+      # First run is cold (~30 min); subsequent runs with the same Podfile.lock are minutes.
+      - name: Cache compiled Lynx (DerivedData)
+        uses: actions/cache@v4
+        with:
+          path: apps/mobile/ios/build/dd
+          key: ios-dd-${{ hashFiles('apps/mobile/ios/Podfile.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ios-dd-${{ hashFiles('apps/mobile/ios/Podfile.lock') }}-
+
       - name: Build the Lynx JS bundle
         working-directory: apps/mobile
         run: |

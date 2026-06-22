@@ -12,7 +12,7 @@ class RootViewController: UIViewController {
       let config = LynxConfig(provider: BundleProvider())
       // Native device capabilities the JS bundle calls via `NativeModules` (only present
       // in this real app, never in Lynx Go): the document picker for résumé upload.
-      config.registerModule(FilePickerModule.self)
+      config.register(FilePickerModule.self)
       builder.config = config
       builder.screenSize = self.view.bounds.size
       builder.fontScale = 1.0
