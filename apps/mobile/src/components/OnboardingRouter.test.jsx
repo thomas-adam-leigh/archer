@@ -8,6 +8,9 @@ vi.mock('../lib/supabase.js', () => ({
   SUPABASE_URL: 'https://example.supabase.co',
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
 }));
+// The résumé screen pulls in resume.js → api.js → config.js, which reads the
+// client env at import; stub it (no network is made in these render tests).
+vi.mock('../lib/config.js', () => ({ ARCHER_API_URL: 'https://api.test' }));
 
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 vi.mock('../lib/onboarding.js', () => ({ fetchOnboardingProgress: fetchMock }));
