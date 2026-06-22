@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       node: ${{ steps.filter.outputs.node }}
+      web: ${{ steps.filter.outputs.web }}
       python: ${{ steps.filter.outputs.python }}
       db: ${{ steps.filter.outputs.db }}
       docker: ${{ steps.filter.outputs.docker }}
@@ -37,8 +38,10 @@ jobs:
         id: filter
         with:
           filters: |
+            # Backend Node workspace (services + packages). apps/web has its own
+            # `web` job below; apps/mobile builds standalone; apps/agent isn't a
+            # workspace package — so none belong to the backend `node` gate.
             node:
-              - 'apps/**'
               - 'services/**'
               - 'packages/**'
               - 'package.json'
@@ -46,6 +49,13 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'biome.json'
               - 'vitest.config.ts'
+              - '.github/workflows/ci.yml'
+            # The TanStack Start web app — its own biome + tsc + build gate.
+            web:
+              - 'apps/web/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
               - '.github/workflows/ci.yml'
             python:
               - '**/*.py'
@@ -81,6 +91,29 @@ jobs:
       # is fine; swap to `--filter "...[origin/main]"` (or Turborepo) when it's slow.
       - name: Build
         run: pnpm -r build
+
+  # ── Web (apps/web): the TanStack Start onboarding app ───────────────────────
+  # apps/web keeps its OWN biome config (tab indent, recommended lint) and is
+  # excluded from the backend biome, so it's linted/typechecked/built here with
+  # its own tooling. Cypress E2E is a separate, non-required `web-e2e` job (ARC-93).
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint + format check (Biome, web config)
+        run: pnpm --filter web exec biome check .
+      - name: Typecheck
+        run: pnpm --filter web exec tsc --noEmit
+      - name: Build
+        run: pnpm --filter web build
 
   # ── Database: the contract drift gate ───────────────────────────────────────
   # Regenerate types from the migrations against an ephemeral Postgres and fail
@@ -167,7 +200,7 @@ jobs:
 
   # ── Required status check (point branch protection at this one) ─────────────
   ci-ok:
-    needs: [changes, node, db, python, docker, security]
+    needs: [changes, node, web, db, python, docker, security]
     if: always()
     runs-on: ubuntu-latest
     steps:
