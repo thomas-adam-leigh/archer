@@ -33,9 +33,9 @@ cd "$WORKTREE"
 pnpm install --frozen-lockfile >/dev/null
 pnpm --filter @archer/scheduler build >/dev/null
 
-# 3. Configure the schedule (idempotent): 30 min, autonomous, all tools.
+# 3. Configure the schedule (idempotent): 15 min, autonomous, all tools.
 node services/scheduler/dist/cli.js set-command "$CMD" >/dev/null
-node services/scheduler/dist/cli.js set-interval 30 >/dev/null
+node services/scheduler/dist/cli.js set-interval 15 >/dev/null
 node services/scheduler/dist/cli.js enable >/dev/null
 
 # 4. Start the daemon detached, unless one is already running.
