@@ -256,3 +256,35 @@ text {
 .Resume__chipText {
   font-size: 14px;
 }
+
+/* Conversational onboarding (the start-from-scratch chat). */
+.Chat__thread {
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px;
+}
+
+.Chat__bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border-radius: 16px;
+}
+
+.Chat__bubble--archer {
+  align-self: flex-start;
+  background-color: rgba(255, 255, 255, 0.12);
+  border-bottom-left-radius: 4px;
+}
+
+.Chat__bubble--user {
+  align-self: flex-end;
+  background-color: #ff6448;
+  border-bottom-right-radius: 4px;
+}
+
+.Chat__bubbleText {
+  font-size: 15px;
+  line-height: 21px;
+  color: #fff;
+}
