@@ -9,22 +9,19 @@ import type { IngestStarted } from '../lib/resume.js';
 import { HomeScreen } from './HomeScreen.js';
 import { IntroScreen, type OnboardingPath } from './IntroScreen.js';
 import { ProcessingScreen } from './ProcessingScreen.js';
+import { ProfileReviewScreen } from './ProfileReviewScreen.js';
 import { ResumeUploadScreen } from './ResumeUploadScreen.js';
 import { StageScreen } from './StageScreen.js';
 
 /** The label + blurb shown for a resumed step whose screen lands in a later
  *  milestone. Replaced by the real screen as each issue ships. */
 const RESUME_COPY: Record<
-  Exclude<OnboardingStep, 'intro' | 'done'>,
+  Exclude<OnboardingStep, 'intro' | 'review' | 'done'>,
   { title: string; subtitle: string }
 > = {
   processing: {
     title: 'Building your profile',
     subtitle: 'Archer is still working through your résumé. Hang tight.',
-  },
-  review: {
-    title: 'Your draft is ready',
-    subtitle: 'Pick up reviewing the profile Archer put together.',
   },
   titles: {
     title: 'Choosing your target roles',
@@ -139,6 +136,13 @@ export function OnboardingRouter(props: {
         onLogout={onLogout}
       />
     );
+  }
+
+  // The proposed-draft review (ARC-76): reached when the ingest run lands a
+  // proposed version, and on relaunch for a user who left off at review. The
+  // screen resolves the proposed version itself, so no id needs threading.
+  if (status.step === 'review') {
+    return <ProfileReviewScreen session={session} />;
   }
 
   const copy = RESUME_COPY[status.step];

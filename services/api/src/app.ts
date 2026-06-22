@@ -1426,7 +1426,11 @@ const gProfile = mk()
       return c.json({ user, versionId: version.id, status: version.status, version });
     },
   )
-  // Read a single version (scoped to the user so it can't read another's).
+  // Read a single version with its structured spine (scoped to the user so it
+  // can't read another's). The spine — work_experiences, education, skills,
+  // certifications, courses, projects, all version-scoped — is what the mobile
+  // profile-review screen renders alongside `attributes` (ARC-76); reads any
+  // version (the proposed draft, not just the live one).
   .openapi(
     createRoute({
       method: "get",
@@ -1442,7 +1446,8 @@ const gProfile = mk()
       if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
       const version = await getProfileVersion(getDb(), user, id);
       if (!version) return c.json({ error: "unknown version" }, 404);
-      return c.json({ user, version });
+      const spine = await readProfileSpine(getDb(), user, id);
+      return c.json({ user, version, spine });
     },
   )
   // Submit a draft version for approval (opens a profile_version proposal). The

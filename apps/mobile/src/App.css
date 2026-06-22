@@ -151,3 +151,108 @@ text {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.8);
 }
+
+/* Profile review (résumé-style render of the proposed draft). */
+.Resume {
+  position: relative;
+  z-index: 100;
+  width: 100%;
+  min-height: 100vh;
+}
+
+.Resume__inner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 32px 20px 48px;
+}
+
+.Resume__header {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.Resume__name {
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.Resume__location {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 4px;
+}
+
+.Resume__contact {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 6px;
+}
+
+.Resume__link {
+  font-size: 14px;
+  color: #ffb4a3;
+  margin-top: 2px;
+}
+
+.Resume__section {
+  display: flex;
+  flex-direction: column;
+  margin-top: 24px;
+}
+
+.Resume__sectionTitle {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #ff6448;
+  margin-bottom: 10px;
+}
+
+.Resume__summary {
+  font-size: 15px;
+  line-height: 22px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.Resume__item {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.Resume__itemTitle {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.Resume__itemMeta {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+}
+
+.Resume__itemBody {
+  font-size: 14px;
+  line-height: 21px;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 6px;
+}
+
+.Resume__chips {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.Resume__chip {
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.12);
+  padding: 6px 12px;
+  margin: 0 8px 8px 0;
+}
+
+.Resume__chipText {
+  font-size: 14px;
+}
