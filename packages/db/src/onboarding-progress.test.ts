@@ -6,6 +6,7 @@ import {
   applyVersionProposal,
   createProfileVersion,
   getOnboardingProgress,
+  getOpenProfileVersionProposal,
   type OnboardingFlags,
   onboardingProgressFrom,
   submitAccountForReview,
@@ -146,25 +147,33 @@ describe.skipIf(!TEST_DB_URL)("getOnboardingProgress (substrate walk)", () => {
     // intro: a fresh signup with no profile data.
     expect((await getOnboardingProgress(sql, userId)).step).toBe("intro");
 
-    // processing: a draft version exists, not yet proposed.
+    // processing: a draft version exists, not yet proposed. No open proposal yet.
     const v = await createProfileVersion(sql, { userId, attributes: { ideal_job: "staff eng" } });
     let p = await getOnboardingProgress(sql, userId);
     expect(p.step).toBe("processing");
     expect(p.hasProfileData).toBe(true);
     expect(p.draftGenerated).toBe(false);
+    expect(p.openProposalId).toBeNull();
+    expect(p.proposedVersionId).toBeNull();
 
-    // review: the draft is submitted as a proposed version.
+    // review: the draft is submitted as a proposed version — the open proposal id +
+    // the version it targets are now exposed so the review screen can self-approve.
     const proposal = await submitVersionProposal(sql, { userId, versionId: v.id, title: "v1" });
     p = await getOnboardingProgress(sql, userId);
     expect(p.step).toBe("review");
     expect(p.draftGenerated).toBe(true);
     expect(p.draftApproved).toBe(false);
+    expect(p.openProposalId).toBe(proposal.id);
+    expect(p.proposedVersionId).toBe(v.id);
 
-    // titles: the proposed version is approved (now live).
+    // titles: the proposed version is approved (now live) — no proposal awaits a
+    // decision any more, so the open-proposal locator goes back to null.
     await applyVersionProposal(sql, proposal.id, { action: "approve" });
     p = await getOnboardingProgress(sql, userId);
     expect(p.step).toBe("titles");
     expect(p.draftApproved).toBe(true);
+    expect(p.openProposalId).toBeNull();
+    expect(p.proposedVersionId).toBeNull();
 
     // submitting: an active title + a negative criterion are captured.
     await addTargetTitle(sql, userId, "Senior Agentic AI Engineer");
@@ -181,5 +190,27 @@ describe.skipIf(!TEST_DB_URL)("getOnboardingProgress (substrate walk)", () => {
     p = await getOnboardingProgress(sql, userId);
     expect(p.step).toBe("done");
     expect(p.completed).toBe(true);
+  });
+
+  it("getOpenProfileVersionProposal: open proposal → id; none → null; only the user's own (ARC-86)", async () => {
+    const other = "cccccccc-0000-4000-8000-000000000099";
+
+    // none: no submitted proposal yet.
+    expect(await getOpenProfileVersionProposal(sql, userId)).toBeNull();
+
+    // open: a submitted proposal exposes its id + target version.
+    const v = await createProfileVersion(sql, { userId, attributes: { ideal_job: "staff eng" } });
+    const proposal = await submitVersionProposal(sql, { userId, versionId: v.id, title: "v1" });
+    expect(await getOpenProfileVersionProposal(sql, userId)).toEqual({
+      proposalId: proposal.id,
+      versionId: v.id,
+    });
+
+    // isolation: another user never sees this user's open proposal.
+    expect(await getOpenProfileVersionProposal(sql, other)).toBeNull();
+
+    // decided: once approved, the proposal is no longer open.
+    await applyVersionProposal(sql, proposal.id, { action: "approve" });
+    expect(await getOpenProfileVersionProposal(sql, userId)).toBeNull();
   });
 });

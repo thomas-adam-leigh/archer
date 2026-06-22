@@ -433,6 +433,7 @@ User-facing routes accept **either** the user's Supabase JWT (`Authorization: Be
 | GET | `/jobs` | `user`, `status?` | `{ user, jobs:[CandidacyListItem] }` |
 | GET | `/activities` | `user`, `type?`, `status?` | `{ user, activities:[…] }` |
 | GET | `/onboarding/state` | `user` | `{ user, onboarding:boolean, liveVersionId }` |
+| GET | `/onboarding/progress` | `user` | `{ user, step, completed, hasProfileData, draftGenerated, draftApproved, titlesGenerated, titlesApproved, negativeCriteriaCaptured, openProposalId, proposedVersionId }` — the resumable step (ARC-66) + the open profile-version proposal to self-approve with (ARC-86): `openProposalId`/`proposedVersionId` are non-null at `step:"review"`, null otherwise |
 | GET | `/accounts/state` | `user` | `{ user, status, readiness:{ ready, targetTitles, negativeCriteria, hasLiveProfile, reasons[] } }` |
 | GET | `/profile` | `user` | `{ user, profile }` |
 | GET | `/profile/versions` | `user` | `{ user, versions[], liveVersionId }` |
@@ -453,6 +454,7 @@ User-facing routes accept **either** the user's Supabase JWT (`Authorization: Be
 |---|---|---|---|
 | POST | `/onboarding/run` | `{ threadId, draft? }` | `{ runId, versionId, proposalId, attributes, events }` |
 | POST | `/onboarding/proposals/:proposalId/decide` | `{ action:"approve"\|"reject", edits?, note? }` | `{ proposalStatus, versionStatus, error? }` — **owner-gated** (`x-archer-admin-secret`) |
+| POST | `/onboarding/proposals/:proposalId/decide/self` | `{ userId?, action:"approve"\|"reject", edits?, note? }` | `{ proposalStatus, versionStatus, error? }` — candidate self-approval of their OWN proposal (ARC-67); scoped to the JWT user, **403** if the proposal isn't theirs. Discover `proposalId` from `GET /onboarding/progress` (`openProposalId`, ARC-86) |
 | POST | `/onboarding/resume` | `{ threadId, storageRef, filename?, kind?:"resume"\|"portfolio" }` | `{ threadId, runId, kind, status:"proposed", versionId, proposalId, activityId }` — resume/portfolio ingest as a streamed 3-phase AG-UI run (real PDF/DOCX extraction + LLM structuring); owner resolved from the thread |
 | POST | `/onboarding/voicenote` | `{ threadId, transcript, provider?, filename? }` | `{ threadId, status:"transcribed", transcript, … }` — persists an already-transcribed note: `transcribe` Activity + transcript message. The client transcribes **first** via the `transcribe` Edge Function (real STT, audio never persisted — runbook §5); `provider` defaults to `"elevenlabs"` |
 | POST | `/profile/versions` | `{ userId?, attributes?, label? }` | `{ versionId, status:"draft", version }` |
