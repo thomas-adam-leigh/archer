@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { AppShell } from "#/components/app-shell.tsx";
+import { useHydrateSession } from "#/lib/session.ts";
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import appCss from "../styles.css?url";
 
@@ -39,6 +40,10 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+	// Restore any persisted session once on the client so returning users stay
+	// signed in across reloads (and route guards know when to act).
+	useHydrateSession();
+
 	return (
 		<html lang="en">
 			<head>

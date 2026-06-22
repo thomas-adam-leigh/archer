@@ -53,6 +53,14 @@ export function clearPersistedSession(): void {
 /** The app-wide session store. Starts `null`; hydrated client-side after mount. */
 export const sessionStore = new Store<Session | null>(null);
 
+/**
+ * Whether the one-shot client hydration has run yet. Starts `false` (matching
+ * SSR + the first client render) and flips `true` once `useHydrateSession` has
+ * consulted `localStorage` — so route guards can tell "no session" apart from
+ * "we haven't looked yet" and avoid bouncing a signed-in user on first paint.
+ */
+export const hydratedStore = new Store<boolean>(false);
+
 /** Set the active session (after sign in / sign up) and persist it. */
 export function setSession(session: Session): void {
 	persistSession(session);
@@ -70,13 +78,20 @@ export function useSession(): Session | null {
 	return useStore(sessionStore);
 }
 
+/** Whether the persisted session has been consulted (see {@link hydratedStore}). */
+export function useIsHydrated(): boolean {
+	return useStore(hydratedStore);
+}
+
 /**
- * Restore any persisted session into the store, once, after mount. Wire this at
- * the app root so a returning user is signed in without a hydration mismatch.
+ * Restore any persisted session into the store, once, after mount, then mark
+ * hydration done. Wire this at the app root so a returning user is signed in
+ * without a hydration mismatch, and so guards know when it is safe to redirect.
  */
 export function useHydrateSession(): void {
 	useEffect(() => {
 		const persisted = loadSession();
 		if (persisted) sessionStore.setState(() => persisted);
+		hydratedStore.setState(() => true);
 	}, []);
 }
