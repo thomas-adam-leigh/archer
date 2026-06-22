@@ -11,3 +11,8 @@ dist-ssr
 .vinxi
 __unconfig*
 todos.json
+
+# Cypress run artifacts (uploaded as CI artifacts on failure, never committed)
+cypress/videos
+cypress/screenshots
+cypress/downloads

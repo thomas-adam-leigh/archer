@@ -1,0 +1,93 @@
+{
+	"intro": {
+		"user": "test-user-id",
+		"hasProfileData": false,
+		"draftGenerated": false,
+		"draftApproved": false,
+		"titlesGenerated": false,
+		"titlesApproved": false,
+		"negativeCriteriaCaptured": false,
+		"completed": false,
+		"openProposalId": null,
+		"proposedVersionId": null,
+		"step": "intro"
+	},
+	"resume": {
+		"user": "test-user-id",
+		"hasProfileData": false,
+		"draftGenerated": false,
+		"draftApproved": false,
+		"titlesGenerated": false,
+		"titlesApproved": false,
+		"negativeCriteriaCaptured": false,
+		"completed": false,
+		"openProposalId": null,
+		"proposedVersionId": null,
+		"step": "resume"
+	},
+	"conversation": {
+		"user": "test-user-id",
+		"hasProfileData": false,
+		"draftGenerated": false,
+		"draftApproved": false,
+		"titlesGenerated": false,
+		"titlesApproved": false,
+		"negativeCriteriaCaptured": false,
+		"completed": false,
+		"openProposalId": null,
+		"proposedVersionId": null,
+		"step": "conversation"
+	},
+	"processing": {
+		"user": "test-user-id",
+		"hasProfileData": true,
+		"draftGenerated": false,
+		"draftApproved": false,
+		"titlesGenerated": false,
+		"titlesApproved": false,
+		"negativeCriteriaCaptured": false,
+		"completed": false,
+		"openProposalId": null,
+		"proposedVersionId": null,
+		"step": "processing"
+	},
+	"review": {
+		"user": "test-user-id",
+		"hasProfileData": true,
+		"draftGenerated": true,
+		"draftApproved": false,
+		"titlesGenerated": false,
+		"titlesApproved": false,
+		"negativeCriteriaCaptured": false,
+		"completed": false,
+		"openProposalId": "test-proposal-id",
+		"proposedVersionId": "test-version-id",
+		"step": "review"
+	},
+	"criteria": {
+		"user": "test-user-id",
+		"hasProfileData": true,
+		"draftGenerated": true,
+		"draftApproved": true,
+		"titlesGenerated": false,
+		"titlesApproved": false,
+		"negativeCriteriaCaptured": false,
+		"completed": false,
+		"openProposalId": null,
+		"proposedVersionId": null,
+		"step": "criteria"
+	},
+	"completed": {
+		"user": "test-user-id",
+		"hasProfileData": true,
+		"draftGenerated": true,
+		"draftApproved": true,
+		"titlesGenerated": true,
+		"titlesApproved": true,
+		"negativeCriteriaCaptured": true,
+		"completed": true,
+		"openProposalId": null,
+		"proposedVersionId": null,
+		"step": "completed"
+	}
+}

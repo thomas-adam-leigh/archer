@@ -1,0 +1,23 @@
+// Loaded automatically before every spec (see cypress.config.ts supportFile).
+import "./commands";
+
+declare global {
+	namespace Cypress {
+		interface Chainable {
+			/** Stub GoTrue sign-up so a fresh account is never created. */
+			signup(email: string, password: string): Chainable<void>;
+			/**
+			 * Stub GoTrue sign-in (+ the API's token-verification lookup) so specs
+			 * authenticate without a real session. Defaults to a canned candidate.
+			 */
+			login(email?: string, password?: string): Chainable<void>;
+			/**
+			 * Stub `GET /onboarding/progress` to report the given onboarding step,
+			 * so the router resumes the flow at that stage.
+			 */
+			onboardingState(step: string): Chainable<void>;
+		}
+	}
+}
+
+export {};

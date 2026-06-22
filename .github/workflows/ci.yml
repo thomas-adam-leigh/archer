@@ -115,6 +115,48 @@ jobs:
       - name: Build
         run: pnpm --filter web build
 
+  # ── Web E2E (apps/web): Cypress — NON-REQUIRED until M9 (ARC-93) ─────────────
+  # Path-filtered to apps/web (+ this workflow) so it never runs on unrelated
+  # PRs, and deliberately NOT in the `ci-ok` gate, so a flaky E2E can't block a
+  # merge until the suite is promoted (ARC-118). cypress-io/github-action runs
+  # `cypress install` explicitly and caches the binary at ~/.cache/Cypress —
+  # which is why the workflow-level CYPRESS_INSTALL_BINARY=0 (kept for the heavy
+  # `node` job) is harmless here; this job overrides it so the binary downloads.
+  web-e2e:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CYPRESS_INSTALL_BINARY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # The action installs workspace deps + the Cypress binary (cached), builds
+      # the app, serves it (node .output/server/index.mjs on :3000), waits for
+      # the server, then runs the specs — so they never race the server.
+      - name: Cypress (build → serve → wait-on → e2e)
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: apps/web
+          build: pnpm build
+          start: pnpm serve
+          wait-on: "http://localhost:3000"
+          wait-on-timeout: 120
+      - name: Upload Cypress artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-artifacts
+          path: |
+            apps/web/cypress/videos
+            apps/web/cypress/screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ── Database: the contract drift gate ───────────────────────────────────────
   # Regenerate types from the migrations against an ephemeral Postgres and fail
   # if the committed packages/db/src/database.types.ts is stale. This is what
