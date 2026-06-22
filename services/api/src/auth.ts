@@ -69,7 +69,16 @@ function subjectFromClaims(payload: JwtPayload): string | null {
 async function verifyViaUserEndpoint(token: string): Promise<string | null> {
   const baseUrl = process.env.SUPABASE_URL;
   if (!baseUrl) return null;
-  const apikey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+  // `/auth/v1/user` requires an `apikey` header (any of the project's keys is
+  // accepted by GoTrue). Accept both the legacy env names and the current ones the
+  // deployed container actually provides (`SUPABASE_SECRET_KEY` /
+  // `SUPABASE_PUBLISHABLE_KEY`) — otherwise apikey is undefined in prod and every
+  // ES256 user token 401s (ARC-87).
+  const apikey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_SECRET_KEY ??
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.SUPABASE_PUBLISHABLE_KEY;
   try {
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/auth/v1/user`, {
       headers: {

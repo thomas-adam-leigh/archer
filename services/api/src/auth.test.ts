@@ -86,3 +86,62 @@ describe("verifySupabaseJwt (ARC-83)", () => {
     expect(await verifySupabaseJwt(sign(validPayload()))).toBeNull();
   });
 });
+
+// The `/auth/v1/user` fallback (asymmetric ES256 tokens this process can't verify
+// locally). `fetch` is mocked, so no live call — we assert the request shape,
+// specifically that the `apikey` header is resolved from the env-var names the
+// deployed container provides (ARC-87).
+describe("verifySupabaseJwt — /auth/v1/user fallback (ARC-87)", () => {
+  const KEY_ENVS = [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_PUBLISHABLE_KEY",
+  ];
+  const realFetch = globalThis.fetch;
+  // An alg the local HS256 path can't verify, so the token falls through to the
+  // server-side fallback (mirrors the project's ES256 signing keys).
+  const es256Token = sign(validPayload(), { alg: "ES256" });
+
+  beforeEach(() => {
+    delete process.env.SUPABASE_JWT_SECRET;
+    process.env.SUPABASE_URL = "https://proj.supabase.co";
+    for (const k of KEY_ENVS) delete process.env[k];
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.SUPABASE_URL;
+    for (const k of KEY_ENVS) delete process.env[k];
+  });
+
+  const captureFetch = () => {
+    const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), headers: (init?.headers ?? {}) as Record<string, string> });
+      return new Response(JSON.stringify({ id: USER }), { status: 200 });
+    }) as typeof fetch;
+    return calls;
+  };
+
+  it("resolves the apikey from SUPABASE_SECRET_KEY (the deployed prod env)", async () => {
+    process.env.SUPABASE_SECRET_KEY = "secret-key-value";
+    const calls = captureFetch();
+    expect(await verifySupabaseJwt(es256Token)).toBe(USER);
+    expect(calls[0].url).toBe("https://proj.supabase.co/auth/v1/user");
+    expect(calls[0].headers.apikey).toBe("secret-key-value");
+    expect(calls[0].headers.Authorization).toBe(`Bearer ${es256Token}`);
+  });
+
+  it("resolves the apikey from SUPABASE_PUBLISHABLE_KEY when that's the only key set", async () => {
+    process.env.SUPABASE_PUBLISHABLE_KEY = "publishable-key-value";
+    const calls = captureFetch();
+    expect(await verifySupabaseJwt(es256Token)).toBe(USER);
+    expect(calls[0].headers.apikey).toBe("publishable-key-value");
+  });
+
+  it("sends no apikey header when no key env is set (GoTrue then rejects → fails closed in prod)", async () => {
+    const calls = captureFetch();
+    await verifySupabaseJwt(es256Token);
+    expect("apikey" in calls[0].headers).toBe(false);
+  });
+});
