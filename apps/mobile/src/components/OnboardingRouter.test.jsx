@@ -12,8 +12,17 @@ vi.mock('../lib/supabase.js', () => ({
 // client env at import; stub it (no network is made in these render tests).
 vi.mock('../lib/config.js', () => ({ ARCHER_API_URL: 'https://api.test' }));
 
-const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
+const { fetchMock, draftMock } = vi.hoisted(() => ({
+  fetchMock: vi.fn(),
+  draftMock: vi.fn(),
+}));
 vi.mock('../lib/onboarding.js', () => ({ fetchOnboardingProgress: fetchMock }));
+// The review step renders the profile-review screen, which self-resolves the
+// proposed draft; mock that fetch so the router test drives routing, not network.
+vi.mock('../lib/profile.js', async (importActual) => ({
+  ...(await importActual()),
+  fetchProposedProfileDraft: draftMock,
+}));
 
 import { OnboardingRouter } from './OnboardingRouter.js';
 
@@ -33,6 +42,7 @@ function renderAt(step) {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  draftMock.mockReset();
   onLogout.mockReset();
 });
 
@@ -45,9 +55,17 @@ test('a brand-new user (step=intro) lands on the intro with both paths', async (
 });
 
 test('a returning user resumes at their step (step=review)', async () => {
+  draftMock.mockResolvedValue({
+    version: {
+      id: 'v9',
+      status: 'proposed',
+      attributes: { full_name: 'Resumed Draft' },
+    },
+    spine: {},
+  });
   const { findByText } = renderAt('review');
 
-  expect(await findByText('Your draft is ready')).toBeInTheDocument();
+  expect(await findByText('Resumed Draft')).toBeInTheDocument();
 });
 
 test('a completed user (step=done) lands on home', async () => {
