@@ -8,6 +8,7 @@ import {
 import type { IngestStarted } from '../lib/resume.js';
 import { HomeScreen } from './HomeScreen.js';
 import { IntroScreen, type OnboardingPath } from './IntroScreen.js';
+import { JobPreferencesScreen } from './JobPreferencesScreen.js';
 import { ProcessingScreen } from './ProcessingScreen.js';
 import { ProfileReviewScreen } from './ProfileReviewScreen.js';
 import { ResumeUploadScreen } from './ResumeUploadScreen.js';
@@ -16,16 +17,12 @@ import { StageScreen } from './StageScreen.js';
 /** The label + blurb shown for a resumed step whose screen lands in a later
  *  milestone. Replaced by the real screen as each issue ships. */
 const RESUME_COPY: Record<
-  Exclude<OnboardingStep, 'intro' | 'review' | 'done'>,
+  Exclude<OnboardingStep, 'intro' | 'review' | 'titles' | 'done'>,
   { title: string; subtitle: string }
 > = {
   processing: {
     title: 'Building your profile',
     subtitle: 'Archer is still working through your résumé. Hang tight.',
-  },
-  titles: {
-    title: 'Choosing your target roles',
-    subtitle: 'Pick up approving the job titles Archer suggested.',
   },
   submitting: {
     title: 'Submitting your profile',
@@ -143,6 +140,14 @@ export function OnboardingRouter(props: {
   // screen resolves the proposed version itself, so no id needs threading.
   if (status.step === 'review') {
     return <ProfileReviewScreen session={session} />;
+  }
+
+  // The job-preferences step (ARC-78): approve Archer's suggested target titles
+  // (re-rank by text/voice) and capture ≥1 rule-out, then advance. Reached after
+  // profile approval, and on relaunch for a user who left off here. On approval we
+  // re-read progress, which moves them on to submitting/done.
+  if (status.step === 'titles') {
+    return <JobPreferencesScreen session={session} onApproved={load} />;
   }
 
   const copy = RESUME_COPY[status.step];
