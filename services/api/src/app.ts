@@ -78,6 +78,7 @@ import {
   scribeRun,
   statusFromEvents,
 } from "./agui.js";
+import { verifySupabaseJwt } from "./auth.js";
 import { getBrain } from "./brain.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
@@ -104,12 +105,66 @@ function safeEqual(a: string, b: string): boolean {
 // generated per-route Context types the OpenAPIHono handlers carry.
 type AuthCtx = { req: { header(name: string): string | undefined } };
 
-// Fail closed: require the shared secret (constant-time compare). With no secret
-// set, deny unless an explicit dev opt-in (ARCHER_API_DEV_OPEN=1, non-prod) is on.
-function authorized(c: AuthCtx): boolean {
+// The authenticated caller behind a request. Two planes (ARC-83):
+//   • service — the trusted server-to-server caller (shared secret or the non-prod
+//     dev opt-in): full trust, may act for ANY user via an explicit `user`/`userId`.
+//   • user — an end user proven by their Supabase JWT: scoped to their own
+//     `auth.uid` (the verified `sub`); cannot act for anyone else.
+type Principal = { kind: "service" } | { kind: "user"; userId: string };
+
+// The shared-secret check (server-to-server). Fail closed: require the secret
+// (constant-time compare); with no secret set, deny unless the non-prod dev opt-in
+// (ARCHER_API_DEV_OPEN=1) is on.
+function serviceSecretOk(c: AuthCtx): boolean {
   const secret = process.env.ARCHER_API_SECRET;
   if (secret) return safeEqual(c.req.header("x-archer-secret") ?? "", secret);
   return process.env.NODE_ENV !== "production" && process.env.ARCHER_API_DEV_OPEN === "1";
+}
+
+// Server-to-server gate for the internal control plane (commands, webhooks): the
+// shared service secret only. These routes drive the CLI / cron and are never
+// reached by an end user's JWT, so JWT auth is deliberately NOT accepted here.
+function authorized(c: AuthCtx): boolean {
+  return serviceSecretOk(c);
+}
+
+// User-facing gate (ARC-83): accept EITHER a valid service secret (full trust) OR
+// a valid Supabase JWT (scoped to the verified user). Fail closed — a Bearer token
+// that is present but invalid/expired/tampered is rejected, never silently ignored.
+async function authenticate(c: AuthCtx): Promise<Principal | null> {
+  if (serviceSecretOk(c)) return { kind: "service" };
+  const header = c.req.header("authorization") ?? "";
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  if (!match) return null;
+  const userId = await verifySupabaseJwt(match[1]);
+  return userId ? { kind: "user", userId } : null;
+}
+
+// Resolve the effective user for a single-user route. A JWT user is pinned to its
+// own verified `sub`: identity comes from the TOKEN, never from caller input — a
+// mismatching explicit `user`/`userId` is refused (403), closing the
+// impersonation hole. The service caller keeps the existing
+// requested-or-`ARCHER_USER_ID` behaviour (full trust).
+function scopedUser(
+  principal: Principal,
+  requested: string | undefined,
+): { user: string } | { error: string; status: 400 | 403 } {
+  if (principal.kind === "user") {
+    if (requested && requested !== principal.userId) {
+      return { error: "forbidden: token does not match requested user", status: 403 };
+    }
+    return { user: principal.userId };
+  }
+  const user = requested ?? process.env.ARCHER_USER_ID;
+  if (!user || !UUID_RE.test(user)) return { error: "invalid user", status: 400 };
+  return { user };
+}
+
+// Ownership check for routes whose owner the server resolves itself (e.g. the
+// thread owner): the service caller may act for anyone; a JWT user only for their
+// own resources.
+function principalOwns(principal: Principal, ownerId: string): boolean {
+  return principal.kind === "service" || principal.userId === ownerId;
 }
 
 // Owner/admin gate for the human-decision routes — account acceptance and the
@@ -326,13 +381,15 @@ const gFeed = mk()
       path: "/jobs",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional(), status: candidacyStatus.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const q = c.req.valid("query");
-      const user = q.user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, q.user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const jobs = await listCandidacies(getDb(), user, { status: q.status as never });
       return c.json({ user, jobs });
     },
@@ -355,13 +412,15 @@ const gFeed = mk()
           status: activityStatus.optional(),
         }),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const q = c.req.valid("query");
-      const user = q.user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, q.user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const activities = await listActivities(getDb(), user, {
         type: q.type as never,
         status: q.status as never,
@@ -386,7 +445,7 @@ const gFeed = mk()
           status: activityStatus.optional(),
         }),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
       if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
@@ -447,14 +506,22 @@ const gFeed = mk()
       request: {
         body: jsonBody(z.looseObject({ threadId: Uuid }), "AG-UI RunAgentInput"),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 409: ERR[409] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const input = c.req.valid("json") as unknown as RunAgentInput;
       const threadId = input.threadId;
       const db = getDb();
       const asJson = input as unknown as Json;
+
+      // A JWT user may only drive runs on their own thread (the service caller may
+      // act on any). Identity comes from the verified token, not the request body.
+      if (principal.kind === "user") {
+        const owner = await getThreadOwner(db, threadId);
+        if (owner !== principal.userId) return c.json({ error: "forbidden" }, 403);
+      }
 
       const interrupts = await loadThreadInterrupts(db, threadId);
       const open = interrupts.filter((i) => i.status === "submitted").map((i) => i.interruptId);
@@ -551,12 +618,19 @@ const gFeed = mk()
       path: "/agui/threads/{threadId}/history",
       security: SERVICE_SECURITY,
       request: { params: z.object({ threadId: Uuid }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const { threadId } = c.req.valid("param");
-      const events = await loadThreadEvents(getDb(), threadId);
+      const db = getDb();
+      // A JWT user may only read their own thread's history (the service caller any).
+      if (principal.kind === "user") {
+        const owner = await getThreadOwner(db, threadId);
+        if (owner !== principal.userId) return c.json({ error: "forbidden" }, 403);
+      }
+      const events = await loadThreadEvents(db, threadId);
       const { state, messages } = restoreThread(events);
       return c.json({ threadId, state, messages, events } as Record<string, unknown>);
     },
@@ -572,12 +646,14 @@ const gOnboard = mk()
       path: "/onboarding/state",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const live = await getLiveProfileVersion(getDb(), user);
       return c.json({ user, onboarding: !live, liveVersionId: live?.id ?? null });
     },
@@ -592,12 +668,14 @@ const gOnboard = mk()
       path: "/onboarding/progress",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const progress = await getOnboardingProgress(getDb(), user);
       return c.json({ user, ...progress });
     },
@@ -617,15 +695,17 @@ const gOnboard = mk()
           "Onboarding draft",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 404: ERR[404] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json");
       const threadId = body.threadId;
       const db = getDb();
       const userId = await getThreadOwner(db, threadId);
       if (!userId) return c.json({ error: "unknown thread" }, 404);
+      if (!principalOwns(principal, userId)) return c.json({ error: "forbidden" }, 403);
 
       const run = await createRun(db, { threadId, input: body as unknown as Json });
       const events = onboardingRun({ threadId, runId: run.id, draft: body.draft });
@@ -671,14 +751,23 @@ const gOnboard = mk()
       request: {
         body: jsonBody(z.object({ threadId: Uuid }), "Guided onboarding finalize"),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404], 500: ERR[500] },
+      responses: {
+        200: ok(),
+        400: ERR[400],
+        401: ERR[401],
+        403: ERR[403],
+        404: ERR[404],
+        500: ERR[500],
+      },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const { threadId } = c.req.valid("json");
       const db = getDb();
       const userId = await getThreadOwner(db, threadId);
       if (!userId) return c.json({ error: "unknown thread" }, 404);
+      if (!principalOwns(principal, userId)) return c.json({ error: "forbidden" }, 403);
 
       const transcript = buildTranscript(
         restoreThread(await loadThreadEvents(db, threadId)).messages,
@@ -742,7 +831,7 @@ const gOnboard = mk()
         // `action` is validated in the handler so the owner gate (401) runs first.
         body: jsonBody(z.looseObject({}), "Decision"),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
       if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
@@ -783,7 +872,8 @@ const gOnboard = mk()
       responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const { proposalId } = c.req.valid("param");
       const body = c.req.valid("json") as {
         userId?: string;
@@ -791,8 +881,9 @@ const gOnboard = mk()
         edits?: { attributes?: Json; label?: string | null };
         note?: string | null;
       };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       if (body.action !== "approve" && body.action !== "reject") {
         return c.json({ error: "'action' must be approve or reject" }, 400);
       }
@@ -824,17 +915,19 @@ const gOnboard = mk()
           "Title-suggestion request",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 409: ERR[409] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as {
         userId?: string;
         feedback?: string;
         current?: string[];
       };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const db = getDb();
       const live = await getLiveProfileVersion(db, user);
       if (!live) return c.json({ error: "no approved profile to suggest titles from" }, 409);
@@ -860,13 +953,15 @@ const gOnboard = mk()
           "Approved title set",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as { userId?: string; titles?: string[] };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const cleaned = (body.titles ?? [])
         .map((t) => (typeof t === "string" ? t.trim() : ""))
         .filter((t) => t.length > 0 && t.length <= 256);
@@ -894,13 +989,15 @@ const gOnboard = mk()
       request: {
         body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Complete onboarding"),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 409: ERR[409] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as { userId?: string };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const result = await completeOnboarding(getDb(), user);
       // Not complete yet (readiness unmet) is a 409 conflict, not a submit.
       if (!result.submitted) {
@@ -1112,7 +1209,7 @@ const gCover = mk()
         // `action` is validated in the handler so the owner gate (401) runs first.
         body: jsonBody(z.looseObject({}), "Decision"),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
       if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
@@ -1226,10 +1323,18 @@ const gIngest = mk()
           "Ingest request",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404], 500: ERR[500] },
+      responses: {
+        200: ok(),
+        400: ERR[400],
+        401: ERR[401],
+        403: ERR[403],
+        404: ERR[404],
+        500: ERR[500],
+      },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as {
         threadId: string;
         storageRef?: string;
@@ -1244,6 +1349,7 @@ const gIngest = mk()
       const threadId = body.threadId;
       const user = await getThreadOwner(db, threadId);
       if (!user) return c.json({ error: "unknown thread" }, 404);
+      if (!principalOwns(principal, user)) return c.json({ error: "forbidden" }, 403);
       // Inferred as the literal union "resume" | "portfolio" (not the named IngestKind
       // alias) so the response type stays portable across the hc<AppType> CLI client.
       const kind = body.kind === "portfolio" ? "portfolio" : "resume";
@@ -1315,10 +1421,11 @@ const gIngest = mk()
           "Voicenote transcript",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 404: ERR[404] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as {
         threadId?: string;
         transcript?: string;
@@ -1340,6 +1447,7 @@ const gIngest = mk()
       const db = getDb();
       const userId = await getThreadOwner(db, threadId);
       if (!userId) return c.json({ error: "unknown thread" }, 404);
+      if (!principalOwns(principal, userId)) return c.json({ error: "forbidden" }, 403);
       const result = await ingestVoicenote(db, {
         threadId,
         userId,
@@ -1363,12 +1471,14 @@ const gAccount = mk()
       path: "/accounts/state",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const db = getDb();
       const account = await getAccount(db, user);
       const readiness = await checkReadiness(db, user);
@@ -1382,13 +1492,15 @@ const gAccount = mk()
       path: "/accounts/submit",
       security: SERVICE_SECURITY,
       request: { body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Submit account") },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as { userId?: string };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const account = await submitAccountForReview(getDb(), user);
       return c.json({ user, status: account.status });
     },
@@ -1406,7 +1518,7 @@ const gAccount = mk()
         // `action` is validated in the handler so the owner gate (401) runs first.
         body: jsonBody(z.looseObject({}), "Account decision"),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 409: ERR[409] },
     }),
     async (c) => {
       if (!ownerAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
@@ -1438,12 +1550,14 @@ const gProfile = mk()
       path: "/profile",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const profile = await getProfile(getDb(), user);
       return c.json({ user, profile: profile ?? null });
     },
@@ -1455,12 +1569,14 @@ const gProfile = mk()
       path: "/profile/versions",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const versions = await listProfileVersions(getDb(), user);
       const live = versions.find((v) => v.status === "approved");
       return c.json({ user, versions, liveVersionId: live?.id ?? null });
@@ -1483,17 +1599,19 @@ const gProfile = mk()
           "New profile version",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as {
         userId?: string;
         attributes?: Json;
         label?: string | null;
       };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const version = await createProfileVersion(getDb(), {
         userId: user,
         attributes: body.attributes,
@@ -1513,13 +1631,15 @@ const gProfile = mk()
       path: "/profile/versions/{id}",
       security: SERVICE_SECURITY,
       request: { params: z.object({ id: Uuid }), query: z.object({ user: Uuid.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 404: ERR[404] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const { id } = c.req.valid("param");
-      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const version = await getProfileVersion(getDb(), user, id);
       if (!version) return c.json({ error: "unknown version" }, 404);
       const spine = await readProfileSpine(getDb(), user, id);
@@ -1540,14 +1660,16 @@ const gProfile = mk()
           "Submit version",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const { id } = c.req.valid("param");
       const body = c.req.valid("json") as { userId?: string; title?: string };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const proposal = await submitVersionProposal(getDb(), {
         userId: user,
         versionId: id,
@@ -1566,14 +1688,16 @@ const gProfile = mk()
         params: z.object({ id: Uuid }),
         body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Rollback"),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403], 409: ERR[409] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const { id } = c.req.valid("param");
       const body = c.req.valid("json") as { userId?: string };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const result = await rollbackToVersion(getDb(), user, id);
       if (result.error) return c.json({ user, ...result }, 409);
       return c.json({ user, ...result });
@@ -1588,13 +1712,15 @@ const gPrefs = mk()
       path: "/titles",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional(), all: z.string().optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const q = c.req.valid("query");
-      const user = q.user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, q.user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const titles = await listTargetTitles(getDb(), user, { activeOnly: q.all !== "1" });
       return c.json({ user, titles });
     },
@@ -1610,13 +1736,15 @@ const gPrefs = mk()
           "New target title",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as { userId?: string; title?: string };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const title = typeof body.title === "string" ? body.title.trim() : "";
       if (!title || title.length > 256) {
         return c.json({ error: "title must be a non-empty string (≤256 chars)" }, 400);
@@ -1631,7 +1759,7 @@ const gPrefs = mk()
       path: "/titles/{id}",
       security: SERVICE_SECURITY,
       request: { params: z.object({ id: Uuid }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
       if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
@@ -1647,12 +1775,14 @@ const gPrefs = mk()
       path: "/criteria",
       security: SERVICE_SECURITY,
       request: { query: z.object({ user: Uuid.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
-      const user = c.req.valid("query").user ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const criteria = await listNegativeCriteria(getDb(), user);
       return c.json({ user, criteria });
     },
@@ -1668,13 +1798,15 @@ const gPrefs = mk()
           "New negative criterion",
         ),
       },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
-      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
       const body = c.req.valid("json") as { userId?: string; text?: string };
-      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
-      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
       const text = typeof body.text === "string" ? body.text.trim() : "";
       if (!text || text.length > 512) {
         return c.json({ error: "text must be a non-empty string (≤512 chars)" }, 400);
@@ -1689,7 +1821,7 @@ const gPrefs = mk()
       path: "/criteria/{id}",
       security: SERVICE_SECURITY,
       request: { params: z.object({ id: Uuid }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
       if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
