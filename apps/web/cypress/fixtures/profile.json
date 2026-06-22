@@ -1,0 +1,68 @@
+{
+	"attributes": {
+		"full_name": "Casey Rivera",
+		"email": "candidate@example.com",
+		"phone": "+44 20 7946 0123",
+		"location": "London, UK",
+		"summary": "Senior frontend engineer with 8 years building accessible, high-performance web apps in React and TypeScript.",
+		"links": {
+			"linkedin": "https://www.linkedin.com/in/casey-rivera",
+			"github": "https://github.com/casey-rivera",
+			"website": "https://caseyrivera.dev"
+		}
+	},
+	"spine": {
+		"workExperiences": [
+			{
+				"title": "Senior Frontend Engineer",
+				"organization": "Northwind Labs",
+				"employmentType": "Full-time",
+				"location": "London, UK",
+				"startDate": "2021-03",
+				"endDate": null,
+				"isCurrent": true,
+				"description": "Led the migration of the customer dashboard to React 19 and TanStack Router; cut TTI by 40%."
+			},
+			{
+				"title": "Frontend Engineer",
+				"organization": "Brightwave",
+				"employmentType": "Full-time",
+				"location": "Manchester, UK",
+				"startDate": "2018-01",
+				"endDate": "2021-02",
+				"isCurrent": false,
+				"description": "Built the design system and component library used across five product teams."
+			}
+		],
+		"education": [
+			{
+				"institution": "University of Bristol",
+				"degree": "BSc",
+				"fieldOfStudy": "Computer Science",
+				"startDate": "2013-09",
+				"endDate": "2016-06",
+				"grade": "First Class Honours"
+			}
+		],
+		"skills": [
+			{ "name": "TypeScript", "category": "Languages", "proficiency": "Expert" },
+			{ "name": "React", "category": "Frameworks", "proficiency": "Expert" },
+			{ "name": "Accessibility", "category": "Practices", "proficiency": "Advanced" }
+		],
+		"certifications": [
+			{
+				"name": "Certified Professional in Accessibility Core Competencies (CPACC)",
+				"issuer": "IAAP",
+				"issuedOn": "2022-05"
+			}
+		],
+		"courses": [
+			{
+				"name": "Advanced React Patterns",
+				"provider": "Frontend Masters",
+				"completedOn": "2023-02"
+			}
+		],
+		"projects": []
+	}
+}

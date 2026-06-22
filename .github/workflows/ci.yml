@@ -115,6 +115,75 @@ jobs:
       - name: Build
         run: pnpm --filter web build
 
+  # ── Web E2E (apps/web): Cypress — NON-REQUIRED until M9 (ARC-93) ─────────────
+  # Path-filtered to apps/web (+ this workflow) so it never runs on unrelated
+  # PRs, and deliberately NOT in the `ci-ok` gate, so a flaky E2E can't block a
+  # merge until the suite is promoted (ARC-118).
+  #
+  # The pnpm workspace lockfile lives at the repo root, so we install deps + the
+  # Cypress binary ourselves (the action's own install only detects a lockfile
+  # inside its working-directory) and run the action with `install: false`. It
+  # still does the build -> serve -> wait-on -> run dance so specs never race the
+  # server. This job overrides the workflow-level CYPRESS_INSTALL_BINARY=0 (which
+  # keeps the ~300 MB binary out of the heavy `node` install) with an empty
+  # string so the binary here does download, into the cached ~/.cache/Cypress.
+  # (It must be "" not "1": Cypress reads any non-"0" value as a download
+  # URL/path, so "1" makes it fetch the binary from "1" and 404.)
+  web-e2e:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CYPRESS_INSTALL_BINARY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Cache the Cypress binary (the classic "Cannot find cached binary"
+      # failure, gh#474), then install it for the web workspace.
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: cypress-${{ runner.os }}-
+      - name: Install Cypress binary
+        # Retry: the binary CDN occasionally 404s transiently (e.g. propagation
+        # lag right after a new release), which would otherwise fail the run.
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm --filter web exec cypress install; then
+              exit 0
+            fi
+            echo "cypress install attempt ${attempt} failed; retrying in 15s…"
+            sleep 15
+          done
+          echo "cypress install failed after 3 attempts" >&2
+          exit 1
+      - name: Cypress (build → serve → wait-on → e2e)
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: apps/web
+          install: false
+          build: pnpm build
+          start: pnpm serve
+          wait-on: "http://localhost:3000"
+          wait-on-timeout: 120
+      - name: Upload Cypress artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-artifacts
+          path: |
+            apps/web/cypress/videos
+            apps/web/cypress/screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ── Database: the contract drift gate ───────────────────────────────────────
   # Regenerate types from the migrations against an ephemeral Postgres and fail
   # if the committed packages/db/src/database.types.ts is stale. This is what

@@ -1,0 +1,17 @@
+{
+	"attributes": {
+		"full_name": "Casey Rivera",
+		"location": "London, UK",
+		"summary": "Senior frontend engineer with ~8 years building accessible React applications."
+	},
+	"spine": {
+		"workExperiences": [
+			{
+				"title": "Senior Frontend Engineer",
+				"organization": "Northwind Labs",
+				"isCurrent": true
+			}
+		],
+		"skills": [{ "name": "React" }, { "name": "TypeScript" }]
+	}
+}
