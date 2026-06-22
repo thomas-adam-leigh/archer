@@ -125,14 +125,16 @@ jobs:
   # inside its working-directory) and run the action with `install: false`. It
   # still does the build -> serve -> wait-on -> run dance so specs never race the
   # server. This job overrides the workflow-level CYPRESS_INSTALL_BINARY=0 (which
-  # keeps the ~300 MB binary out of the heavy `node` install) so the binary here
-  # does download, into the cached ~/.cache/Cypress.
+  # keeps the ~300 MB binary out of the heavy `node` install) with an empty
+  # string so the binary here does download, into the cached ~/.cache/Cypress.
+  # (It must be "" not "1": Cypress reads any non-"0" value as a download
+  # URL/path, so "1" makes it fetch the binary from "1" and 404.)
   web-e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     env:
-      CYPRESS_INSTALL_BINARY: "1"
+      CYPRESS_INSTALL_BINARY: ""
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
