@@ -7,6 +7,7 @@ import {
   coverLetterSubmitRun,
   draftAttributes,
   draftContent,
+  guidedOnboardingRun,
   INGEST_PHASES,
   interruptsFromEvents,
   onboardingRun,
@@ -463,6 +464,68 @@ describe("resumeIngestRun — streamed 3-phase ingest → proposed version", () 
     const events = resumeIngestRun(args);
     const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
     expect(state).toEqual({ phase: "complete", versionId: "v-1", proposalId: "p-1" });
+  });
+});
+
+describe("guidedOnboardingRun — conversation draft (incl. spine) → proposed version", () => {
+  const draft = {
+    attributes: { full_name: "Ada Lovelace", summary: "Engineer." },
+    spine: {
+      workExperiences: [{ title: "Lead Engineer", organization: "Analytical Engines Ltd" }],
+      skills: [{ name: "TypeScript" }],
+      education: [],
+    },
+  };
+  const args = { threadId: THREAD, runId: RUN, draft, versionId: "v-9", proposalId: "p-9" };
+
+  it("accretes attributes + non-empty spine lists, one delta each, bounded by run start/finish", () => {
+    const events = guidedOnboardingRun(args);
+    const seq = types(events);
+    expect(seq[0]).toBe("run_started");
+    expect(seq.at(-1)).toBe("run_finished");
+    // One snapshot opens the draft; deltas accrete it (never another snapshot).
+    expect(seq.filter((t) => t === "state_snapshot")).toHaveLength(1);
+    // 2 attribute deltas + 2 non-empty spine lists (empty `education` skipped) + 1
+    // terminal phase/version delta = 5.
+    expect(seq.filter((t) => t === "state_delta")).toHaveLength(5);
+    expect(statusFromEvents(events)).toBe("completed");
+  });
+
+  it("finishes carrying the proposed version + proposal on the terminal outcome", () => {
+    expect(outcomeFromEvents(guidedOnboardingRun(args))).toEqual({
+      type: "success",
+      phase: "complete",
+      versionId: "v-9",
+      proposalId: "p-9",
+    });
+  });
+
+  it("folds to a completed state carrying the draft + version + proposal (history restore)", () => {
+    const events = guidedOnboardingRun(args);
+    const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
+    expect(state).toEqual({
+      phase: "complete",
+      draft: {
+        attributes: { full_name: "Ada Lovelace", summary: "Engineer." },
+        spine: {
+          workExperiences: [{ title: "Lead Engineer", organization: "Analytical Engines Ltd" }],
+          skills: [{ name: "TypeScript" }],
+        },
+      },
+      versionId: "v-9",
+      proposalId: "p-9",
+    });
+  });
+
+  it("produces a valid run with an empty draft (no attributes, no spine)", () => {
+    const events = guidedOnboardingRun({
+      ...args,
+      draft: { attributes: {}, spine: {} },
+    });
+    const seq = types(events);
+    // Only the terminal phase/version delta remains.
+    expect(seq.filter((t) => t === "state_delta")).toHaveLength(1);
+    expect(statusFromEvents(events)).toBe("completed");
   });
 });
 

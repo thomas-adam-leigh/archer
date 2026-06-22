@@ -56,6 +56,7 @@ import {
   succeedActivity,
   transitionCandidacy,
   type VersionDecision,
+  writeProfileSpine,
 } from "@archer/db";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { Scalar } from "@scalar/hono-api-reference";
@@ -64,6 +65,7 @@ import {
   coverLetterSubmitRun,
   draftAttributes,
   draftContent,
+  guidedOnboardingRun,
   interruptsFromEvents,
   onboardingRun,
   outcomeFromEvents,
@@ -80,6 +82,7 @@ import { getBrain } from "./brain.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
 import { extractResume } from "./ingest.js";
+import { buildTranscript, hasSpine, structureConversation } from "./onboarding/converse.js";
 import { getScribe } from "./scribe.js";
 import { suggestTargetTitles } from "./titles.js";
 import { stubSynthesizer } from "./tts.js";
@@ -651,6 +654,79 @@ const gOnboard = mk()
         attributes,
         events,
       } as Record<string, unknown>);
+    },
+  )
+  // Finalize the conversational "start from scratch" path (ARC-79): fold the thread's
+  // gathered conversation into a structured draft (attributes + spine) with the real
+  // LLM, persist it as a PROPOSED profile_version incl. spine (the same spine writer
+  // the résumé path uses), and emit a guided run that converges on the shared review
+  // (phase:"complete" + versionId/proposalId, like /onboarding/resume). The brain's
+  // multi-turn ASKING happens earlier over /agui/run; this is the structure+propose
+  // step. The owner is resolved from the thread, not trusted from the caller.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/guided",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(z.object({ threadId: Uuid }), "Guided onboarding finalize"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 404: ERR[404], 500: ERR[500] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { threadId } = c.req.valid("json");
+      const db = getDb();
+      const userId = await getThreadOwner(db, threadId);
+      if (!userId) return c.json({ error: "unknown thread" }, 404);
+
+      const transcript = buildTranscript(
+        restoreThread(await loadThreadEvents(db, threadId)).messages,
+      );
+      const run = await createRun(db, { threadId, input: { threadId } as unknown as Json });
+      try {
+        // Structure the conversation → attributes + spine (real LLM, mocked in CI).
+        const { attributes, spine } = await structureConversation(transcript);
+        const version = await createProfileVersion(db, {
+          userId,
+          label: "onboarding draft",
+          attributes,
+        });
+        if (hasSpine(spine)) await writeProfileSpine(db, userId, version.id, spine);
+        const proposal = await submitVersionProposal(db, {
+          userId,
+          versionId: version.id,
+          title: "Approve your profile",
+        });
+        const events = guidedOnboardingRun({
+          threadId,
+          runId: run.id,
+          draft: { attributes, spine },
+          versionId: version.id,
+          proposalId: proposal.id,
+        });
+        await appendEvents(db, threadId, run.id, events);
+        await finishRun(db, run.id, {
+          status: statusFromEvents(events),
+          outcome: outcomeFromEvents(events) ?? null,
+        });
+        return c.json({
+          threadId,
+          runId: run.id,
+          status: "proposed",
+          versionId: version.id,
+          proposalId: proposal.id,
+          attributes,
+        } as Record<string, unknown>);
+      } catch (err) {
+        // Structuring failed (no/invalid model JSON): record an auditable run_error
+        // so the client can retry, then 500 — mirroring the résumé-ingest failure path.
+        const message = err instanceof Error ? err.message : "guided onboarding failed";
+        const events = runError(threadId, run.id, message);
+        await appendEvents(db, threadId, run.id, events);
+        await finishRun(db, run.id, { status: "error", error: message });
+        return c.json({ error: message }, 500);
+      }
     },
   )
   // Decide a submitted profile-version proposal: approve (optionally with edits)
