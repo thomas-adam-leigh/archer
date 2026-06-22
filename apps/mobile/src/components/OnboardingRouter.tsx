@@ -7,6 +7,7 @@ import {
 } from '../lib/onboarding.js';
 import type { RevisionStarted } from '../lib/profile.js';
 import type { IngestStarted } from '../lib/resume.js';
+import { fetchPrimaryThreadId } from '../lib/threads.js';
 import { CompletionScreen } from './CompletionScreen.js';
 import { ConversationalOnboardingScreen } from './ConversationalOnboardingScreen.js';
 import { HomeScreen } from './HomeScreen.js';
@@ -35,7 +36,15 @@ const RESUME_COPY: Record<
 type Status =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; step: OnboardingStep; proposalId: string | null };
+  | {
+      kind: 'ready';
+      step: OnboardingStep;
+      proposalId: string | null;
+      /** The thread to reattach the processing screen to on a cold restart
+       *  (ARC-82) — resolved only for the `processing` step, null otherwise (or
+       *  when resolution failed, in which case we fall back to the stand-in). */
+      threadId: string | null;
+    };
 
 /**
  * The launch-time onboarding router (ARC-73). After auth it reads the resumable
@@ -56,13 +65,22 @@ export function OnboardingRouter(props: {
   const load = useCallback(() => {
     setStatus({ kind: 'loading' });
     fetchOnboardingProgress(session)
-      .then((p) =>
+      .then(async (p) => {
+        // On a cold restart mid-ingest the run lives only on the server; resolve
+        // the user's thread so the processing screen can reattach to it via
+        // history + Realtime (ARC-82). Failing to resolve is non-fatal — the
+        // processing branch falls back to a static stand-in.
+        const threadId =
+          p.step === 'processing'
+            ? await fetchPrimaryThreadId(session).catch(() => null)
+            : null;
         setStatus({
           kind: 'ready',
           step: p.step,
           proposalId: p.openProposalId,
-        }),
-      )
+          threadId,
+        });
+      })
       .catch(() => setStatus({ kind: 'error' }));
   }, [session]);
 
@@ -185,6 +203,22 @@ export function OnboardingRouter(props: {
   // relaunch for a user who left off here before the submit landed.
   if (status.step === 'submitting') {
     return <CompletionScreen session={session} onComplete={load} />;
+  }
+
+  // The processing step (ARC-82): a returning user who left off mid-ingest. The
+  // run already streamed (or is streaming) server-side, so we reattach the real
+  // processing screen to their thread — it seeds from history and follows
+  // Realtime, then advances to review when the proposed version lands (re-read
+  // progress). If the thread couldn't be resolved we fall back to the stand-in.
+  if (status.step === 'processing' && status.threadId) {
+    return (
+      <ProcessingScreen
+        session={session}
+        ingest={{ threadId: status.threadId }}
+        onComplete={load}
+        onRetry={load}
+      />
+    );
   }
 
   const copy = RESUME_COPY[status.step];

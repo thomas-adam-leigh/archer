@@ -16,15 +16,30 @@ vi.mock('../lib/supabase.js', () => ({
 // client env at import; stub it (no network is made in these render tests).
 vi.mock('../lib/config.js', () => ({ ARCHER_API_URL: 'https://api.test' }));
 
-const { fetchMock, draftMock, accountStateMock, completeMock } = vi.hoisted(
-  () => ({
+const { fetchMock, draftMock, accountStateMock, completeMock, threadMock } =
+  vi.hoisted(() => ({
     fetchMock: vi.fn(),
     draftMock: vi.fn(),
     accountStateMock: vi.fn(),
     completeMock: vi.fn(),
-  }),
-);
+    threadMock: vi.fn(),
+  }));
 vi.mock('../lib/onboarding.js', () => ({ fetchOnboardingProgress: fetchMock }));
+// The processing step reattaches the real processing screen to the resolved
+// thread (ARC-82). Stub the screen to assert routing (its live behaviour has its
+// own suite) and the thread resolver to drive the resume path.
+vi.mock('./ProcessingScreen.js', () => ({
+  ProcessingScreen: ({ ingest }) => (
+    <view>
+      <text>{`reattached:${ingest.threadId}`}</text>
+    </view>
+  ),
+  REVISE_PHASES: [],
+}));
+vi.mock('../lib/threads.js', async (importActual) => ({
+  ...(await importActual()),
+  fetchPrimaryThreadId: threadMock,
+}));
 // The review step renders the profile-review screen, which self-resolves the
 // proposed draft; mock that fetch so the router test drives routing, not network.
 vi.mock('../lib/profile.js', async (importActual) => ({
@@ -59,6 +74,10 @@ beforeEach(() => {
   draftMock.mockReset();
   accountStateMock.mockReset();
   completeMock.mockReset();
+  threadMock.mockReset();
+  // Default to a pending resolve so screens that resolve the thread on mount
+  // (the conversational path) sit on their loading copy; resume tests override.
+  threadMock.mockReturnValue(new Promise(() => {}));
   onLogout.mockReset();
 });
 
@@ -91,6 +110,21 @@ test('a returning user resumes at their step (step=review)', async () => {
   const { findByText } = renderAt('review');
 
   expect(await findByText('Resumed Draft')).toBeInTheDocument();
+});
+
+test('a returning user mid-ingest (step=processing) reattaches to their run', async () => {
+  threadMock.mockResolvedValue('thread-7');
+  const { findByText } = renderAt('processing');
+
+  expect(await findByText('reattached:thread-7')).toBeInTheDocument();
+  expect(threadMock).toHaveBeenCalledTimes(1);
+});
+
+test('the processing step falls back to a stand-in when the thread is unresolved', async () => {
+  threadMock.mockRejectedValue(new Error('offline'));
+  const { findByText } = renderAt('processing');
+
+  expect(await findByText('Building your profile')).toBeInTheDocument();
 });
 
 test('a completed user (step=done) lands on the status-aware home', async () => {
