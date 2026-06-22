@@ -72,6 +72,10 @@ export async function extractResume(
       format: meta.format,
       pages: meta.pages ?? null,
       bytes: meta.bytes,
+      // Keep the extracted text on the proposed version so a later feedback-driven
+      // revision can re-use it instead of rebuilding from feedback alone (ARC-85).
+      // It's the text already produced above — we never re-store the raw file.
+      resumeText: text,
     },
   };
 }

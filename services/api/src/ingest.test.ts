@@ -52,6 +52,9 @@ describe("extractResume", () => {
       format: "pdf",
     });
     expect(extraction.details.bytes).toBeGreaterThan(0);
+    // The extracted text is kept on the version so a later revision can re-use it (ARC-85).
+    expect(typeof extraction.details.resumeText).toBe("string");
+    expect((extraction.details.resumeText as string).length).toBeGreaterThan(0);
   });
 
   it("propagates a text-extraction failure (unsupported file) before the LLM runs", async () => {

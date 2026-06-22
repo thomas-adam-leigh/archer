@@ -525,6 +525,91 @@ export function resumeIngestRun({
   return events;
 }
 
+// ── The draft-revise run: streamed feedback→amended version progress ──────────
+// The review screen's feedback/redraft loop (ARC-85, unblocking ARC-77). When the
+// candidate gives feedback on their proposed draft, the route revises it (re-using the
+// résumé text / conversation, ./onboarding/revise.ts) into a NEW proposed version and
+// emits this run so the client streams live status — exactly like resumeIngestRun, but
+// framed for a revision ("reading your feedback" → "updating your profile"). It
+// converges on the SAME terminal shape (`phase:"complete"` + versionId/proposalId, in
+// both outcome and shared state) so the processing screen auto-advances back to review.
+
+const REVISE_STEP = "revise";
+
+/** The two ordered progress phases a revise run streams, in emission order — the live
+ *  status the review screen renders while the draft is re-built (Milestone 5). */
+export const REVISE_PHASES = [
+  { phase: "reading", message: "Reading your feedback." },
+  { phase: "revising", message: "Updating your profile." },
+] as const;
+
+export interface ReviseDraftRunArgs {
+  threadId: string;
+  runId: string;
+  parentRunId?: string | null;
+  /** The revised proposed version this run produced; rides on the terminal outcome + state. */
+  versionId: string;
+  /** The proposal awaiting the candidate's review; rides on the terminal outcome + state. */
+  proposalId: string;
+}
+
+/**
+ * Produce the ordered event log for one draft-revise run. Opens shared state at the
+ * first phase, walks the revise phases (each a `/phase` StateDelta plus an assistant
+ * status line), and finishes successfully — surfacing the revised `versionId`/
+ * `proposalId` both in the terminal `run_finished` outcome and in shared state. The
+ * final folded shared state is `{ phase: "complete", versionId, proposalId }`, the
+ * same shape resumeIngestRun lands on, so the review screen restores it identically.
+ */
+export function reviseDraftRun({
+  threadId,
+  runId,
+  parentRunId = null,
+  versionId,
+  proposalId,
+}: ReviseDraftRunArgs): AgUiEvent[] {
+  const [first, ...rest] = REVISE_PHASES;
+  const events: AgUiEvent[] = [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "step_started", data: { stepName: REVISE_STEP } },
+    { type: "state_snapshot", data: { snapshot: { phase: first.phase } } },
+  ];
+  const say = (n: number, text: string) => {
+    const id = `${runId}:m${n}`;
+    events.push({ type: "text_message_start", data: { messageId: id, role: "assistant" } });
+    events.push({ type: "text_message_content", data: { messageId: id, delta: text } });
+    events.push({ type: "text_message_end", data: { messageId: id } });
+  };
+  say(1, first.message);
+  rest.forEach((p, i) => {
+    events.push({
+      type: "state_delta",
+      data: { delta: [{ op: "replace", path: "/phase", value: p.phase }] },
+    });
+    say(i + 2, p.message);
+  });
+  events.push({
+    type: "state_delta",
+    data: {
+      delta: [
+        { op: "replace", path: "/phase", value: "complete" },
+        { op: "add", path: "/versionId", value: versionId },
+        { op: "add", path: "/proposalId", value: proposalId },
+      ],
+    },
+  });
+  events.push({ type: "step_finished", data: { stepName: REVISE_STEP } });
+  events.push({
+    type: "run_finished",
+    data: {
+      threadId,
+      runId,
+      outcome: { type: "success", phase: "complete", versionId, proposalId },
+    },
+  });
+  return events;
+}
+
 // ── The Scribe run: cover-letter draft assembly into shared state ─────────────
 // The Scribe drafts the one thing Archer puts in front of an employer in the
 // candidate's name. Like the onboarding Guide, it is a scripted, deterministic
