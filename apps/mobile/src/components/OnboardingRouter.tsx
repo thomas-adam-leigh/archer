@@ -8,6 +8,7 @@ import {
 import type { IngestStarted } from '../lib/resume.js';
 import { HomeScreen } from './HomeScreen.js';
 import { IntroScreen, type OnboardingPath } from './IntroScreen.js';
+import { ProcessingScreen } from './ProcessingScreen.js';
 import { ResumeUploadScreen } from './ResumeUploadScreen.js';
 import { StageScreen } from './StageScreen.js';
 
@@ -94,16 +95,19 @@ export function OnboardingRouter(props: {
   }
 
   if (status.step === 'intro') {
-    // Once the résumé ingest run has started, hand off to the processing screen
-    // (the real, Realtime-subscribed screen lands in ARC-75); show its stand-in.
+    // Once the résumé ingest run has started, hand off to the streamed, non-
+    // interruptible processing screen (ARC-75). On completion it advances to the
+    // review step; a failed run clears the run and returns to the upload screen.
     if (ingest) {
-      const copy = RESUME_COPY.processing;
       return (
-        <StageScreen
-          title={copy.title}
-          subtitle={copy.subtitle}
-          secondaryLabel="Sign out"
-          onSecondary={onLogout}
+        <ProcessingScreen
+          session={session}
+          ingest={ingest}
+          onComplete={() => {
+            setIngest(null);
+            load();
+          }}
+          onRetry={() => setIngest(null)}
         />
       );
     }

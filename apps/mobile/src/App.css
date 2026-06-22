@@ -113,6 +113,33 @@ text {
   color: #fff;
 }
 
+.Phase {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.Phase__mark {
+  width: 22px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #ff6448;
+}
+
+.Phase__label {
+  font-size: 16px;
+}
+
+.Phase--pending .Phase__mark,
+.Phase--pending .Phase__label {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.Phase--done .Phase__mark {
+  color: #c4ffe0;
+}
+
 .Auth__switch {
   margin-top: 16px;
   display: flex;
