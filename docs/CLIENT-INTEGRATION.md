@@ -168,15 +168,19 @@ The slice the backend consumes (`agui.ts:28-35`):
 
 > `forwardedProps.outcome` is the **stub's scripted-outcome hint**: `"interrupt"` makes the stub propose a tool call that needs approval and end on an interrupt; otherwise it completes. This is a stub affordance — a real brain decides on its own.
 
+> **The candidate's turn is recorded.** Send the new answer as the **last** `messages` entry (`role:"user"`); the run records it to the event log as a `user` text message before the assistant reply, so `restoreThread`/`GET …/history` returns both sides — the transcript `POST /onboarding/guided` structures the profile from (ARC-84). Send the full history if you like — only the last turn is new and persisted, so turns never duplicate. **Conversational voice answers** go through this same route as text (transcribe client-side via the `transcribe` edge function first), so spoken answers count identically; `POST /onboarding/voicenote` is the separate tier-2 corpus ingest, not the conversation transcript.
+
 ### The event stream out
 
 A run returns its **full event log** in the JSON response `events` array (this is *not* an SSE/streaming endpoint today — the run executes synchronously and the whole bounded log comes back at once; live delivery to other subscribers is via Realtime, §4). Every run is bounded by `run_started … run_finished` (or `run_error`).
 
-A fresh non-interrupt run emits (`agui.ts:76-89`):
+A fresh non-interrupt run emits:
 
 ```
-run_started → step_started → text_message_start → text_message_content
-→ text_message_end → state_snapshot → step_finished → run_finished{outcome:success}
+run_started → step_started
+→ [text_message_start/content/end {role:"user"}]   ← only when a candidate turn was sent
+→ text_message_start → text_message_content → text_message_end   ← the assistant reply
+→ state_snapshot → step_finished → run_finished{outcome:success}
 ```
 
 An interrupt run additionally emits a `tool_call_start/args/end` triplet, then `state_snapshot` + `messages_snapshot`, then `run_finished{outcome:interrupt, interrupts:[…]}` (`agui.ts:91-157`).

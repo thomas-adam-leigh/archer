@@ -176,6 +176,71 @@ describe("runStub — injected reply text (the real LLM brain, ARC-60)", () => {
   });
 });
 
+describe("runStub — records the candidate's turn (ARC-84)", () => {
+  const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
+
+  it("persists the latest user turn before the assistant reply, restored as the transcript", () => {
+    const events = runStub({
+      threadId: THREAD,
+      runId: RUN,
+      input: { threadId: THREAD, messages: [{ role: "user", content: "I build APIs at Acme." }] },
+      reply: "Great — what are your top skills?",
+    });
+    // Both sides are in the restored transcript, candidate before assistant.
+    const { messages } = restoreThread(events);
+    expect(messages).toEqual([
+      { id: `${RUN}:u1`, role: "user", content: "I build APIs at Acme." },
+      { id: `${RUN}:m1`, role: "assistant", content: "Great — what are your top skills?" },
+    ]);
+  });
+
+  it("adds no user turn for a greeting run with no candidate input", () => {
+    // success() sends no messages — the projection stays assistant-only (unchanged).
+    expect(restoreThread(success()).messages).toEqual([
+      { id: `${RUN}:m1`, role: "assistant", content: GREETING },
+    ]);
+  });
+
+  it("records only the new (last) turn, not the replayed history", () => {
+    // The client sends the full history; only the final user turn is new this run.
+    const events = runStub({
+      threadId: THREAD,
+      runId: RUN,
+      input: {
+        threadId: THREAD,
+        messages: [
+          { role: "user", content: "earlier answer" },
+          { role: "assistant", content: "earlier question" },
+          { role: "user", content: "TypeScript and Go." },
+        ],
+      },
+      reply: "Thanks!",
+    });
+    const userTurns = restoreThread(events).messages.filter((m) => m.role === "user");
+    expect(userTurns).toEqual([{ id: `${RUN}:u1`, role: "user", content: "TypeScript and Go." }]);
+  });
+
+  it("keeps the candidate's turn in the interrupt messages_snapshot", () => {
+    const events = runStub({
+      threadId: THREAD,
+      runId: RUN,
+      input: {
+        threadId: THREAD,
+        messages: [{ role: "user", content: "Email me." }],
+        forwardedProps: { outcome: "interrupt" },
+      },
+      reply: "On it.",
+    });
+    const snap = events.find((e) => e.type === "messages_snapshot")?.data as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(snap.messages).toEqual([
+      { id: `${RUN}:u1`, role: "user", content: "Email me." },
+      { id: `${RUN}:m1`, role: "assistant", content: "On it." },
+    ]);
+  });
+});
+
 describe("restoreThread — history restore projection", () => {
   const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
 

@@ -65,6 +65,18 @@ const GREETING = "Hi — I'm Archer. Let's get your job hunt set up.";
 const STEP = "respond";
 const ACTION = "sendEmail";
 
+/** The candidate's new turn for this run: the last non-assistant message in the
+ *  input, trimmed, or undefined when there is none (e.g. the opening greeting run).
+ *  RunAgentInput.messages carries the full history; only the final turn is new this
+ *  run — earlier turns were already persisted by their own runs, so recording only
+ *  the last one keeps the event log free of duplicates (ARC-84). */
+function latestUserTurn(input: RunAgentInput): string | undefined {
+  const last = input.messages?.at(-1);
+  if (!last || last.role === "assistant") return undefined;
+  const content = last.content?.trim();
+  return content ? content : undefined;
+}
+
 /**
  * Produce the ordered event log for one stubbed run. Always bounded by
  * `run_started` … `run_finished`; emits a TextMessage start/content/end triplet
@@ -84,10 +96,26 @@ export function runStub(args: StubArgs): AgUiEvent[] {
   const events: AgUiEvent[] = [
     { type: "run_started", data: { threadId, runId, parentRunId } },
     { type: "step_started", data: { stepName: STEP } },
+  ];
+
+  // Record the candidate's turn (text, or voice transcribed client-side then sent
+  // here as a message) BEFORE the assistant reply, so the restored transcript holds
+  // both sides — what conversational onboarding structures the profile from (ARC-84).
+  const userTurn = latestUserTurn(input);
+  const userMessageId = `${runId}:u1`;
+  if (userTurn) {
+    events.push(
+      { type: "text_message_start", data: { messageId: userMessageId, role: "user" } },
+      { type: "text_message_content", data: { messageId: userMessageId, delta: userTurn } },
+      { type: "text_message_end", data: { messageId: userMessageId } },
+    );
+  }
+
+  events.push(
     { type: "text_message_start", data: { messageId, role: "assistant" } },
     { type: "text_message_content", data: { messageId, delta: greeting } },
     { type: "text_message_end", data: { messageId } },
-  ];
+  );
 
   if (!wantInterrupt) {
     events.push({ type: "state_snapshot", data: { snapshot: { phase: "greeted" } } });
@@ -129,7 +157,12 @@ export function runStub(args: StubArgs): AgUiEvent[] {
   events.push({ type: "state_snapshot", data: { snapshot: { phase: "awaiting_approval" } } });
   events.push({
     type: "messages_snapshot",
-    data: { messages: [{ id: messageId, role: "assistant", content: greeting }] },
+    data: {
+      messages: [
+        ...(userTurn ? [{ id: userMessageId, role: "user", content: userTurn }] : []),
+        { id: messageId, role: "assistant", content: greeting },
+      ],
+    },
   });
   events.push({ type: "step_finished", data: { stepName: STEP } });
   events.push({
