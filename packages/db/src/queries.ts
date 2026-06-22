@@ -1641,10 +1641,47 @@ export function onboardingProgressFrom(flags: OnboardingFlags): OnboardingProgre
   };
 }
 
-/** The resumable onboarding step for the mobile router (ARC-66). A pure read over
- *  profile_versions + target_titles + negative_criteria + accounts: gathers the
- *  stage flags in one round trip and folds them into the step machine. */
-export async function getOnboardingProgress(db: Db, userId: string): Promise<OnboardingProgress> {
+/** The open profile-version proposal the review screen self-approves with (ARC-86):
+ *  its proposal id + the version it targets, or null when none is awaiting the
+ *  candidate's decision. */
+export interface OpenProfileProposal {
+  /** The open (submitted, not-yet-decided) profile-version proposal id — pass to
+   *  the self-decide route to approve/reject. Null when there is none open. */
+  openProposalId: string | null;
+  /** The proposed profile version that proposal targets, or null when none open. */
+  proposedVersionId: string | null;
+}
+
+/** The user's open (submitted, awaiting-decision) profile-version proposal, if any
+ *  (ARC-86). The {userId, versionId} locator rides on the proposal's plan jsonb (see
+ *  {@link submitVersionProposal}) — there is no FK. Submitting a draft flips it to
+ *  'proposed' and opens exactly one such proposal, so at most one is open at a time;
+ *  newest-first is defensive. Returns null once the proposal leaves 'submitted'
+ *  (approved/rejected). Scoped to the user — only their own proposal is visible. */
+export async function getOpenProfileVersionProposal(
+  db: Db,
+  userId: string,
+): Promise<{ proposalId: string; versionId: string } | null> {
+  const rows = await db<{ proposalId: string; versionId: string }[]>`
+    select id as "proposalId", plan->>'versionId' as "versionId"
+    from proposals
+    where kind = 'profile_version'
+      and status = 'submitted'
+      and plan->>'userId' = ${userId}
+    order by created_at desc
+    limit 1`;
+  return rows[0] ?? null;
+}
+
+/** The resumable onboarding step for the mobile router (ARC-66) plus the open
+ *  profile-version proposal id the review screen self-approves with (ARC-86). A pure
+ *  read over profile_versions + target_titles + negative_criteria + accounts +
+ *  proposals: gathers the stage flags, folds them into the step machine, and attaches
+ *  the open proposal locator (null when none). */
+export async function getOnboardingProgress(
+  db: Db,
+  userId: string,
+): Promise<OnboardingProgress & OpenProfileProposal> {
   const rows = await db<(OnboardingFlags & { negativeCriteriaCaptured: boolean })[]>`
     select
       exists (select 1 from profile_versions where user_id = ${userId})
@@ -1661,7 +1698,12 @@ export async function getOnboardingProgress(db: Db, userId: string): Promise<Onb
         as "negativeCriteriaCaptured",
       exists (select 1 from accounts where user_id = ${userId}
               and status <> 'onboarding') as "accountSubmitted"`;
-  return onboardingProgressFrom(rows[0]);
+  const open = await getOpenProfileVersionProposal(db, userId);
+  return {
+    ...onboardingProgressFrom(rows[0]),
+    openProposalId: open?.proposalId ?? null,
+    proposedVersionId: open?.versionId ?? null,
+  };
 }
 
 /** Submit the account for review. Provisions the row just-in-time and moves it to

@@ -661,7 +661,10 @@ const gOnboard = mk()
   // The precise, resumable onboarding step (ARC-66): the full step machine
   // (intro → processing → review → titles → submitting → done) + the stage flags
   // the spec's resumability questions key on, extending the coarse
-  // /onboarding/state. Pure read; same own-rows service-role auth.
+  // /onboarding/state. Also exposes the open profile-version proposal
+  // (openProposalId/proposedVersionId, ARC-86) so the review screen can self-approve
+  // (POST …/decide/self) and resumability can restore the review step. Pure read;
+  // same own-rows auth.
   .openapi(
     createRoute({
       method: "get",
