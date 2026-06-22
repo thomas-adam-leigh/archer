@@ -1,12 +1,13 @@
 /// <reference types="@lynx-js/rspeedy/client" />
 
 interface ImportMetaEnv {
-  readonly PUBLIC_SUPABASE_URL: string
-  readonly PUBLIC_SUPABASE_PUBLISHABLE_KEY: string
+  readonly PUBLIC_SUPABASE_URL: string;
+  readonly PUBLIC_SUPABASE_PUBLISHABLE_KEY: string;
+  readonly PUBLIC_ARCHER_API_URL: string;
 }
 
 interface ImportMeta {
-  readonly env: ImportMetaEnv
+  readonly env: ImportMetaEnv;
 }
 
 declare module '@lynx-js/types' {
@@ -20,4 +21,4 @@ declare module '@lynx-js/types' {
 }
 
 // This export makes the file a module
-export {}
+export {};
