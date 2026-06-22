@@ -257,11 +257,39 @@ text {
   font-size: 14px;
 }
 
-/* Conversational onboarding (the start-from-scratch chat). */
-.Chat__thread {
+/* Conversational onboarding (the start-from-scratch chat). A fixed-height column:
+   pinned header, flexing scroll area for the transcript, composer pinned at the
+   bottom so the input + actions never scroll off-screen. */
+.Chat {
+  position: relative;
+  z-index: 100;
   display: flex;
   flex-direction: column;
-  margin-top: 16px;
+  width: 100%;
+  height: 100vh;
+}
+
+.Chat__header {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px 8px;
+}
+
+.Chat__thread {
+  flex: 1;
+  min-height: 0; /* allow the scroll area to shrink so the composer stays pinned */
+  display: flex;
+  flex-direction: column;
+  padding: 8px 20px;
+}
+
+.Chat__composer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 20px 24px;
+  background-color: rgba(0, 0, 0, 0.55);
 }
 
 .Chat__bubble {
