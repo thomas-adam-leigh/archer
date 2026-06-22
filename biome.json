@@ -10,6 +10,7 @@
       "!**/coverage",
       "!agent",
       "!apps/mobile",
+      "!apps/web",
       "!pnpm-lock.yaml",
       "!packages/db/supabase",
       "!**/*.generated.ts",

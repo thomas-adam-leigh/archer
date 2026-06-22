@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent:#E8772E; --accent-2:#F4A05A;
+    --bg:#09090a; --bg-2:#0e0e10;
+    --card:rgba(255,255,255,0.042); --card-2:rgba(255,255,255,0.025);
+    --line:rgba(255,255,255,0.09); --line-2:rgba(255,255,255,0.055);
+    --txt:#F6F5F3; --txt2:#a4a39f; --txt3:#6d6c69;
+    --glow:color-mix(in srgb, var(--accent) 40%, transparent);
+    --glow-soft:color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);font-family:"Manrope",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  ::selection{background:color-mix(in srgb,var(--accent) 45%,transparent);color:#fff}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  button{font-family:inherit;cursor:pointer}
+  @keyframes a-fadeup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @keyframes a-fade{from{opacity:0}to{opacity:1}}
+  @keyframes a-pop{0%{opacity:0;transform:scale(.94)}60%{transform:scale(1.01)}100%{opacity:1;transform:scale(1)}}
+  @keyframes a-ring{0%{transform:scale(1);opacity:.5}70%{opacity:0}100%{transform:scale(2.4);opacity:0}}
+  @keyframes a-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+  @keyframes a-spin{to{transform:rotate(360deg)}}
+  @keyframes a-spin-r{to{transform:rotate(-360deg)}}
+  @keyframes a-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+  @keyframes a-float2{0%,100%{transform:translateY(0)}50%{transform:translateY(7px)}}
+  @keyframes a-shimmer{0%{background-position:-220% 0}100%{background-position:220% 0}}
+  @keyframes a-blink{0%,100%{opacity:.25}50%{opacity:1}}
+  @keyframes a-bar{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}
+  @keyframes a-dot{0%,80%,100%{transform:scale(.6);opacity:.35}40%{transform:scale(1);opacity:1}}
+  @keyframes a-glowpulse{0%,100%{opacity:.5}50%{opacity:.9}}
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;overflow-y:auto;overflow-x:hidden;background:
+  radial-gradient(120% 80% at 80% -10%, color-mix(in srgb,var(--accent) 10%,transparent) 0%, transparent 45%),
+  radial-gradient(90% 60% at 8% 110%, rgba(120,140,255,0.05) 0%, transparent 50%),
+  var(--bg);">
+  <div style="position:absolute;inset:0;pointer-events:none;opacity:.5;background-image:radial-gradient(rgba(255,255,255,0.035) 1px, transparent 1px);background-size:26px 26px;background-position:center;mask-image:radial-gradient(110% 90% at 50% 30%, #000 30%, transparent 78%);-webkit-mask-image:radial-gradient(110% 90% at 50% 30%, #000 30%, transparent 78%)"></div>
+
+  <!-- ============ TOP BAR ============ -->
+  <div style="position:relative;z-index:5;max-width:1180px;margin:0 auto;padding:22px 26px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+    <div style="display:flex;align-items:center;gap:11px">
+      <div style="width:30px;height:30px;border-radius:9px;background:linear-gradient(140deg,var(--accent-2),var(--accent));display:flex;align-items:center;justify-content:center;box-shadow:0 6px 22px var(--glow)">
+        <div style="width:11px;height:11px;border-radius:50%;background:#0c0c0d"></div>
+      </div>
+      <span style="font-family:'Space Grotesk';font-weight:700;font-size:18px;letter-spacing:-.01em">Archer</span>
+    </div>
+    <sc-if value="{{ showSteps }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:7px">
+        <sc-for list="{{ steps }}" as="s" hint-placeholder-count="4">
+          <div title="{{ s.label }}" style="width:30px;height:4px;border-radius:3px;transition:background .4s,box-shadow .4s;background:{{ s.bg }};box-shadow:{{ s.shadow }}"></div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <div style="width:74px;display:flex;justify-content:flex-end">
+      <sc-if value="{{ isWelcome }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ signIn }}" style="background:none;border:none;color:var(--txt2);font-size:14px;font-weight:600;padding:6px 4px" style-hover="{{ hoverDim }}">Sign in</button>
+      </sc-if>
+    </div>
+  </div>
+
+  <div style="position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:0 26px 90px;min-height:calc(100vh - 76px)">
+
+  <!-- ================= 1. WELCOME ================= -->
+  <sc-if value="{{ isWelcome }}" hint-placeholder-val="{{ true }}">
+    <div style="display:grid;grid-template-columns:1.05fr .95fr;gap:40px;align-items:center;padding-top:6vh;min-height:78vh">
+      <div style="animation:a-fadeup .7s ease both">
+        <div style="display:inline-flex;align-items:center;gap:9px;padding:7px 14px;border:1px solid var(--line);border-radius:100px;background:var(--card-2);font-size:13px;color:var(--txt2);font-weight:600;margin-bottom:30px">
+          <span style="width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);animation:a-glowpulse 2s infinite"></span>
+          Your autonomous career agent
+        </div>
+        <h1 style="font-family:'Space Grotesk';font-weight:700;font-size:clamp(40px,6vw,72px);line-height:1.02;letter-spacing:-.03em;margin:0 0 22px">
+          Never apply for<br>a job <span style="color:var(--accent)">on your own</span> again.
+        </h1>
+        <p style="font-size:clamp(16px,1.5vw,19px);line-height:1.6;color:var(--txt2);max-width:480px;margin:0 0 38px">
+          Archer learns who you are, then quietly hunts every weekday — filtering, researching, and drafting tailored applications. You only step in for the decisions that matter.
+        </p>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <button onClick="{{ getStarted }}" style="display:inline-flex;align-items:center;gap:10px;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:#160a02;border:none;border-radius:14px;padding:16px 28px;font-size:16px;font-weight:700;box-shadow:0 12px 38px var(--glow);transition:transform .15s,box-shadow .2s" style-hover="{{ hoverLift }}">
+            Get started
+            <span style="font-size:18px">→</span>
+          </button>
+          <span style="font-size:14px;color:var(--txt3)">Takes about 3 minutes · just talk</span>
+        </div>
+        <div style="display:flex;gap:26px;margin-top:48px;flex-wrap:wrap">
+          <sc-for list="{{ welcomeStats }}" as="w" hint-placeholder-count="3">
+            <div>
+              <div style="font-family:'Space Grotesk';font-weight:600;font-size:15px;color:var(--txt)">{{ w.k }}</div>
+              <div style="font-size:13px;color:var(--txt3);margin-top:2px">{{ w.v }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="position:relative;height:440px;display:flex;align-items:center;justify-content:center;animation:a-fade 1s ease both">
+        <div style="position:absolute;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,var(--glow) 0%,transparent 68%);filter:blur(8px);animation:a-glowpulse 4s infinite"></div>
+        <div style="position:relative;width:188px;height:188px;display:flex;align-items:center;justify-content:center">
+          <div style="position:absolute;inset:-30px;border:1px solid var(--line-2);border-radius:50%;animation:a-spin 28s linear infinite"></div>
+          <div style="position:absolute;inset:-58px;border:1px solid rgba(255,255,255,0.04);border-radius:50%;animation:a-spin-r 40s linear infinite"></div>
+          <div style="width:138px;height:138px;border-radius:50%;background:linear-gradient(145deg,var(--accent-2),var(--accent) 60%,#9c4310);box-shadow:0 0 60px var(--glow),inset 0 6px 18px rgba(255,255,255,0.35),inset 0 -10px 24px rgba(0,0,0,0.4);animation:a-breathe 5s ease-in-out infinite"></div>
+        </div>
+        <div style="position:absolute;top:34px;left:-6px;animation:a-float 6s ease-in-out infinite">
+          <div style="display:flex;align-items:center;gap:9px;padding:11px 15px;background:var(--card);border:1px solid var(--line);border-radius:13px;backdrop-filter:blur(14px);box-shadow:0 12px 30px rgba(0,0,0,0.4)">
+            <span style="font-size:15px">🔎</span><span style="font-size:13px;font-weight:600;color:var(--txt)">Scanned 214 roles</span>
+          </div>
+        </div>
+        <div style="position:absolute;bottom:64px;right:-12px;animation:a-float2 7s ease-in-out infinite">
+          <div style="display:flex;align-items:center;gap:9px;padding:11px 15px;background:var(--card);border:1px solid var(--line);border-radius:13px;backdrop-filter:blur(14px);box-shadow:0 12px 30px rgba(0,0,0,0.4)">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)"></span><span style="font-size:13px;font-weight:600;color:var(--txt)">Cover letter drafted</span>
+          </div>
+        </div>
+        <div style="position:absolute;bottom:6px;left:24px;animation:a-float 8s ease-in-out infinite">
+          <div style="display:flex;align-items:center;gap:9px;padding:11px 15px;background:var(--card);border:1px solid var(--line);border-radius:13px;backdrop-filter:blur(14px);box-shadow:0 12px 30px rgba(0,0,0,0.4)">
+            <span style="font-size:15px">✉️</span><span style="font-size:13px;font-weight:600;color:var(--txt)">Applied — Stripe</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ================= 2. MEET ARCHER ================= -->
+  <sc-if value="{{ isMeet }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:760px;margin:0 auto;padding-top:5vh;text-align:center;animation:a-fadeup .6s ease both">
+      <div style="position:relative;width:96px;height:96px;margin:0 auto 26px;display:flex;align-items:center;justify-content:center">
+        <div style="position:absolute;inset:-14px;border-radius:50%;background:radial-gradient(circle,var(--glow) 0%,transparent 70%);animation:a-glowpulse 3.4s infinite"></div>
+        <div style="width:74px;height:74px;border-radius:50%;background:linear-gradient(145deg,var(--accent-2),var(--accent) 60%,#9c4310);box-shadow:0 0 44px var(--glow),inset 0 4px 12px rgba(255,255,255,0.32);animation:a-breathe 4.6s ease-in-out infinite"></div>
+      </div>
+      <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:clamp(26px,3.4vw,38px);letter-spacing:-.02em;margin:0 0 16px">Hi, I'm Archer.</h2>
+      <p style="font-size:clamp(16px,1.6vw,19px);line-height:1.6;color:var(--txt2);max-width:560px;margin:0 auto 40px">
+        I'm here to find your next role. Before I can search on your behalf, I need to understand who you are, what you've done, and where you want to go. Two ways to start —
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;text-align:left">
+        <button onClick="{{ chooseUpload }}" style="position:relative;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:30px 26px;text-align:left;color:var(--txt);transition:border-color .2s,transform .15s,background .2s;overflow:hidden" style-hover="{{ hoverCard }}">
+          <div style="width:46px;height:46px;border-radius:13px;background:color-mix(in srgb,var(--accent) 16%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);display:flex;align-items:center;justify-content:center;margin-bottom:18px;color:var(--accent)">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+          </div>
+          <div style="font-family:'Space Grotesk';font-weight:600;font-size:19px;margin-bottom:7px">Upload my résumé</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--txt2)">The fast track. I'll read your document and build your profile from it in seconds.</div>
+          <div style="margin-top:16px;font-size:13px;font-weight:600;color:var(--accent);display:flex;align-items:center;gap:6px">Word document <span>→</span></div>
+        </button>
+        <button onClick="{{ chooseInterview }}" style="position:relative;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:30px 26px;text-align:left;color:var(--txt);transition:border-color .2s,transform .15s,background .2s;overflow:hidden" style-hover="{{ hoverCard }}">
+          <div style="width:46px;height:46px;border-radius:13px;background:color-mix(in srgb,var(--accent) 16%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);display:flex;align-items:center;justify-content:center;margin-bottom:18px;color:var(--accent)">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+          </div>
+          <div style="font-family:'Space Grotesk';font-weight:600;font-size:19px;margin-bottom:7px">Start from scratch</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--txt2)">No résumé needed. Just talk to me — I'll interview you and build it as we go.</div>
+          <div style="margin-top:16px;font-size:13px;font-weight:600;color:var(--accent);display:flex;align-items:center;gap:6px">A quick conversation <span>→</span></div>
+        </button>
+      </div>
+      <button onClick="{{ goBack }}" style="margin-top:26px;background:none;border:none;color:var(--txt3);font-size:14px;font-weight:600" style-hover="{{ hoverDim }}">← Back</button>
+    </div>
+  </sc-if>
+
+  <!-- ================= 3a. UPLOAD ================= -->
+  <sc-if value="{{ isUpload }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:620px;margin:0 auto;padding-top:6vh;animation:a-fadeup .6s ease both">
+      <div style="text-align:center;margin-bottom:34px">
+        <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:clamp(24px,3vw,32px);letter-spacing:-.02em;margin:0 0 10px">Drop in your résumé</h2>
+        <p style="font-size:16px;color:var(--txt2);margin:0">I'll pull out your experience, links and skills — then show you what I found.</p>
+      </div>
+      <label style="display:block;cursor:pointer">
+        <input type="file" accept=".doc,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange="{{ onFile }}" style="display:none">
+        <div style="border:1.6px dashed var(--line);border-radius:22px;background:var(--card-2);padding:54px 30px;text-align:center;transition:border-color .2s,background .2s" style-hover="{{ hoverDrop }}">
+          <div style="width:64px;height:64px;border-radius:18px;background:color-mix(in srgb,var(--accent) 14%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--accent)">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+          </div>
+          <div style="font-family:'Space Grotesk';font-weight:600;font-size:18px;margin-bottom:6px">Drop your résumé here</div>
+          <div style="font-size:14px;color:var(--txt3)">or click to browse · Word (.doc, .docx)</div>
+          <div style="display:inline-block;margin-top:20px;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:#160a02;border-radius:12px;padding:12px 24px;font-size:15px;font-weight:700;box-shadow:0 10px 28px var(--glow)">Choose file</div>
+        </div>
+      </label>
+      <sc-if value="{{ uploadError }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:16px;padding:14px 16px;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 9%,transparent);border-radius:13px;color:var(--accent-2);font-size:14px;font-weight:600">{{ uploadError }}</div>
+      </sc-if>
+      <div style="margin-top:30px;padding:22px 24px;background:var(--card-2);border:1px solid var(--line-2);border-radius:18px">
+        <div style="font-size:13px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">How it works</div>
+        <sc-for list="{{ uploadSteps }}" as="u" hint-placeholder-count="3">
+          <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:11px">
+            <div style="width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line);flex:none;margin-top:1px;color:var(--txt3);display:flex;align-items:center;justify-content:center;font-size:11px">{{ u.n }}</div>
+            <div style="font-size:14px;line-height:1.5;color:var(--txt2)">{{ u.t }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <button onClick="{{ chooseInterview }}" style="display:block;margin:24px auto 0;background:none;border:none;color:var(--txt3);font-size:14px;font-weight:600" style-hover="{{ hoverDim }}">No résumé handy? Talk to me instead →</button>
+    </div>
+  </sc-if>
+
+  <!-- ================= 3a-b. BUILDING ================= -->
+  <sc-if value="{{ isBuilding }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:560px;margin:0 auto;padding-top:9vh;text-align:center;animation:a-fade .5s ease both">
+      <div style="position:relative;width:160px;height:160px;margin:0 auto 40px;display:flex;align-items:center;justify-content:center">
+        <div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,var(--glow) 0%,transparent 68%);animation:a-glowpulse 2.4s infinite"></div>
+        <div style="position:absolute;inset:6px;border:2px solid transparent;border-top-color:var(--accent);border-right-color:color-mix(in srgb,var(--accent) 40%,transparent);border-radius:50%;animation:a-spin 1.6s linear infinite"></div>
+        <div style="position:absolute;inset:26px;border:1.5px solid transparent;border-bottom-color:color-mix(in srgb,var(--accent) 55%,transparent);border-radius:50%;animation:a-spin-r 2.4s linear infinite"></div>
+        <div style="width:78px;height:78px;border-radius:50%;background:linear-gradient(145deg,var(--accent-2),var(--accent) 60%,#9c4310);box-shadow:0 0 40px var(--glow),inset 0 4px 12px rgba(255,255,255,0.32);animation:a-breathe 3s ease-in-out infinite"></div>
+      </div>
+      <div style="font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:10px">{{ buildFileName }}</div>
+      <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:26px;letter-spacing:-.01em;margin:0 0 8px;min-height:34px">{{ buildStageText }}</h2>
+      <p style="font-size:15px;color:var(--txt2);margin:0 0 30px">Hang tight — I'm reading every line. This can take a moment.</p>
+      <div style="max-width:420px;margin:0 auto 36px">
+        <div style="height:6px;border-radius:6px;background:rgba(255,255,255,0.08);overflow:hidden">
+          <div style="height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent-2),var(--accent));transition:width .5s ease;width:{{ buildPctW }}"></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:380px;margin:0 auto;text-align:left">
+        <sc-for list="{{ buildLog }}" as="b" hint-placeholder-count="3">
+          <div style="display:flex;align-items:center;gap:11px;font-size:14px;color:var(--txt2);opacity:.95;animation:a-fadeup .4s ease both">
+            <span style="width:18px;height:18px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent);font-size:11px">✓</span>
+            {{ b }}
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ================= 3b. INTERVIEW ================= -->
+  <sc-if value="{{ isInterview }}" hint-placeholder-val="{{ false }}">
+    <div style="display:grid;grid-template-columns:1.15fr .85fr;gap:30px;padding-top:2vh;align-items:start">
+      <!-- conversation column -->
+      <div style="display:flex;flex-direction:column;min-height:74vh">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:13px;margin-bottom:22px">
+            <div style="position:relative;width:46px;height:46px;flex:none;display:flex;align-items:center;justify-content:center">
+              <div style="position:absolute;inset:-6px;border-radius:50%;background:radial-gradient(circle,var(--glow) 0%,transparent 70%);animation:a-glowpulse 3s infinite"></div>
+              <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(145deg,var(--accent-2),var(--accent) 60%,#9c4310);box-shadow:0 0 22px var(--glow);animation:a-breathe 4s ease-in-out infinite"></div>
+            </div>
+            <div>
+              <div style="font-family:'Space Grotesk';font-weight:600;font-size:15px">Archer</div>
+              <div style="font-size:12px;color:var(--txt3)">Question {{ qNum }} of {{ qTotal }}</div>
+            </div>
+          </div>
+          <div style="background:var(--card);border:1px solid var(--line);border-radius:20px;border-top-left-radius:6px;padding:24px 26px;max-width:560px;animation:a-pop .45s ease both" key="{{ qNum }}">
+            <p style="font-family:'Space Grotesk';font-weight:500;font-size:clamp(19px,2.2vw,24px);line-height:1.38;letter-spacing:-.01em;margin:0;color:var(--txt)">{{ currentQuestion }}</p>
+          </div>
+
+          <sc-if value="{{ hasUserSaid }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <div style="background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 26%,transparent);border-radius:20px;border-top-right-radius:6px;padding:16px 20px;max-width:480px;animation:a-fadeup .4s ease both">
+                <p style="font-size:16px;line-height:1.5;margin:0;color:var(--txt)">{{ lastUserSaid }}</p>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- sticky mic dock -->
+        <div style="position:sticky;bottom:18px;margin-top:30px;display:flex;flex-direction:column;align-items:center;gap:14px">
+          <sc-if value="{{ micError }}" hint-placeholder-val="{{ false }}">
+            <div style="text-align:center;padding:14px 18px;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 9%,transparent);border-radius:14px;max-width:420px">
+              <div style="font-size:14px;font-weight:600;color:var(--accent-2);margin-bottom:6px">{{ micError }}</div>
+              <button onClick="{{ retryMic }}" style="background:none;border:1px solid var(--line);border-radius:10px;padding:7px 16px;color:var(--txt);font-size:13px;font-weight:600" style-hover="{{ hoverCard }}">Try again</button>
+            </div>
+          </sc-if>
+          <div onClick="{{ toggleListen }}" style="position:relative;width:108px;height:108px;cursor:pointer;display:flex;align-items:center;justify-content:center">
+            <div ref="{{ ring1Ref }}" style="position:absolute;inset:0;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 45%,transparent);opacity:0"></div>
+            <div ref="{{ ring2Ref }}" style="position:absolute;inset:0;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 45%,transparent);opacity:0"></div>
+            <div ref="{{ orbRef }}" style="width:74px;height:74px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:{{ orbBg }};box-shadow:0 0 36px var(--glow);transition:background .3s,transform .08s">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#160a02" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+            </div>
+          </div>
+          <div style="font-size:14px;font-weight:600;color:{{ listenColor }};min-height:20px;text-align:center">{{ listenLabel }}</div>
+          <sc-if value="{{ hasInterim }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:14px;color:var(--txt2);font-style:italic;max-width:440px;text-align:center;min-height:18px">"{{ interim }}"</div>
+          </sc-if>
+          <sc-if value="{{ canSubmitAnswer }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:10px">
+              <button onClick="{{ redoAnswer }}" style="background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px 18px;color:var(--txt);font-size:14px;font-weight:600" style-hover="{{ hoverCard }}">Redo</button>
+              <button onClick="{{ submitAnswer }}" style="background:linear-gradient(135deg,var(--accent-2),var(--accent));border:none;border-radius:11px;padding:9px 22px;color:#160a02;font-size:14px;font-weight:700;box-shadow:0 8px 22px var(--glow)" style-hover="{{ hoverLift }}">Looks right →</button>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+
+      <!-- live profile accretion -->
+      <div style="position:sticky;top:18px">
+        <div style="background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px 22px;backdrop-filter:blur(14px)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-family:'Space Grotesk';font-weight:600;font-size:15px">Your profile, taking shape</div>
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:a-glowpulse 1.6s infinite"></span>
+          </div>
+          <div style="font-size:13px;color:var(--txt3);margin-bottom:18px">I'm structuring this as we talk.</div>
+          <sc-if value="{{ hasCaptured }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <sc-for list="{{ capturedList }}" as="c" hint-placeholder-count="2">
+                <div style="animation:a-fadeup .45s ease both">
+                  <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">{{ c.label }}</div>
+                  <div style="font-size:14px;line-height:1.5;color:var(--txt);background:var(--card-2);border:1px solid var(--line-2);border-radius:12px;padding:11px 13px">{{ c.value }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ capturedEmpty }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:30px 10px;text-align:center;color:var(--txt3);font-size:13px;line-height:1.6;border:1px dashed var(--line-2);border-radius:14px">Nothing yet.<br>Answer my first question and watch this fill in.</div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ================= 4. PROFILE REVEAL ================= -->
+  <sc-if value="{{ isReveal }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:880px;margin:0 auto;padding-top:2vh">
+      <div style="text-align:center;margin-bottom:26px;animation:a-fadeup .5s ease both">
+        <div style="display:inline-flex;align-items:center;gap:9px;padding:6px 13px;border:1px solid var(--line);border-radius:100px;background:var(--card-2);font-size:12px;color:var(--txt2);font-weight:600;margin-bottom:14px">
+          <span style="width:6px;height:6px;border-radius:50%;background:var(--accent)"></span> Draft v{{ profileVersion }} · for your approval
+        </div>
+        <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:clamp(24px,3vw,34px);letter-spacing:-.02em;margin:0 0 8px">Here's you, as I understand you.</h2>
+        <p style="font-size:15px;color:var(--txt2);margin:0">Take a look. If anything's off or missing, just tell me out loud.</p>
+      </div>
+
+      <div style="position:relative;background:var(--card);border:1px solid var(--line);border-radius:24px;overflow:hidden;animation:a-pop .5s ease both">
+        <!-- revising overlay -->
+        <sc-if value="{{ revising }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;inset:0;z-index:9;background:rgba(8,8,9,0.82);backdrop-filter:blur(6px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;animation:a-fade .3s ease both">
+            <div style="position:relative;width:70px;height:70px;display:flex;align-items:center;justify-content:center">
+              <div style="position:absolute;inset:0;border:2px solid transparent;border-top-color:var(--accent);border-radius:50%;animation:a-spin 1.2s linear infinite"></div>
+              <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(145deg,var(--accent-2),var(--accent));box-shadow:0 0 26px var(--glow);animation:a-breathe 2.2s infinite"></div>
+            </div>
+            <div style="font-family:'Space Grotesk';font-weight:600;font-size:18px">{{ reviseLabel }}</div>
+          </div>
+        </sc-if>
+
+        <!-- header -->
+        <div style="padding:32px 34px 26px;border-bottom:1px solid var(--line-2);background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 7%,transparent),transparent)">
+          <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+            <div style="width:74px;height:74px;border-radius:20px;flex:none;background:linear-gradient(140deg,var(--accent-2),var(--accent));display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:700;font-size:28px;color:#160a02;box-shadow:0 10px 28px var(--glow)">{{ profile.initials }}</div>
+            <div style="flex:1;min-width:200px">
+              <h3 style="font-family:'Space Grotesk';font-weight:700;font-size:27px;letter-spacing:-.02em;margin:0 0 4px">{{ profile.name }}</h3>
+              <div style="font-size:16px;color:var(--accent-2);font-weight:600;margin-bottom:8px">{{ profile.title }}</div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--txt2)">
+                <sc-if value="{{ profile.location }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px">📍 {{ profile.location }}</span></sc-if>
+                <sc-if value="{{ profile.email }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px">✉ {{ profile.email }}</span></sc-if>
+                <sc-if value="{{ profile.phone }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px">☎ {{ profile.phone }}</span></sc-if>
+              </div>
+            </div>
+          </div>
+          <sc-if value="{{ hasLinks }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:16px">
+              <sc-for list="{{ linkList }}" as="l" hint-placeholder-count="3">
+                <span style="display:inline-flex;align-items:center;gap:7px;padding:7px 13px;background:var(--card-2);border:1px solid var(--line);border-radius:100px;font-size:13px;color:var(--txt);font-weight:500">
+                  <span style="color:var(--accent)">{{ l.icon }}</span>{{ l.text }}
+                </span>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- body -->
+        <div style="padding:28px 34px 34px;display:flex;flex-direction:column;gap:26px">
+          <sc-if value="{{ profile.summary }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <div style="font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt3);margin-bottom:11px">Summary</div>
+              <p style="font-size:15px;line-height:1.65;color:var(--txt);margin:0">{{ profile.summary }}</p>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ hasExperience }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <div style="font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt3);margin-bottom:15px">Experience</div>
+              <div style="display:flex;flex-direction:column;gap:20px">
+                <sc-for list="{{ profile.experience }}" as="x" hint-placeholder-count="2">
+                  <div style="display:flex;gap:15px">
+                    <div style="display:flex;flex-direction:column;align-items:center;flex:none;padding-top:4px">
+                      <div style="width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--glow)"></div>
+                      <div style="width:1px;flex:1;background:var(--line);margin-top:6px"></div>
+                    </div>
+                    <div style="flex:1">
+                      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
+                        <div style="font-family:'Space Grotesk';font-weight:600;font-size:16px">{{ x.role }}</div>
+                        <div style="font-size:13px;color:var(--txt3);white-space:nowrap">{{ x.period }}</div>
+                      </div>
+                      <div style="font-size:14px;color:var(--accent-2);font-weight:500;margin:2px 0 9px">{{ x.company }}</div>
+                      <sc-for list="{{ x.bullets }}" as="bt" hint-placeholder-count="2">
+                        <div style="display:flex;gap:9px;font-size:14px;line-height:1.55;color:var(--txt2);margin-bottom:5px">
+                          <span style="color:var(--accent);flex:none">·</span>{{ bt }}
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:26px">
+            <sc-if value="{{ hasEducation }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <div style="font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt3);margin-bottom:13px">Education</div>
+                <sc-for list="{{ profile.education }}" as="e" hint-placeholder-count="1">
+                  <div style="margin-bottom:13px">
+                    <div style="font-weight:600;font-size:15px">{{ e.degree }}</div>
+                    <div style="font-size:13px;color:var(--txt2);margin-top:2px">{{ e.school }}</div>
+                    <div style="font-size:12px;color:var(--txt3);margin-top:1px">{{ e.period }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ hasCerts }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <div style="font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt3);margin-bottom:13px">Courses & Certifications</div>
+                <sc-for list="{{ profile.certifications }}" as="ct" hint-placeholder-count="2">
+                  <div style="display:flex;gap:9px;font-size:14px;line-height:1.5;color:var(--txt);margin-bottom:8px">
+                    <span style="color:var(--accent);flex:none">✦</span>{{ ct }}
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ hasSkills }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <div style="font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt3);margin-bottom:13px">Skills</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <sc-for list="{{ profile.skills }}" as="sk" hint-placeholder-count="6">
+                  <span style="padding:7px 13px;background:var(--card-2);border:1px solid var(--line);border-radius:100px;font-size:13px;font-weight:500;color:var(--txt)">{{ sk }}</span>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+
+      <!-- action dock -->
+      <div style="position:sticky;bottom:18px;margin-top:22px;display:flex;flex-direction:column;align-items:center;gap:14px">
+        <sc-if value="{{ micError }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:12px 16px;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 9%,transparent);border-radius:13px;font-size:13px;color:var(--accent-2);font-weight:600">{{ micError }} · <span onClick="{{ retryMic }}" style="text-decoration:underline;cursor:pointer">retry</span></div>
+        </sc-if>
+        <sc-if value="{{ hasInterim }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:14px;color:var(--txt2);font-style:italic;max-width:520px;text-align:center">"{{ interim }}"</div>
+        </sc-if>
+        <div style="display:flex;align-items:center;gap:14px;background:rgba(10,10,11,0.7);backdrop-filter:blur(16px);border:1px solid var(--line);border-radius:18px;padding:12px 14px;box-shadow:0 14px 40px rgba(0,0,0,0.5)">
+          <button onClick="{{ approveProfile }}" style="display:inline-flex;align-items:center;gap:9px;background:linear-gradient(135deg,var(--accent-2),var(--accent));border:none;border-radius:13px;padding:14px 24px;color:#160a02;font-size:15px;font-weight:700;box-shadow:0 8px 24px var(--glow)" style-hover="{{ hoverLift }}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#160a02" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            This is me
+          </button>
+          <div style="width:1px;height:30px;background:var(--line)"></div>
+          <button onClick="{{ toggleListen }}" style="display:inline-flex;align-items:center;gap:10px;background:{{ feedbackBtnBg }};border:1px solid var(--line);border-radius:13px;padding:13px 20px;color:var(--txt);font-size:15px;font-weight:600;transition:background .25s" style-hover="{{ hoverCard }}">
+            <span style="position:relative;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center">
+              <span ref="{{ orbRef }}" style="position:absolute;inset:0;border-radius:50%;background:{{ feedbackDotBg }};transition:transform .08s"></span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:relative;color:{{ feedbackIconColor }}"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+            </span>
+            {{ feedbackLabel }}
+          </button>
+        </div>
+        <sc-if value="{{ canSubmitAnswer }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ submitFeedback }}" style="background:var(--card);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);border-radius:12px;padding:10px 22px;color:var(--accent-2);font-size:14px;font-weight:700" style-hover="{{ hoverCard }}">Send to Archer →</button>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ================= 5. JOB TITLES ================= -->
+  <sc-if value="{{ isTitles }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:680px;margin:0 auto;padding-top:3vh">
+      <div style="text-align:center;margin-bottom:28px;animation:a-fadeup .5s ease both">
+        <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:clamp(24px,3vw,34px);letter-spacing:-.02em;margin:0 0 8px">Here's what I'll hunt for.</h2>
+        <p style="font-size:15px;color:var(--txt2);margin:0;max-width:480px;margin:0 auto">Your target titles, ranked. Want a different order or a different role? Just say so.</p>
+      </div>
+
+      <div style="position:relative;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:14px;animation:a-pop .5s ease both">
+        <sc-if value="{{ titlesRevising }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;inset:0;z-index:9;background:rgba(8,8,9,0.82);backdrop-filter:blur(6px);border-radius:22px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+            <div style="position:relative;width:60px;height:60px;display:flex;align-items:center;justify-content:center">
+              <div style="position:absolute;inset:0;border:2px solid transparent;border-top-color:var(--accent);border-radius:50%;animation:a-spin 1.2s linear infinite"></div>
+              <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(145deg,var(--accent-2),var(--accent));box-shadow:0 0 22px var(--glow);animation:a-breathe 2.2s infinite"></div>
+            </div>
+            <div style="font-family:'Space Grotesk';font-weight:600;font-size:16px">{{ reviseLabel }}</div>
+          </div>
+        </sc-if>
+        <sc-for list="{{ titles }}" as="t" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:16px;padding:16px 16px;border-radius:15px;margin-bottom:6px;transition:background .2s;background:{{ t.rowBg }}">
+            <div style="width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:700;font-size:16px;background:{{ t.badgeBg }};color:{{ t.badgeColor }};border:1px solid {{ t.badgeBorder }}">{{ t.rank }}</div>
+            <div style="flex:1">
+              <div style="font-family:'Space Grotesk';font-weight:600;font-size:17px">{{ t.title }}</div>
+              <div style="font-size:13px;color:var(--txt3);margin-top:2px">{{ t.note }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- rule outs -->
+      <div style="margin-top:18px;background:var(--card-2);border:1px solid var(--line-2);border-radius:18px;padding:20px 22px">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+          <div style="font-family:'Space Grotesk';font-weight:600;font-size:15px">Never send me</div>
+        </div>
+        <div style="font-size:13px;color:var(--txt3);margin-bottom:14px">So I can filter sharply from day one. Tell me anything to rule out.</div>
+        <sc-if value="{{ hasRuleOuts }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <sc-for list="{{ ruleOuts }}" as="r" hint-placeholder-count="1">
+              <span style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;background:color-mix(in srgb,var(--accent) 10%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);border-radius:100px;font-size:13px;font-weight:600;color:var(--accent-2)">⊘ {{ r }}</span>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noRuleOuts }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:13px;color:var(--txt3);font-style:italic">Nothing ruled out yet — say something like "nothing in .NET or C#".</div>
+        </sc-if>
+      </div>
+
+      <!-- action dock -->
+      <div style="position:sticky;bottom:18px;margin-top:22px;display:flex;flex-direction:column;align-items:center;gap:14px">
+        <sc-if value="{{ micError }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:12px 16px;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 9%,transparent);border-radius:13px;font-size:13px;color:var(--accent-2);font-weight:600">{{ micError }} · <span onClick="{{ retryMic }}" style="text-decoration:underline;cursor:pointer">retry</span></div>
+        </sc-if>
+        <sc-if value="{{ hasInterim }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:14px;color:var(--txt2);font-style:italic;max-width:520px;text-align:center">"{{ interim }}"</div>
+        </sc-if>
+        <div style="display:flex;align-items:center;gap:14px;background:rgba(10,10,11,0.7);backdrop-filter:blur(16px);border:1px solid var(--line);border-radius:18px;padding:12px 14px;box-shadow:0 14px 40px rgba(0,0,0,0.5)">
+          <button onClick="{{ approveTitles }}" style="display:inline-flex;align-items:center;gap:9px;background:linear-gradient(135deg,var(--accent-2),var(--accent));border:none;border-radius:13px;padding:14px 24px;color:#160a02;font-size:15px;font-weight:700;box-shadow:0 8px 24px var(--glow)" style-hover="{{ hoverLift }}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#160a02" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Go find me these
+          </button>
+          <div style="width:1px;height:30px;background:var(--line)"></div>
+          <button onClick="{{ toggleListen }}" style="display:inline-flex;align-items:center;gap:10px;background:{{ feedbackBtnBg }};border:1px solid var(--line);border-radius:13px;padding:13px 20px;color:var(--txt);font-size:15px;font-weight:600;transition:background .25s" style-hover="{{ hoverCard }}">
+            <span style="position:relative;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center">
+              <span ref="{{ orbRef }}" style="position:absolute;inset:0;border-radius:50%;background:{{ feedbackDotBg }};transition:transform .08s"></span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:relative;color:{{ feedbackIconColor }}"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+            </span>
+            {{ feedbackLabel }}
+          </button>
+        </div>
+        <sc-if value="{{ canSubmitAnswer }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ submitTitleFeedback }}" style="background:var(--card);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);border-radius:12px;padding:10px 22px;color:var(--accent-2);font-size:14px;font-weight:700" style-hover="{{ hoverCard }}">Send to Archer →</button>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ================= 6. DONE / HOME ================= -->
+  <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:600px;margin:0 auto;padding-top:6vh;text-align:center;animation:a-fadeup .6s ease both">
+      <div style="position:relative;width:112px;height:112px;margin:0 auto 26px;display:flex;align-items:center;justify-content:center">
+        <div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,var(--glow) 0%,transparent 68%);animation:a-glowpulse 3.4s infinite"></div>
+        <div ref="{{ ring1Ref }}" style="position:absolute;inset:8px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 40%,transparent);animation:a-ring 3s ease-out infinite"></div>
+        <div ref="{{ ring2Ref }}" style="position:absolute;inset:8px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 40%,transparent);animation:a-ring 3s ease-out infinite 1.5s"></div>
+        <div style="width:78px;height:78px;border-radius:50%;background:linear-gradient(145deg,var(--accent-2),var(--accent) 60%,#9c4310);box-shadow:0 0 44px var(--glow),inset 0 4px 12px rgba(255,255,255,0.32);animation:a-breathe 4.4s ease-in-out infinite"></div>
+      </div>
+      <div style="display:inline-flex;align-items:center;gap:9px;padding:7px 15px;border:1px solid {{ statusBorder }};border-radius:100px;background:{{ statusBg }};font-size:13px;font-weight:600;color:{{ statusColor }};margin-bottom:22px">
+        <span style="width:8px;height:8px;border-radius:50%;background:{{ statusDot }};box-shadow:0 0 8px {{ statusDot }};animation:a-glowpulse 1.8s infinite"></span>{{ statusPill }}
+      </div>
+      <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:clamp(26px,3.4vw,38px);letter-spacing:-.02em;margin:0 0 16px;line-height:1.1">{{ homeTitle }}</h2>
+      <p style="font-size:clamp(15px,1.6vw,18px);line-height:1.6;color:var(--txt2);max-width:460px;margin:0 auto 36px">{{ homeBody }}</p>
+      <!-- RESTING / SCHEDULED -->
+      <sc-if value="{{ showResting }}" hint-placeholder-val="{{ true }}">
+        <div style="max-width:432px;margin:0 auto;text-align:left">
+          <div style="background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px 20px;margin-bottom:14px;display:flex;gap:15px;align-items:center">
+            <div style="width:46px;height:46px;border-radius:13px;flex:none;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 14%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);color:var(--accent)">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/></svg>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt3);margin-bottom:3px">Next run</div>
+              <div style="font-family:'Space Grotesk';font-weight:600;font-size:19px;color:var(--txt)">{{ nextRunLabel }} · {{ nextRunTime }}</div>
+              <div style="font-size:13px;color:var(--txt2);margin-top:3px">Archer runs every weekday at 08:00 and 13:00, then rests.</div>
+            </div>
+          </div>
+          <sc-if value="{{ hasLastFound }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:13px 16px;border-radius:13px;background:color-mix(in srgb,var(--accent) 9%,transparent);border:1px solid color-mix(in srgb,var(--accent) 26%,transparent);font-size:13px;color:var(--accent-2);font-weight:600;margin-bottom:14px">✦ Last run found {{ lastFound }} roles — I'm lining them up for your approval.</div>
+          </sc-if>
+          <div style="background:var(--card-2);border:1px solid var(--line-2);border-radius:18px;padding:16px 18px">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt3);margin-bottom:13px">Where I'll look</div>
+            <sc-for list="{{ scanSources }}" as="src" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:13px;padding:11px 13px;border-radius:12px;background:var(--card);border:1px solid var(--line-2);margin-bottom:8px">
+                <div style="width:32px;height:32px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:700;font-size:14px;background:rgba(255,255,255,0.05);color:var(--txt2)">{{ src.initial }}</div>
+                <div style="flex:1">
+                  <div style="font-weight:600;font-size:14px;color:{{ src.nameColor }}">{{ src.name }}</div>
+                  <div style="font-size:12px;color:var(--txt3);margin-top:1px">{{ src.statusText }}</div>
+                </div>
+                <sc-if value="{{ src.spinning }}" hint-placeholder-val="{{ false }}"><div style="width:18px;height:18px;border:2px solid transparent;border-top-color:var(--accent);border-radius:50%;animation:a-spin .9s linear infinite;flex:none"></div></sc-if>
+                <sc-if value="{{ src.doneCheck }}" hint-placeholder-val="{{ false }}"><div style="width:20px;height:20px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent-2);font-size:11px">✓</div></sc-if>
+                <sc-if value="{{ src.queued }}" hint-placeholder-val="{{ true }}"><div style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.18);flex:none"></div></sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;justify-content:center;margin-top:24px;flex-wrap:wrap">
+          <button onClick="{{ startScan }}" style="display:inline-flex;align-items:center;gap:9px;background:linear-gradient(135deg,var(--accent-2),var(--accent));border:none;border-radius:13px;padding:13px 24px;color:#160a02;font-size:15px;font-weight:700;box-shadow:0 10px 28px var(--glow)" style-hover="{{ hoverLift }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#160a02" stroke="none"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+            Watch a run
+          </button>
+          <button onClick="{{ restart }}" style="background:none;border:1px solid var(--line);border-radius:13px;padding:13px 22px;color:var(--txt2);font-size:14px;font-weight:600" style-hover="{{ hoverCard }}">Start over</button>
+        </div>
+      </sc-if>
+
+      <!-- SCANNING -->
+      <sc-if value="{{ isScanning }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:440px;margin:0 auto;text-align:left">
+          <div style="height:6px;border-radius:6px;background:rgba(255,255,255,0.08);overflow:hidden;margin-bottom:7px">
+            <div style="height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent-2),var(--accent));transition:width .5s ease;width:{{ scanPctW }}"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--txt2);margin-bottom:18px">
+            <span>{{ totalSeen }} roles seen</span><span style="color:var(--accent-2);font-weight:600">{{ totalShort }} shortlisted</span>
+          </div>
+          <div style="background:var(--card-2);border:1px solid var(--line-2);border-radius:18px;padding:16px 18px">
+            <sc-for list="{{ scanSources }}" as="src" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:13px;padding:11px 13px;border-radius:12px;background:var(--card);border:1px solid var(--line-2);margin-bottom:8px">
+                <div style="width:32px;height:32px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:700;font-size:14px;background:rgba(255,255,255,0.05);color:var(--txt2)">{{ src.initial }}</div>
+                <div style="flex:1">
+                  <div style="font-weight:600;font-size:14px;color:{{ src.nameColor }}">{{ src.name }}</div>
+                  <div style="font-size:12px;color:var(--txt3);margin-top:1px">{{ src.statusText }}</div>
+                </div>
+                <sc-if value="{{ src.spinning }}" hint-placeholder-val="{{ false }}"><div style="width:18px;height:18px;border:2px solid transparent;border-top-color:var(--accent);border-radius:50%;animation:a-spin .9s linear infinite;flex:none"></div></sc-if>
+                <sc-if value="{{ src.doneCheck }}" hint-placeholder-val="{{ false }}"><div style="width:20px;height:20px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent-2);font-size:11px">✓</div></sc-if>
+                <sc-if value="{{ src.queued }}" hint-placeholder-val="{{ true }}"><div style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.18);flex:none"></div></sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ scanDone }}" hint-placeholder-val="{{ false }}">
+            <div style="text-align:center;margin-top:18px;font-family:'Space Grotesk';font-weight:600;font-size:16px;color:var(--accent-2);animation:a-fadeup .4s ease both">Sweep complete — {{ totalShort }} shortlisted ✦</div>
+          </sc-if>
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:820},&quot;accentColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#E8772E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#E8772E&quot;,&quot;#6E8BF5&quot;,&quot;#34B27B&quot;,&quot;#C969E0&quot;]},&quot;archerSpeaks&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;jumpTo&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;flow&quot;,&quot;options&quot;:[&quot;flow&quot;,&quot;welcome&quot;,&quot;meet&quot;,&quot;upload&quot;,&quot;building&quot;,&quot;interview&quot;,&quot;reveal&quot;,&quot;titles&quot;,&quot;done&quot;],&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.orbRef = React.createRef();
+    this.ring1Ref = React.createRef();
+    this.ring2Ref = React.createRef();
+    const saved = this.load();
+    this.state = Object.assign({
+      screen:'welcome', path:null,
+      uploadError:'', buildStage:0, buildPct:0, buildFileName:'', buildLog:[],
+      qIndex:0, captured:[], lastUserSaid:'', listening:false, interim:'', pendingAnswer:'', micError:'',
+      profile:null, profileVersion:1, revising:false, reviseLabel:'',
+      titles:[], ruleOuts:[], titlesRevising:false,
+      homeStatus:'review', scan:null, lastFound:0
+    }, saved||{});
+    // transient resets
+    this.state.listening=false; this.state.interim=''; this.state.pendingAnswer=''; this.state.micError='';
+    this.state.revising=false; this.state.titlesRevising=false;
+    this.questions = [
+      {key:'intro', label:'About', q:"To start — what's your name, and what do you do?"},
+      {key:'recent', label:'Recent role', q:"Tell me about your most recent role. Where, and what did you work on?"},
+      {key:'path', label:'Background', q:"What came before that? Walk me through your path."},
+      {key:'education', label:'Education', q:"Where did you study, or how did you learn your craft?"},
+      {key:'skills', label:'Skills', q:"What are you genuinely great at — the tools and languages you reach for?"},
+      {key:'ambition', label:'Ambition', q:"Now the fun part: what do you want next? The role you'd be thrilled to land."},
+      {key:'avoid', label:'Rule out', q:"Last thing — what should I never send you? Anything you'd rather avoid."}
+    ];
+  }
+
+  // ---------- persistence ----------
+  load(){ try{ const r=localStorage.getItem('archer_onboard_v1'); return r?JSON.parse(r):null; }catch(e){ return null; } }
+  persist(){
+    try{
+      const s=this.state;
+      localStorage.setItem('archer_onboard_v1', JSON.stringify({
+        screen:s.screen, path:s.path, buildStage:s.buildStage, buildPct:s.buildPct, buildFileName:s.buildFileName, buildLog:s.buildLog,
+        qIndex:s.qIndex, captured:s.captured, lastUserSaid:s.lastUserSaid,
+        profile:s.profile, profileVersion:s.profileVersion, titles:s.titles, ruleOuts:s.ruleOuts, homeStatus:s.homeStatus, lastFound:s.lastFound
+      }));
+    }catch(e){}
+  }
+  set(patch, cb){ this.setState(patch, ()=>{ this.persist(); if(cb) cb(); }); }
+
+  componentDidMount(){
+    if(this.props.accentColor){ document.documentElement.style.setProperty('--accent', this.props.accentColor); }
+    const jump = this.props.jumpTo;
+    if(jump && jump!=='flow'){ this.demoSeed(jump); }
+    else {
+      const s=this.state;
+      if(s.screen==='building'){ this.set({screen: s.profile?'reveal':'upload'}); }
+      else if(s.screen==='interview'){ setTimeout(()=>this.speak(this.questions[s.qIndex]?.q),500); }
+      else if(s.screen==='done'){ if(s.homeStatus==='scanning'){ this.set({homeStatus:'resting'}); } else if(s.homeStatus==='review'){ this.scheduleResting(); } }
+    }
+  }
+  componentWillUnmount(){ this.teardownAudio(); try{ if(this._rec) this._rec.abort(); }catch(e){} if(this._activate) clearTimeout(this._activate); if(this._scanT) clearTimeout(this._scanT); if(this._scanIv) clearInterval(this._scanIv); window.speechSynthesis && window.speechSynthesis.cancel(); }
+
+  // ---------- demo seeding for jumpTo prop ----------
+  demoSeed(screen){
+    const patch={screen};
+    if(['reveal','titles','done'].includes(screen)){ patch.profile=this.sampleProfile(); patch.path='upload'; }
+    if(['titles','done'].includes(screen)){ const t=this.fallbackTitles(); patch.titles=t.titles; patch.ruleOuts=t.ruleOuts; }
+    if(screen==='done'){ patch.homeStatus='resting'; }
+    if(screen==='building'){ patch.buildFileName='Jordan_Mensah_CV.docx'; patch.path='upload'; }
+    if(screen==='interview'){ patch.path='scratch'; patch.captured=[{label:'About',value:"Jordan Mensah — a senior product engineer."}]; patch.qIndex=1; }
+    this.set(patch, ()=>{
+      if(screen==='building') this.runBuild();
+      if(screen==='interview') setTimeout(()=>this.speak(this.questions[1].q),400);
+      // done is shown resting
+    });
+  }
+
+  // ---------- navigation ----------
+  getStarted(){ this.set({screen:'meet'}); }
+  signIn(){ this.set({screen:'meet'}); }
+  goBack(){ this.set({screen:'welcome'}); }
+  chooseUpload(){ this.set({screen:'upload', path:'upload', uploadError:''}); }
+  chooseInterview(){
+    this.set({screen:'interview', path:'scratch'}, ()=>{
+      setTimeout(()=>this.speak(this.questions[this.state.qIndex].q), 400);
+    });
+  }
+  restart(){ try{localStorage.removeItem('archer_onboard_v1');}catch(e){} this.teardownAudio();
+    this.set({screen:'welcome', path:null, qIndex:0, captured:[], lastUserSaid:'', profile:null, profileVersion:1, titles:[], ruleOuts:[], homeStatus:'review', buildStage:0, buildPct:0, buildLog:[], micError:'', interim:'', pendingAnswer:'', listening:false}); }
+
+  // ---------- upload path ----------
+  onFile(e){
+    const f=e.target.files && e.target.files[0];
+    if(!f) return;
+    const ok=/\.(docx?|)$/i.test(f.name) && /word|document|octet|^$/i.test(f.type) || /\.docx?$/i.test(f.name);
+    if(!/\.docx?$/i.test(f.name)){ this.set({uploadError:"That doesn't look like a Word document. Please upload a .doc or .docx file."}); return; }
+    this.set({screen:'building', buildFileName:f.name, buildStage:0, buildPct:0, buildLog:[], uploadError:''}, ()=>this.runBuild());
+  }
+  runBuild(){
+    const stages=[
+      {t:'Reading your résumé…', log:'Read your résumé', pct:18},
+      {t:'Pulling out your experience…', log:'Found 3 roles and your career timeline', pct:42},
+      {t:'Finding your links…', log:'Picked up LinkedIn, GitHub and your site', pct:64},
+      {t:'Structuring your skills…', log:'Organised your skills and tools', pct:82},
+      {t:'Building your profile…', log:'Assembled your candidate profile', pct:100}
+    ];
+    let i=0;
+    const tick=()=>{
+      if(i>=stages.length){ this.finishBuild(); return; }
+      const st=stages[i];
+      this.set({buildStage:i, buildPct:st.pct, buildLog:[...this.state.buildLog, st.log].slice(-5)});
+      i++;
+      this._buildT=setTimeout(tick, 1500 + Math.random()*900);
+    };
+    tick();
+  }
+  async finishBuild(){
+    let profile=this.sampleProfile();
+    this.set({profile, profileVersion:1, screen:'reveal'});
+  }
+
+  // ---------- interview voice ----------
+  get rec(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR) return null;
+    if(!this._rec){
+      const r=new SR(); r.continuous=false; r.interimResults=true; r.lang='en-US';
+      r.onresult=(ev)=>{
+        let intr='', fin='';
+        for(let i=ev.resultIndex;i<ev.results.length;i++){
+          const t=ev.results[i][0].transcript;
+          if(ev.results[i].isFinal) fin+=t; else intr+=t;
+        }
+        if(fin){ this.set({pendingAnswer:(this.state.pendingAnswer+' '+fin).trim(), interim:''}); }
+        else { this.setState({interim:intr}); }
+      };
+      r.onerror=(e)=>{
+        if(e.error==='not-allowed'||e.error==='service-not-allowed'){ this.set({micError:"I couldn't reach your microphone. Check your browser's mic permission and try again.", listening:false}); }
+        else if(e.error==='no-speech'){ this.set({listening:false}); }
+        else { this.set({listening:false}); }
+        this.teardownAudio();
+      };
+      r.onend=()=>{ if(this.state.listening){ this.set({listening:false}); this.teardownAudio(); } };
+      this._rec=r;
+    }
+    return this._rec;
+  }
+  async setupAudio(){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      this._stream=stream;
+      const Ctx=window.AudioContext||window.webkitAudioContext;
+      this._ctx=new Ctx();
+      const src=this._ctx.createMediaStreamSource(stream);
+      this._an=this._ctx.createAnalyser(); this._an.fftSize=256;
+      src.connect(this._an);
+      this._data=new Uint8Array(this._an.frequencyBinCount);
+      const loop=()=>{
+        if(!this._an) return;
+        this._an.getByteFrequencyData(this._data);
+        let sum=0; for(let i=0;i<this._data.length;i++) sum+=this._data[i];
+        const lvl=Math.min(1, (sum/this._data.length)/70);
+        const orb=this.orbRef.current;
+        if(orb) orb.style.transform='scale('+(1+lvl*0.45)+')';
+        const r1=this.ring1Ref.current, r2=this.ring2Ref.current;
+        if(r1){ r1.style.opacity=String(0.15+lvl*0.5); r1.style.transform='scale('+(1+lvl*0.7)+')'; }
+        if(r2){ r2.style.opacity=String(0.1+lvl*0.35); r2.style.transform='scale('+(1+lvl*1.1)+')'; }
+        this._raf=requestAnimationFrame(loop);
+      };
+      loop();
+      return true;
+    }catch(e){
+      this.set({micError:"I couldn't reach your microphone. Check your browser's mic permission and try again.", listening:false});
+      return false;
+    }
+  }
+  teardownAudio(){
+    if(this._raf) cancelAnimationFrame(this._raf); this._raf=null;
+    if(this._stream){ this._stream.getTracks().forEach(t=>t.stop()); this._stream=null; }
+    if(this._ctx){ try{this._ctx.close();}catch(e){} this._ctx=null; }
+    this._an=null;
+    const orb=this.orbRef.current; if(orb) orb.style.transform='';
+    const r1=this.ring1Ref.current, r2=this.ring2Ref.current;
+    if(r1){r1.style.opacity='0';r1.style.transform='';} if(r2){r2.style.opacity='0';r2.style.transform='';}
+  }
+  async toggleListen(){
+    if(this.state.listening){ this.stopListen(); return; }
+    window.speechSynthesis && window.speechSynthesis.cancel();
+    this.set({micError:'', interim:''});
+    const ok=await this.setupAudio();
+    if(!ok) return;
+    this.set({listening:true});
+    const r=this.rec;
+    if(r){ try{ r.start(); }catch(e){} }
+  }
+  stopListen(){
+    this.set({listening:false});
+    const r=this._rec; if(r){ try{ r.stop(); }catch(e){} }
+    this.teardownAudio();
+  }
+  retryMic(){ this.set({micError:''}); this.toggleListen(); }
+  redoAnswer(){ this.set({pendingAnswer:'', interim:''}); }
+
+  speak(text){
+    if(!text) return;
+    if(this.props.archerSpeaks===false) return;
+    try{
+      const synth=window.speechSynthesis; if(!synth) return;
+      synth.cancel();
+      const u=new SpeechSynthesisUtterance(text);
+      u.rate=1.02; u.pitch=1.0;
+      const vs=synth.getVoices();
+      const pref=vs.find(v=>/(Google US English|Samantha|Jenny|Aria|Daniel)/i.test(v.name))||vs.find(v=>/en[-_]US/i.test(v.lang))||vs[0];
+      if(pref) u.voice=pref;
+      synth.speak(u);
+    }catch(e){}
+  }
+
+  submitAnswer(){
+    const ans=(this.state.pendingAnswer||'').trim(); if(!ans) return;
+    const q=this.questions[this.state.qIndex];
+    const captured=[...this.state.captured.filter(c=>c.key!==q.key), {key:q.key, label:q.label, value:ans}];
+    const next=this.state.qIndex+1;
+    if(next>=this.questions.length){
+      this.set({captured, lastUserSaid:ans, pendingAnswer:'', interim:'', listening:false}, ()=>this.buildFromInterview(captured));
+      this.stopListen();
+    } else {
+      this.set({captured, qIndex:next, lastUserSaid:'', pendingAnswer:'', interim:'', listening:false}, ()=>{
+        setTimeout(()=>this.speak(this.questions[next].q), 350);
+      });
+      this.stopListen();
+    }
+  }
+
+  async buildFromInterview(captured){
+    this.set({screen:'building', buildFileName:'Your conversation', buildStage:0, buildPct:0, buildLog:[]}, ()=>{
+      const stages=[
+        {t:'Listening back…', log:'Reviewed everything you told me', pct:30},
+        {t:'Structuring your story…', log:'Organised your experience', pct:62},
+        {t:'Building your profile…', log:'Assembled your candidate profile', pct:100}
+      ];
+      let i=0;
+      const tick=async ()=>{
+        if(i>=stages.length){
+          const raw=captured.map(c=>c.label+': '+c.value).join('\n');
+          const avoid=captured.find(c=>c.key==='avoid');
+          let profile=await this.aiProfile(raw) || this.profileFromInterview(captured);
+          const titles=await this.aiTitles(profile, avoid?avoid.value:'') ;
+          const patch={profile, profileVersion:1, screen:'reveal'};
+          if(titles){ patch.titles=titles.titles; patch.ruleOuts=titles.ruleOuts; }
+          this.set(patch);
+          return;
+        }
+        const st=stages[i];
+        this.set({buildStage:i, buildPct:st.pct, buildLog:[...this.state.buildLog, st.log]});
+        i++;
+        this._buildT=setTimeout(tick, 1400);
+      };
+      tick();
+    });
+  }
+
+  // ---------- AI helpers (graceful fallback) ----------
+  parseJSON(txt){
+    if(!txt) return null;
+    try{ const a=txt.indexOf('{'), b=txt.lastIndexOf('}'); if(a<0||b<0) return null; return JSON.parse(txt.slice(a,b+1)); }catch(e){ return null; }
+  }
+  async aiProfile(raw){
+    if(!(window.claude && window.claude.complete)) return null;
+    try{
+      const p="You are Archer, a career agent. From the raw career info below, return ONLY compact JSON (no prose) with keys: name, title, location, email, phone, links{linkedin,github,website}, summary, experience[{role,company,period,bullets[]}], education[{degree,school,period}], certifications[], skills[]. Use \"\" or [] when unknown. summary<=42 words. max 3 experience, max 2 bullets each, max 10 skills. RAW:\n"+raw;
+      const out=await window.claude.complete(p);
+      const j=this.parseJSON(out);
+      if(j && j.name){ j.initials=this.initials(j.name); return this.normProfile(j); }
+    }catch(e){}
+    return null;
+  }
+  async aiTitles(profile, avoid){
+    if(!(window.claude && window.claude.complete)){ return this.fallbackTitles(avoid); }
+    try{
+      const p="Given this candidate, return ONLY JSON {titles:[{title,note}], ruleOuts:[strings]}. 5 ranked job titles best to least, each with a 5-7 word note on why. ruleOuts: 1-3 short things to exclude derived from: \""+(avoid||'')+"\". Candidate: "+JSON.stringify({title:profile.title, summary:profile.summary, skills:profile.skills});
+      const out=await window.claude.complete(p);
+      const j=this.parseJSON(out);
+      if(j && j.titles && j.titles.length){
+        return { titles:j.titles.map(t=>typeof t==='string'?{title:t,note:''}:t).slice(0,5),
+                 ruleOuts:(j.ruleOuts||[]).slice(0,3) };
+      }
+    }catch(e){}
+    return this.fallbackTitles(avoid);
+  }
+  fallbackTitles(avoid){
+    let ruleOuts=[];
+    if(avoid){ const a=avoid.toLowerCase();
+      if(a.includes('.net')||a.includes('c#')) ruleOuts.push('.NET / C# roles');
+      if(a.includes('on-site')||a.includes('onsite')||a.includes('office')) ruleOuts.push('Strictly on-site roles');
+      if(a.includes('manage')) ruleOuts.push('People-management roles');
+      if(!ruleOuts.length){ const cl=avoid.trim().replace(/^(nothing|no|avoid|not)\s+(in\s+|with\s+)?/i,''); if(cl) ruleOuts.push(cl.charAt(0).toUpperCase()+cl.slice(1)); }
+    }
+    return {
+      titles:[
+        {title:'Senior Agentic AI Engineer', note:'Your AI + product blend fits best here'},
+        {title:'Full-Stack TypeScript Engineer', note:'Strong match on your core stack'},
+        {title:'AI Application Engineer', note:'Shipping LLM features end to end'},
+        {title:'Senior Software Engineer', note:'Broad fit across product teams'},
+        {title:'Founding Engineer', note:'Early-stage, high-ownership roles'}
+      ],
+      ruleOuts
+    };
+  }
+
+  initials(name){ if(!name) return 'A'; const p=name.trim().split(/\s+/); return ((p[0]||'')[0]||'')+((p[1]||'')[0]||''); }
+  normProfile(p){
+    p.links=p.links||{}; p.experience=p.experience||[]; p.education=p.education||[]; p.certifications=p.certifications||[]; p.skills=p.skills||[];
+    p.experience.forEach(x=>{ x.bullets=x.bullets||[]; });
+    if(!p.initials) p.initials=this.initials(p.name);
+    return p;
+  }
+  profileFromInterview(captured){
+    const g=k=>{ const c=captured.find(x=>x.key===k); return c?c.value:''; };
+    const intro=g('intro');
+    let name='You', title='Professional';
+    const m=intro.match(/(?:i'?m|i am|my name is|this is)\s+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/);
+    if(m) name=m[1]; else { const w=intro.trim().split(/\s+/).slice(0,2).join(' '); if(w) name=w; }
+    const tm=intro.match(/(?:a|an|work as|i'?m a|i am a)\s+([a-z][\w\s/&+-]{2,40}?)(?:\.|,|$| at | who | with )/i);
+    if(tm) title=tm[1].trim().replace(/\b\w/g,c=>c.toUpperCase());
+    const skills=g('skills').split(/,|\band\b|\//).map(s=>s.trim()).filter(s=>s.length>1&&s.length<26).slice(0,10);
+    return this.normProfile({
+      name, title,
+      location:'', email:'', phone:'', links:{},
+      summary:(g('ambition')? g('ambition')+' ' :'')+(g('intro')||'').slice(0,180),
+      experience:[ g('recent')&&{role:'Most recent role', company:'', period:'', bullets:[g('recent')]}, g('path')&&{role:'Earlier experience', company:'', period:'', bullets:[g('path')]} ].filter(Boolean),
+      education: g('education')? [{degree:g('education'), school:'', period:''}] : [],
+      certifications:[], skills
+    });
+  }
+  sampleProfile(){
+    return this.normProfile({
+      name:'Jordan Mensah', initials:'JM',
+      title:'Senior Full-Stack & AI Engineer',
+      location:'Cape Town, South Africa',
+      email:'jordan.mensah@hey.com', phone:'+27 82 555 0148',
+      links:{ linkedin:'linkedin.com/in/jordanmensah', github:'github.com/jmensah', website:'jordanmensah.dev' },
+      summary:'Product-minded engineer with 8 years building web platforms and, lately, agentic AI features. Ships end-to-end, from data layer to polished UI, and loves turning fuzzy problems into reliable products.',
+      experience:[
+        {role:'Senior Software Engineer', company:'Lumen Labs', period:'2022 — Present', bullets:['Led the team that shipped an LLM-powered support agent now handling 40% of tickets.','Owned the TypeScript/React front end and the Node + Postgres services behind it.']},
+        {role:'Full-Stack Engineer', company:'Yoco', period:'2019 — 2022', bullets:['Built merchant onboarding flows used by 100k+ small businesses.','Cut checkout latency 35% by reworking the payments data path.']},
+        {role:'Software Engineer', company:'Takealot', period:'2017 — 2019', bullets:['Worked across the catalogue and search stack in a high-traffic marketplace.']}
+      ],
+      education:[ {degree:'BSc Computer Science', school:'University of Cape Town', period:'2013 — 2016'} ],
+      certifications:['AWS Certified Solutions Architect','Deep Learning Specialization — DeepLearning.AI'],
+      skills:['TypeScript','React','Node.js','Python','PostgreSQL','LLMs / RAG','AWS','GraphQL','Docker','System Design']
+    });
+  }
+
+  // ---------- reveal feedback ----------
+  submitFeedback(){
+    const fb=(this.state.pendingAnswer||'').trim(); if(!fb) return;
+    this.stopListen();
+    this.set({pendingAnswer:'', interim:'', listening:false, revising:true, reviseLabel:'Archer is thinking…'});
+    setTimeout(()=>this.setState({reviseLabel:'Archer is updating your profile…'}), 1200);
+    this.reviseProfile(fb);
+  }
+  async reviseProfile(fb){
+    let revised=null;
+    if(window.claude && window.claude.complete){
+      try{
+        const p="You are Archer. Apply this user feedback to the candidate profile JSON and return ONLY the full updated JSON with the SAME shape (name,title,location,email,phone,links{linkedin,github,website},summary,experience[{role,company,period,bullets[]}],education[{degree,school,period}],certifications[],skills[]). Keep everything not mentioned unchanged. FEEDBACK: \""+fb+"\"\nPROFILE: "+JSON.stringify(this.stripProfile(this.state.profile));
+        const out=await window.claude.complete(p);
+        const j=this.parseJSON(out);
+        if(j && j.name) revised=this.normProfile(j);
+      }catch(e){}
+    }
+    if(!revised) revised=this.heuristicRevise(this.state.profile, fb);
+    setTimeout(()=>{
+      this.set({profile:revised, profileVersion:this.state.profileVersion+1, revising:false, reviseLabel:''});
+      this.speak('Done — take another look.');
+    }, 900);
+  }
+  stripProfile(p){ const {initials, ...rest}=p||{}; return rest; }
+  heuristicRevise(p, fb){
+    const np=JSON.parse(JSON.stringify(p)); const f=fb.toLowerCase();
+    const skillMatch=fb.match(/add\s+([\w .+#/-]+?)\s+(?:to (?:my )?skills|as a skill)/i);
+    if(skillMatch){ np.skills=[...new Set([...(np.skills||[]), skillMatch[1].trim()])]; }
+    else if(f.includes('add') && f.includes('skill')){ /* generic */ }
+    if(f.includes('summary')){ np.summary=fb.replace(/.*summary[^a-z0-9]*/i,'').trim()||np.summary; }
+    const loc=fb.match(/(?:i'?m in|based in|live in|location is|i am in)\s+([A-Za-z ,]{2,40})/i);
+    if(loc) np.location=loc[1].trim();
+    np.initials=this.initials(np.name);
+    return np;
+  }
+  approveProfile(){
+    this.stopListen();
+    if(this.state.titles && this.state.titles.length){ this.set({screen:'titles'}); return; }
+    this.set({screen:'building', buildFileName:'', buildStage:0, buildPct:0, buildLog:[]}, async ()=>{
+      // brief generate-titles moment reusing build visuals
+      const stages=[{t:'Reading your profile…', log:'Understood your strengths', pct:50},{t:'Choosing target roles…', log:'Ranked your best-fit titles', pct:100}];
+      let i=0; const tick=async()=>{
+        if(i>=stages.length){ const t=await this.aiTitles(this.state.profile,''); this.set({titles:t.titles, ruleOuts:t.ruleOuts, screen:'titles'}); return; }
+        const st=stages[i]; this.set({buildStage:i, buildPct:st.pct, buildLog:[...this.state.buildLog, st.log]}); i++; this._buildT=setTimeout(tick,1100);
+      }; tick();
+    });
+  }
+
+  // ---------- titles feedback ----------
+  submitTitleFeedback(){
+    const fb=(this.state.pendingAnswer||'').trim(); if(!fb) return;
+    this.stopListen();
+    this.set({pendingAnswer:'', interim:'', listening:false, titlesRevising:true, reviseLabel:'Archer is re-ranking…'});
+    this.reviseTitles(fb);
+  }
+  async reviseTitles(fb){
+    let result=null;
+    if(window.claude && window.claude.complete){
+      try{
+        const p="You are Archer. Update these target job titles based on the user's spoken feedback and return ONLY JSON {titles:[{title,note}], ruleOuts:[strings]}. Re-rank/add/remove as asked, keep 1-5 titles each with a 5-7 word note, and add any new rule-outs to the existing ones. FEEDBACK: \""+fb+"\"\nCURRENT_TITLES: "+JSON.stringify(this.state.titles)+"\nCURRENT_RULEOUTS: "+JSON.stringify(this.state.ruleOuts);
+        const out=await window.claude.complete(p);
+        const j=this.parseJSON(out);
+        if(j && j.titles && j.titles.length){ result={titles:j.titles.map(t=>typeof t==='string'?{title:t,note:''}:t).slice(0,5), ruleOuts:(j.ruleOuts||this.state.ruleOuts).slice(0,4)}; }
+      }catch(e){}
+    }
+    if(!result) result=this.heuristicTitles(fb);
+    setTimeout(()=>{ this.set({titles:result.titles, ruleOuts:result.ruleOuts, titlesRevising:false}); this.speak('Updated. Better?'); }, 1300);
+  }
+  heuristicTitles(fb){
+    let titles=[...this.state.titles]; let ruleOuts=[...this.state.ruleOuts]; const f=fb.toLowerCase();
+    // rule out capture
+    const ro=fb.match(/(?:never send|rule out|no|nothing|avoid|don'?t want)\s+(?:me\s+)?(?:anything\s+)?(?:in\s+|with\s+)?([\w .+#/&-]{2,40})/i);
+    if(ro){ const v=ro[1].trim().replace(/\.$/,''); if(v && !/^(send|want|like)/i.test(v)) ruleOuts=[...new Set([...ruleOuts, v.charAt(0).toUpperCase()+v.slice(1)])]; }
+    // promote a title mentioned to number one
+    const found=titles.find(t=>f.includes(t.title.toLowerCase().split(' ')[0]) && (f.includes('first')||f.includes('number one')||f.includes('#1')||f.includes('top')));
+    if(found){ titles=[found, ...titles.filter(t=>t!==found)]; }
+    titles=titles.map((t,i)=>({...t, rank:i+1}));
+    return {titles, ruleOuts};
+  }
+  approveTitles(){ this.stopListen(); this.set({screen:'done', homeStatus:'review'}, ()=>this.scheduleResting()); }
+  scheduleResting(){ if(this._activate) clearTimeout(this._activate); this._activate=setTimeout(()=>{ this.set({homeStatus:'resting'}); }, 2800); }
+
+  sources(){ return [
+    {key:'cj', name:'Career Junction'},
+    {key:'cjet', name:'CareerJet'},
+    {key:'pnet', name:'PNet'},
+    {key:'li', name:'LinkedIn Jobs'},
+    {key:'ind', name:'Indeed'}
+  ]; }
+  nextRunText(){
+    const now=new Date(), slots=[8,13]; let d=new Date(now);
+    for(let add=0;add<10;add++){
+      const day=d.getDay();
+      if(day>=1 && day<=5){
+        for(const h of slots){ const c=new Date(d); c.setHours(h,0,0,0); if(c>now) return this.fmtRun(c, now); }
+      }
+      d.setDate(d.getDate()+1); d.setHours(0,0,0,0);
+    }
+    return {label:'Monday', time:'08:00'};
+  }
+  fmtRun(c, now){
+    const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const tmr=new Date(now); tmr.setDate(now.getDate()+1);
+    const label = c.toDateString()===now.toDateString() ? 'Today' : (c.toDateString()===tmr.toDateString() ? 'Tomorrow' : days[c.getDay()]);
+    return {label, time:String(c.getHours()).padStart(2,'0')+':00'};
+  }
+
+  startScan(){
+    const srcs=this.sources().map(s=>({...s, status:'queued', seen:0, short:0}));
+    this.set({homeStatus:'scanning', scan:{srcs, idx:0, done:false}}, ()=>this.scanStep(0));
+  }
+  scanStep(i){
+    const scan=this.state.scan; if(!scan) return;
+    if(i>=scan.srcs.length){ this.finishScan(); return; }
+    this.set({scan:{...scan, idx:i, srcs:scan.srcs.map((s,k)=>k===i?{...s,status:'scanning'}:s)}});
+    const target=45+Math.floor(Math.random()*170);
+    const shortT=Math.random()<0.72?Math.floor(Math.random()*3):0;
+    let seen=0;
+    if(this._scanIv) clearInterval(this._scanIv);
+    this._scanIv=setInterval(()=>{
+      const cur=this.state.scan; if(!cur){ clearInterval(this._scanIv); return; }
+      seen+=Math.max(2, Math.floor(target/13));
+      if(seen>=target){
+        seen=target; clearInterval(this._scanIv);
+        this.set({scan:{...cur, srcs:cur.srcs.map((s,k)=>k===i?{...s,status:'done',seen,short:shortT}:s)}});
+        this._scanT=setTimeout(()=>this.scanStep(i+1), 520);
+      } else {
+        this.set({scan:{...cur, srcs:cur.srcs.map((s,k)=>k===i?{...s,seen}:s)}});
+      }
+    }, 105);
+  }
+  finishScan(){
+    const scan=this.state.scan;
+    const found=scan?scan.srcs.reduce((a,s)=>a+s.short,0):0;
+    this.set({scan:{...scan, done:true}, lastFound:found});
+    this.speak(found>0 ? ("Done. I found "+found+(found===1?" role":" roles")+" worth a look.") : "Done — nothing new this time. I'll keep watching.");
+    this._scanT=setTimeout(()=>{ this.set({homeStatus:'resting', scan:null}); }, 2800);
+  }
+
+  // ---------- hover style snippets ----------
+  get hoverLift(){ return {transform:'translateY(-2px)', boxShadow:'0 16px 44px var(--glow)'}; }
+  get hoverCard(){ return {borderColor:'color-mix(in srgb,var(--accent) 45%,transparent)', background:'rgba(255,255,255,0.055)'}; }
+  get hoverDrop(){ return {borderColor:'var(--accent)', background:'color-mix(in srgb,var(--accent) 6%,transparent)'}; }
+  get hoverDim(){ return {color:'var(--txt)'}; }
+
+  renderVals(){
+    const s=this.state;
+    const screen=s.screen;
+    const p=s.profile||{};
+    const links=p.links||{};
+    const linkList=[];
+    if(links.linkedin) linkList.push({icon:'in', text:links.linkedin});
+    if(links.github) linkList.push({icon:'gh', text:links.github});
+    if(links.website) linkList.push({icon:'↗', text:links.website});
+
+    const mkStep=(label,on)=>({label, bg: on?'var(--accent)':'rgba(255,255,255,0.12)', shadow: on?'0 0 10px var(--glow)':'none'});
+    const steps=[
+      mkStep('Meet', ['meet','upload','building','interview','reveal','titles','done'].includes(screen)),
+      mkStep('Profile', ['reveal','titles','done'].includes(screen) || screen==='building'),
+      mkStep('Titles', ['titles','done'].includes(screen)),
+      mkStep('Done', screen==='done')
+    ];
+
+    const titles=(s.titles||[]).map((t,i)=>{
+      const top=i===0;
+      return {
+        title:t.title, note:t.note||'', rank:i+1,
+        badgeBg: top?'linear-gradient(135deg,var(--accent-2),var(--accent))':'var(--card-2)',
+        badgeColor: top?'#160a02':'var(--txt2)',
+        badgeBorder: top?'transparent':'var(--line)',
+        rowBg: top?'color-mix(in srgb,var(--accent) 8%,transparent)':'transparent'
+      };
+    });
+
+    const listening=s.listening;
+    const hs=s.homeStatus;
+    const isReview=hs==='review', isResting=(hs==='resting'||hs==='review'), isScan=hs==='scanning';
+    const nr=this.nextRunText();
+    const srcRaw = s.scan ? s.scan.srcs : this.sources().map(x=>({name:x.name, status:'queued', seen:0, short:0}));
+    const scanSources = srcRaw.map(x=>({
+      name:x.name, initial:x.name[0],
+      statusText: x.status==='done' ? (x.seen+' scanned · '+x.short+' shortlisted')
+                : x.status==='scanning' ? (x.seen+' seen · '+x.short+' shortlisted')
+                : 'In queue',
+      nameColor: x.status==='queued' ? 'var(--txt3)' : 'var(--txt)',
+      spinning: x.status==='scanning', doneCheck: x.status==='done', queued: x.status==='queued'
+    }));
+    const totalSeen = s.scan ? s.scan.srcs.reduce((a,x)=>a+x.seen,0) : 0;
+    const totalShort = s.scan ? s.scan.srcs.reduce((a,x)=>a+x.short,0) : 0;
+    const doneCount = s.scan ? s.scan.srcs.filter(x=>x.status==='done').length : 0;
+    const scanPct = s.scan ? Math.round(doneCount/s.scan.srcs.length*100) : 0;
+
+    return {
+      screen,
+      isWelcome: screen==='welcome', isMeet: screen==='meet', isUpload: screen==='upload',
+      isBuilding: screen==='building', isInterview: screen==='interview', isReveal: screen==='reveal',
+      isTitles: screen==='titles', isDone: screen==='done',
+      showSteps: screen!=='welcome', steps,
+
+      // handlers
+      getStarted:()=>this.getStarted(), signIn:()=>this.signIn(), goBack:()=>this.goBack(),
+      chooseUpload:()=>this.chooseUpload(), chooseInterview:()=>this.chooseInterview(),
+      onFile:(e)=>this.onFile(e), toggleListen:()=>this.toggleListen(), retryMic:()=>this.retryMic(),
+      submitAnswer:()=>this.submitAnswer(), redoAnswer:()=>this.redoAnswer(),
+      approveProfile:()=>this.approveProfile(), submitFeedback:()=>this.submitFeedback(),
+      approveTitles:()=>this.approveTitles(), submitTitleFeedback:()=>this.submitTitleFeedback(),
+      restart:()=>this.restart(), startScan:()=>this.startScan(),
+
+      // refs
+      orbRef:this.orbRef, ring1Ref:this.ring1Ref, ring2Ref:this.ring2Ref,
+
+      // hover
+      hoverLift:this.hoverLift, hoverCard:this.hoverCard, hoverDrop:this.hoverDrop, hoverDim:this.hoverDim,
+
+      // welcome
+      welcomeStats:[{k:'Every weekday',v:'Archer searches'},{k:'Zero forms',v:'Just talk'},{k:'You approve',v:'Always in control'}],
+
+      // upload
+      uploadError:s.uploadError,
+      uploadSteps:[
+        {n:'1', t:'Drop in your Word résumé (.doc or .docx).'},
+        {n:'2', t:"I'll extract your name, links, experience and skills."},
+        {n:'3', t:'You review what I built — and tell me anything to fix.'}
+      ],
+
+      // building
+      buildFileName:s.buildFileName||'Working…',
+      buildStageText:['Reading your résumé…','Pulling out your experience…','Finding your links…','Structuring your skills…','Building your profile…'][s.buildStage]||(s.buildLog.length?'Almost there…':'Getting started…'),
+      buildPctW:(s.buildPct||0)+'%',
+      buildLog:s.buildLog||[],
+
+      // interview
+      qNum:s.qIndex+1, qTotal:this.questions.length,
+      currentQuestion:this.questions[s.qIndex]?this.questions[s.qIndex].q:'',
+      hasUserSaid: !!s.lastUserSaid, lastUserSaid:s.lastUserSaid,
+      capturedList:s.captured, hasCaptured:s.captured.length>0, capturedEmpty:s.captured.length===0,
+      listening,
+      listenLabel: s.micError? 'Mic unavailable' : (listening? 'Listening… tap to stop' : (s.pendingAnswer? 'Tap to add more' : 'Tap to answer')),
+      listenColor: listening? 'var(--accent-2)' : 'var(--txt2)',
+      orbBg: listening? 'linear-gradient(145deg,#ff9d52,var(--accent))' : 'linear-gradient(145deg,var(--accent-2),var(--accent))',
+      interim:s.interim, hasInterim: !!s.interim,
+      canSubmitAnswer: !!(s.pendingAnswer && !listening),
+      micError:s.micError,
+
+      // reveal
+      profile:p, profileVersion:s.profileVersion, revising:s.revising, reviseLabel:s.reviseLabel,
+      hasLinks: linkList.length>0, linkList,
+      hasExperience:(p.experience||[]).length>0, hasEducation:(p.education||[]).length>0,
+      hasCerts:(p.certifications||[]).length>0, hasSkills:(p.skills||[]).length>0,
+      feedbackBtnBg: listening? 'color-mix(in srgb,var(--accent) 18%,transparent)' : 'var(--card)',
+      feedbackDotBg: listening? 'var(--accent)' : 'transparent',
+      feedbackIconColor: listening? '#160a02' : 'var(--txt)',
+      feedbackLabel: listening? 'Listening…' : (s.pendingAnswer? 'Add more' : 'Tell me what to change'),
+
+      // titles
+      titles, titlesRevising:s.titlesRevising,
+      ruleOuts:s.ruleOuts||[], hasRuleOuts:(s.ruleOuts||[]).length>0, noRuleOuts:(s.ruleOuts||[]).length===0,
+
+      // home / done
+      showResting: isResting, isScanning: isScan,
+      statusPill: isScan? 'Running now' : isReview? 'Finalising your setup' : 'Scheduled · resting',
+      statusColor: isScan? 'var(--accent-2)' : 'var(--txt2)',
+      statusBorder: isScan? 'color-mix(in srgb,var(--accent) 38%,transparent)' : 'var(--line)',
+      statusBg: isScan? 'color-mix(in srgb,var(--accent) 9%,transparent)' : 'var(--card-2)',
+      statusDot: isScan? 'var(--accent)' : '#7d8aa0',
+      homeTitle: isScan? "Archer is on the hunt." : "You're all set. Archer takes it from here.",
+      homeBody: isScan
+        ? "Going through your job boards one at a time, matching every role against your profile. Sit back — I'll shortlist anything worth a look."
+        : "From here on the work happens in the background. Archer wakes on weekday mornings, sweeps the boards for roles that fit, and only brings you the ones worth your time.",
+      nextRunLabel: nr.label, nextRunTime: nr.time,
+      hasLastFound: s.lastFound>0, lastFound: s.lastFound,
+      scanSources, totalSeen, totalShort, scanPctW: scanPct+'%',
+      scanDone: !!(s.scan && s.scan.done)
+    };
+  }
+}
+</script>
+</body>
+</html>

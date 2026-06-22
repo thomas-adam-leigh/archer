@@ -15,6 +15,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Keep Cypress (a devDep of apps/web) from downloading its ~300 MB binary during the
+# backend `pnpm install --frozen-lockfile` — only the dedicated web-e2e job fetches it
+# (via cypress-io/github-action, which caches it). Stops Cypress bloating/breaking CI.
+env:
+  CYPRESS_INSTALL_BINARY: "0"
+
 jobs:
   # ── Change detection ────────────────────────────────────────────────────────
   # Gate each downstream job so a docs-only PR doesn't rebuild the world.
