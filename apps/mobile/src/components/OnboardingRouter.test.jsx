@@ -1,5 +1,9 @@
 import '@testing-library/jest-dom';
-import { getQueriesForElement, render } from '@lynx-js/react/testing-library';
+import {
+  fireEvent,
+  getQueriesForElement,
+  render,
+} from '@lynx-js/react/testing-library';
 import { beforeEach, expect, test, vi } from 'vitest';
 
 // The router pulls in HomeScreen/IntroScreen → auth → supabase, which read the
@@ -52,6 +56,15 @@ test('a brand-new user (step=intro) lands on the intro with both paths', async (
   expect(await findByText("Hi, I'm Archer")).toBeInTheDocument();
   expect(await findByText('Upload my résumé')).toBeInTheDocument();
   expect(await findByText('Start from scratch')).toBeInTheDocument();
+});
+
+test('choosing "Start from scratch" opens the guided chat', async () => {
+  const { findByText } = renderAt('intro');
+
+  fireEvent.tap(await findByText('Start from scratch'));
+  // The chat resolves the thread first; its loading copy is enough to prove the
+  // scratch path now routes to the conversational screen, not a stand-in.
+  expect(await findByText('Getting Archer ready…')).toBeInTheDocument();
 });
 
 test('a returning user resumes at their step (step=review)', async () => {

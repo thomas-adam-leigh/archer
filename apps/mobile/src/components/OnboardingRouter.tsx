@@ -7,6 +7,7 @@ import {
 } from '../lib/onboarding.js';
 import type { RevisionStarted } from '../lib/profile.js';
 import type { IngestStarted } from '../lib/resume.js';
+import { ConversationalOnboardingScreen } from './ConversationalOnboardingScreen.js';
 import { HomeScreen } from './HomeScreen.js';
 import { IntroScreen, type OnboardingPath } from './IntroScreen.js';
 import { JobPreferencesScreen } from './JobPreferencesScreen.js';
@@ -29,12 +30,6 @@ const RESUME_COPY: Record<
     title: 'Submitting your profile',
     subtitle: "You're all set — Archer is sending your profile for review.",
   },
-};
-
-/** Copy for the start-from-scratch stand-in, until the guided chat exists (ARC-80). */
-const SCRATCH_COPY = {
-  title: 'Start from scratch',
-  subtitle: "The guided chat is coming soon — we'll pick this up here.",
 };
 
 type Status =
@@ -124,13 +119,15 @@ export function OnboardingRouter(props: {
         />
       );
     }
+    // The start-from-scratch path (ARC-80): a guided chat that accretes the same
+    // structured draft and converges on the shared review. On completion we re-read
+    // progress, which moves the user to the review step.
     if (path === 'scratch') {
       return (
-        <StageScreen
-          title={SCRATCH_COPY.title}
-          subtitle={SCRATCH_COPY.subtitle}
-          secondaryLabel="Back"
-          onSecondary={() => setPath(null)}
+        <ConversationalOnboardingScreen
+          session={session}
+          onComplete={load}
+          onBack={() => setPath(null)}
         />
       );
     }
