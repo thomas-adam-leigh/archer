@@ -35,5 +35,7 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Archer uses your microphone so you can answer by voice during onboarding.</string>
 </dict>
 </plist>
