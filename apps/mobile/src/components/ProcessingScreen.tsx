@@ -16,17 +16,33 @@ export interface IngestComplete {
   proposalId: string;
 }
 
+/** One ordered processing phase: its `state.phase` key and the display copy. */
+export interface ProcessingPhase {
+  key: string;
+  label: string;
+}
+
 /**
  * The streamed ingest phases, in order, with their display copy. Mirrors the
  * backend `INGEST_PHASES` (`services/api/src/agui.ts`): the run flips
  * `state.phase` through `reading → extracting → building → complete`. The screen
  * renders against the live `state.phase`, never a fake timer.
  */
-const PHASES = [
+export const INGEST_PHASES: readonly ProcessingPhase[] = [
   { key: 'reading', label: 'Reading your résumé' },
   { key: 'extracting', label: 'Extracting your experience' },
   { key: 'building', label: 'Building your profile' },
-] as const;
+];
+
+/**
+ * The streamed revise phases (ARC-77 feedback/redraft loop). Mirrors the backend
+ * `REVISE_PHASES`: the run flips `state.phase` through `reading → revising →
+ * complete` as Archer folds the feedback into a new proposed draft.
+ */
+export const REVISE_PHASES: readonly ProcessingPhase[] = [
+  { key: 'reading', label: 'Reading your feedback' },
+  { key: 'revising', label: 'Updating your profile' },
+];
 
 /** Lowercase the first letter so a phase label reads after "Archer is …". */
 function lowerFirst(s: string): string {
@@ -49,9 +65,17 @@ export function ProcessingScreen(props: {
   ingest: IngestStarted;
   onComplete: (result: IngestComplete) => void;
   onRetry: () => void;
+  /** The ordered phases to render; defaults to the résumé ingest phases. */
+  phases?: readonly ProcessingPhase[];
+  /** The failure-card body copy; defaults to the résumé ingest wording. */
+  failureMessage?: string;
   createSession?: (opts: ThreadSessionOptions) => ThreadSession;
 }) {
   const { session, ingest, onComplete, onRetry } = props;
+  const phases = props.phases ?? INGEST_PHASES;
+  const failureMessage =
+    props.failureMessage ??
+    "Archer couldn't finish reading your résumé. Please try again.";
   const [view, setView] = useState<ThreadView | null>(null);
   const notified = useRef(false);
 
@@ -74,7 +98,8 @@ export function ProcessingScreen(props: {
   }, [ingest.threadId, session.accessToken, props.createSession]);
 
   const state = (view?.state ?? {}) as Record<string, Json>;
-  const statePhase = typeof state.phase === 'string' ? state.phase : 'reading';
+  const statePhase =
+    typeof state.phase === 'string' ? state.phase : phases[0].key;
   const lifecycle = view?.phase ?? null;
   const versionId =
     typeof state.versionId === 'string' ? state.versionId : null;
@@ -100,9 +125,7 @@ export function ProcessingScreen(props: {
       <view className="Auth">
         <view className="Auth__card">
           <text className="Auth__title">Something went wrong</text>
-          <text className="Auth__subtitle">
-            Archer couldn't finish reading your résumé. Please try again.
-          </text>
+          <text className="Auth__subtitle">{failureMessage}</text>
           <view className="Button" bindtap={onRetry}>
             <text className="Button__label">Try again</text>
           </view>
@@ -115,12 +138,12 @@ export function ProcessingScreen(props: {
   // current one is active, later ones pending. `complete` marks them all done.
   const activeIndex =
     statePhase === 'complete'
-      ? PHASES.length
+      ? phases.length
       : Math.max(
           0,
-          PHASES.findIndex((p) => p.key === statePhase),
+          phases.findIndex((p) => p.key === statePhase),
         );
-  const heading = PHASES[Math.min(activeIndex, PHASES.length - 1)];
+  const heading = phases[Math.min(activeIndex, phases.length - 1)];
   const headingText = `Archer is ${lowerFirst(heading.label)}`;
 
   return (
@@ -131,7 +154,7 @@ export function ProcessingScreen(props: {
           Hang tight — this only takes a moment. There's nothing to do here.
         </text>
 
-        {PHASES.map((p, i) => {
+        {phases.map((p, i) => {
           const status =
             i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'pending';
           return (

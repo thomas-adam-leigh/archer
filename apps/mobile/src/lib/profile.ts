@@ -16,7 +16,7 @@
  * review step lands on the same draft without threading an id through the run.
  */
 
-import { apiGet } from './api.js';
+import { apiGet, apiPost } from './api.js';
 import type { Session } from './auth.js';
 
 /** External links captured on the profile-wide attributes snapshot. */
@@ -159,4 +159,54 @@ export async function fetchProposedProfileDraft(
     session.accessToken,
   );
   return { version: detail.version, spine: detail.spine ?? {} };
+}
+
+/** The POST surface the decide/revise calls need — injectable for offline tests. */
+export type ProfilePost = <T>(
+  path: string,
+  accessToken: string,
+  body?: unknown,
+) => Promise<T>;
+
+/**
+ * Self-approve the candidate's OWN proposed profile draft (ARC-67 self-decide),
+ * advancing onboarding past the review step. Keyed by the open proposal id the
+ * review screen resolves from `/onboarding/progress` (ARC-86). The user is scoped
+ * via the `userId` body field on top of the bearer token (the client contract).
+ */
+export async function approveProposedDraft(
+  session: Session,
+  proposalId: string,
+  post: ProfilePost = apiPost,
+): Promise<void> {
+  await post(
+    `/onboarding/proposals/${proposalId}/decide/self`,
+    session.accessToken,
+    { userId: session.user.id, action: 'approve' },
+  );
+}
+
+/** A streamed revise run the review screen subscribes to (same shape as an ingest run). */
+export interface RevisionStarted {
+  threadId: string;
+  runId: string;
+}
+
+/**
+ * Revise the open proposed draft from the candidate's feedback (ARC-85), kicking
+ * off a streamed run that amends the draft (never blanking it) and lands a NEW
+ * proposed version on the shared review. Returns the run's `threadId`/`runId` so
+ * the caller can show the live processing state and loop back to review.
+ */
+export async function reviseProposedDraft(
+  session: Session,
+  args: { threadId: string; feedback: string },
+  post: ProfilePost = apiPost,
+): Promise<RevisionStarted> {
+  const resp = await post<{ threadId: string; runId: string }>(
+    '/onboarding/revise',
+    session.accessToken,
+    { threadId: args.threadId, feedback: args.feedback },
+  );
+  return { threadId: resp.threadId, runId: resp.runId };
 }

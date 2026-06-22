@@ -16,7 +16,7 @@ vi.mock('../lib/supabase.js', () => ({
 }));
 vi.mock('../lib/config.js', () => ({ ARCHER_API_URL: 'https://api.test' }));
 
-import { ProcessingScreen } from './ProcessingScreen.js';
+import { ProcessingScreen, REVISE_PHASES } from './ProcessingScreen.js';
 
 const session = {
   accessToken: 'access-1',
@@ -123,6 +123,36 @@ test('a failed run shows a retry that calls onRetry', async () => {
 
   fireEvent.tap(retry);
   expect(onRetry).toHaveBeenCalledTimes(1);
+});
+
+test('renders custom revise phases + failure copy when configured (ARC-77)', async () => {
+  const { factory, emit } = makeSession(view({ phase: 'reading' }, 'running'));
+  render(
+    <ProcessingScreen
+      session={session}
+      ingest={ingest}
+      onComplete={onComplete}
+      onRetry={onRetry}
+      phases={REVISE_PHASES}
+      failureMessage="Archer couldn't update your profile. Please try again."
+      createSession={factory}
+    />,
+  );
+  const { findByText } = getQueriesForElement(elementTree.root);
+
+  expect(
+    await findByText('Archer is reading your feedback'),
+  ).toBeInTheDocument();
+
+  await emit(view({ phase: 'revising' }, 'running'));
+  expect(
+    await findByText('Archer is updating your profile'),
+  ).toBeInTheDocument();
+
+  await emit(view({ phase: 'building' }, 'error'));
+  expect(
+    await findByText("Archer couldn't update your profile. Please try again."),
+  ).toBeInTheDocument();
 });
 
 test('is non-interruptible while running (no cancel/back/sign-out)', async () => {

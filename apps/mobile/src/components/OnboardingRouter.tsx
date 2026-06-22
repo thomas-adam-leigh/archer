@@ -5,11 +5,12 @@ import {
   fetchOnboardingProgress,
   type OnboardingStep,
 } from '../lib/onboarding.js';
+import type { RevisionStarted } from '../lib/profile.js';
 import type { IngestStarted } from '../lib/resume.js';
 import { HomeScreen } from './HomeScreen.js';
 import { IntroScreen, type OnboardingPath } from './IntroScreen.js';
 import { JobPreferencesScreen } from './JobPreferencesScreen.js';
-import { ProcessingScreen } from './ProcessingScreen.js';
+import { ProcessingScreen, REVISE_PHASES } from './ProcessingScreen.js';
 import { ProfileReviewScreen } from './ProfileReviewScreen.js';
 import { ResumeUploadScreen } from './ResumeUploadScreen.js';
 import { StageScreen } from './StageScreen.js';
@@ -39,7 +40,7 @@ const SCRATCH_COPY = {
 type Status =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; step: OnboardingStep };
+  | { kind: 'ready'; step: OnboardingStep; proposalId: string | null };
 
 /**
  * The launch-time onboarding router (ARC-73). After auth it reads the resumable
@@ -55,11 +56,18 @@ export function OnboardingRouter(props: {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [path, setPath] = useState<OnboardingPath | null>(null);
   const [ingest, setIngest] = useState<IngestStarted | null>(null);
+  const [reviseRun, setReviseRun] = useState<RevisionStarted | null>(null);
 
   const load = useCallback(() => {
     setStatus({ kind: 'loading' });
     fetchOnboardingProgress(session)
-      .then((p) => setStatus({ kind: 'ready', step: p.step }))
+      .then((p) =>
+        setStatus({
+          kind: 'ready',
+          step: p.step,
+          proposalId: p.openProposalId,
+        }),
+      )
       .catch(() => setStatus({ kind: 'error' }));
   }, [session]);
 
@@ -135,11 +143,35 @@ export function OnboardingRouter(props: {
     );
   }
 
-  // The proposed-draft review (ARC-76): reached when the ingest run lands a
-  // proposed version, and on relaunch for a user who left off at review. The
-  // screen resolves the proposed version itself, so no id needs threading.
+  // The proposed-draft review (ARC-76 + ARC-77): reached when the ingest run lands
+  // a proposed version, and on relaunch for a user who left off at review. The
+  // screen resolves the proposed version itself, so no id needs threading. Approve
+  // self-approves and advances (re-read progress → titles); feedback starts a revise
+  // run, which we render as a live processing state that loops back to a fresh review.
   if (status.step === 'review') {
-    return <ProfileReviewScreen session={session} />;
+    if (reviseRun) {
+      return (
+        <ProcessingScreen
+          session={session}
+          ingest={reviseRun}
+          phases={REVISE_PHASES}
+          failureMessage="Archer couldn't update your profile. Please try again."
+          onComplete={() => {
+            setReviseRun(null);
+            load();
+          }}
+          onRetry={() => setReviseRun(null)}
+        />
+      );
+    }
+    return (
+      <ProfileReviewScreen
+        session={session}
+        proposalId={status.proposalId}
+        onApproved={load}
+        onRevised={setReviseRun}
+      />
+    );
   }
 
   // The job-preferences step (ARC-78): approve Archer's suggested target titles

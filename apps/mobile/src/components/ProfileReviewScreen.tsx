@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from '@lynx-js/react';
 
 import type { Session } from '../lib/auth.js';
 import {
+  approveProposedDraft as approveProposedDraftDefault,
   type Certification,
   type Course,
   type Education,
@@ -10,9 +11,16 @@ import {
   type ProfileDraft,
   type ProfileFetch,
   type Project,
+  type RevisionStarted,
+  reviseProposedDraft as reviseProposedDraftDefault,
   type Skill,
   type WorkExperience,
 } from '../lib/profile.js';
+import { fetchPrimaryThreadId } from '../lib/threads.js';
+import {
+  captureVoice as captureVoiceDefault,
+  VoiceInputError,
+} from '../lib/voice.js';
 import { StageScreen } from './StageScreen.js';
 
 const MONTHS = [
@@ -92,21 +100,42 @@ type Status =
   | { kind: 'ready'; draft: ProfileDraft };
 
 /**
- * The profile review screen (ARC-76): a résumé-style render of the PROPOSED
- * profile version Archer assembled, the shared destination for both onboarding
- * paths. It reads the proposed version's `attributes` + spine and lays out full
- * name, contact, links, summary, experience, education, skills, certifications,
- * courses, and projects — each section omitted gracefully when empty.
+ * The profile review screen (ARC-76 render + ARC-77 decision loop): a résumé-style
+ * render of the PROPOSED profile version Archer assembled, the shared destination
+ * for both onboarding paths. It reads the proposed version's `attributes` + spine
+ * and lays out full name, contact, links, summary, experience, education, skills,
+ * certifications, courses, and projects — each section omitted gracefully when empty.
  *
- * This screen is read-only; the approve / feedback / redraft actions land beneath
- * it in ARC-77. The fetch is injectable so the suite runs fully offline.
+ * Beneath the résumé sit the decision actions (ARC-77): **Approve** self-approves
+ * the candidate's own draft (`proposalId` resolved from `/onboarding/progress`) and
+ * advances to job preferences; **feedback** (by text or voice) kicks off a streamed
+ * revise run that amends the draft live and loops back to a fresh review. Every
+ * network + voice seam is injectable so the suite runs fully offline.
  */
 export function ProfileReviewScreen(props: {
   session: Session;
+  /** The open proposal to self-approve (from progress); approve is disabled when null. */
+  proposalId?: string | null;
+  /** Advance past review once the draft is approved. */
+  onApproved?: () => void;
+  /** Hand the started revise run up so the live processing state can be shown. */
+  onRevised?: (run: RevisionStarted) => void;
   fetchDraft?: (session: Session, get?: ProfileFetch) => Promise<ProfileDraft>;
+  approve?: typeof approveProposedDraftDefault;
+  revise?: typeof reviseProposedDraftDefault;
+  resolveThreadId?: (session: Session) => Promise<string>;
+  captureVoice?: typeof captureVoiceDefault;
 }) {
-  const { session } = props;
+  const { session, proposalId, onApproved, onRevised } = props;
+  const approve = props.approve ?? approveProposedDraftDefault;
+  const revise = props.revise ?? reviseProposedDraftDefault;
+  const resolveThreadId = props.resolveThreadId ?? fetchPrimaryThreadId;
+  const captureVoice = props.captureVoice ?? captureVoiceDefault;
+
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
+  const [feedback, setFeedback] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setStatus({ kind: 'loading' });
@@ -123,6 +152,60 @@ export function ProfileReviewScreen(props: {
   }, [session, props.fetchDraft]);
 
   useEffect(load, [load]);
+
+  // Self-approve the open draft and advance. Disabled until the proposal id resolves.
+  const onApprove = useCallback(() => {
+    if (busy || !proposalId) return;
+    setBusy(true);
+    setError(null);
+    approve(session, proposalId)
+      .then(() => onApproved?.())
+      .catch(() => setError("Couldn't approve your profile. Please try again."))
+      .finally(() => setBusy(false));
+  }, [busy, proposalId, approve, session, onApproved]);
+
+  // Submit feedback → start a revise run → hand it up for the live processing state.
+  const submitFeedback = useCallback(
+    (text: string) => {
+      const instruction = text.trim();
+      if (!instruction || busy) return;
+      setBusy(true);
+      setError(null);
+      resolveThreadId(session)
+        .then((threadId) =>
+          revise(session, { threadId, feedback: instruction }),
+        )
+        .then((run) => {
+          setFeedback('');
+          onRevised?.(run);
+        })
+        .catch(() =>
+          setError("Couldn't send your feedback to Archer. Please try again."),
+        )
+        .finally(() => setBusy(false));
+    },
+    [busy, resolveThreadId, session, revise, onRevised],
+  );
+
+  // Capture spoken feedback and submit it as a revise instruction.
+  const submitVoiceFeedback = useCallback(() => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    captureVoice({ accessToken: session.accessToken })
+      .then((transcript) => {
+        setBusy(false);
+        submitFeedback(transcript);
+      })
+      .catch((err) => {
+        setError(
+          err instanceof VoiceInputError
+            ? err.message
+            : "Couldn't capture your voice. Please try again.",
+        );
+        setBusy(false);
+      });
+  }, [busy, captureVoice, session.accessToken, submitFeedback]);
 
   if (status.kind === 'loading') {
     return (
@@ -268,6 +351,47 @@ export function ProfileReviewScreen(props: {
             ))}
           </Section>
         ) : null}
+
+        <view className="Resume__section">
+          <text className="Resume__sectionTitle">Make it yours</text>
+          <text className="Resume__itemBody">
+            Approve to continue, or tell Archer what to add, change, or improve.
+          </text>
+          <input
+            className="Field"
+            placeholder="e.g. add my 2023 promotion, drop the summary"
+            bindinput={(e) => setFeedback(e.detail.value)}
+          />
+          <view
+            className={
+              busy
+                ? 'Button Button--secondary Button--busy'
+                : 'Button Button--secondary'
+            }
+            bindtap={() => submitFeedback(feedback)}
+          >
+            <text className="Button__label">Send to Archer</text>
+          </view>
+          <view
+            className={
+              busy
+                ? 'Button Button--secondary Button--busy'
+                : 'Button Button--secondary'
+            }
+            bindtap={submitVoiceFeedback}
+          >
+            <text className="Button__label">🎤 Feedback by voice</text>
+          </view>
+
+          {error ? <text className="Auth__error">{error}</text> : null}
+
+          <view
+            className={busy || !proposalId ? 'Button Button--busy' : 'Button'}
+            bindtap={onApprove}
+          >
+            <text className="Button__label">Approve &amp; continue</text>
+          </view>
+        </view>
       </view>
     </scroll-view>
   );
