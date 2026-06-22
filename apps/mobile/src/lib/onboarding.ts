@@ -29,6 +29,11 @@ export interface OnboardingProgress {
   negativeCriteriaCaptured: boolean;
   completed: boolean;
   step: OnboardingStep;
+  /** The open profile-version proposal the review screen self-approves with
+   *  (ARC-86), or null when none is awaiting the candidate's decision. */
+  openProposalId: string | null;
+  /** The proposed version that open proposal targets, or null when none open. */
+  proposedVersionId: string | null;
 }
 
 /** The `/onboarding/progress` response also echoes the resolved `user`. */

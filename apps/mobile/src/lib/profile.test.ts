@@ -6,8 +6,10 @@ vi.mock('./config.js', () => ({ ARCHER_API_URL: 'https://api.test' }));
 
 import type { Session } from './auth.js';
 import {
+  approveProposedDraft,
   fetchProposedProfileDraft,
   NoProposedVersionError,
+  reviseProposedDraft,
 } from './profile.js';
 
 const session: Session = {
@@ -102,5 +104,35 @@ describe('fetchProposedProfileDraft', () => {
       '/profile/versions?user=a%2Fb%20c',
       'access-1',
     );
+  });
+});
+
+describe('approveProposedDraft', () => {
+  test('self-approves the open proposal scoped to the user', async () => {
+    const post = vi.fn().mockResolvedValue({});
+    await approveProposedDraft(session, 'prop-9', post);
+    expect(post).toHaveBeenCalledWith(
+      '/onboarding/proposals/prop-9/decide/self',
+      'access-1',
+      { userId: 'user-1', action: 'approve' },
+    );
+  });
+});
+
+describe('reviseProposedDraft', () => {
+  test('posts the feedback for the thread and returns the started run', async () => {
+    const post = vi
+      .fn()
+      .mockResolvedValue({ threadId: 'thread-1', runId: 'run-7' });
+    const run = await reviseProposedDraft(
+      session,
+      { threadId: 'thread-1', feedback: 'add my promotion' },
+      post,
+    );
+    expect(post).toHaveBeenCalledWith('/onboarding/revise', 'access-1', {
+      threadId: 'thread-1',
+      feedback: 'add my promotion',
+    });
+    expect(run).toEqual({ threadId: 'thread-1', runId: 'run-7' });
   });
 });

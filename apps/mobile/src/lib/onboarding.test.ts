@@ -26,6 +26,8 @@ const progress: OnboardingProgress & { user: string } = {
   negativeCriteriaCaptured: false,
   completed: false,
   step: 'review',
+  openProposalId: 'prop-1',
+  proposedVersionId: 'v2',
 };
 
 describe('fetchOnboardingProgress', () => {
