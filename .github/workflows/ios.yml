@@ -1,0 +1,104 @@
+name: iOS build (ArcherMobile)
+
+# Builds the Lynx JS bundle and compiles the native ArcherMobile app on a free
+# GitHub macOS runner — so the heavy Lynx-from-source compile never runs on a
+# laptop. Produces a runnable .app artifact for the iOS Simulator. Native device
+# modules (FilePickerModule, …) only exist in this real app, never in Lynx Go.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "apps/mobile/ios/**"
+      - "apps/mobile/src/**"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+# Public, build-time client config (NOT secrets — the publishable key is the
+# anon key already shipped in every client bundle; the URLs are public).
+env:
+  PUBLIC_SUPABASE_URL: https://djyuqyiblzcsrqcirqgp.supabase.co
+  PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_cihNfzHSXESWAf0-PWIJYQ_ES5YRaUG
+  PUBLIC_ARCHER_API_URL: https://api.archer.careers
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes | grep -i ios | head -3 || true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/mobile/pnpm-lock.yaml
+
+      - name: Build the Lynx JS bundle
+        working-directory: apps/mobile
+        run: |
+          pnpm install --ignore-workspace --frozen-lockfile
+          pnpm build
+          mkdir -p ios/ArcherMobile/Resources
+          cp dist/main.lynx.bundle ios/ArcherMobile/Resources/main.lynx.bundle
+          ls -la ios/ArcherMobile/Resources
+
+      - name: Install iOS toolchain (XcodeGen + CocoaPods)
+        run: |
+          brew install xcodegen
+          gem install cocoapods --no-document
+
+      - name: Generate project + install pods
+        working-directory: apps/mobile/ios
+        run: |
+          xcodegen generate
+          pod install
+
+      - name: Build for the iOS Simulator
+        working-directory: apps/mobile/ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace ArcherMobile.xcworkspace \
+            -scheme ArcherMobile \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet 2>&1 | tee /tmp/xcodebuild.log
+
+      - name: Package the .app
+        if: success()
+        working-directory: apps/mobile/ios
+        run: |
+          APP=$(find build/dd/Build/Products -maxdepth 2 -name "ArcherMobile.app" | head -1)
+          echo "Built: $APP"
+          (cd "$(dirname "$APP")" && ditto -c -k --keepParent ArcherMobile.app /tmp/ArcherMobile-sim.zip)
+
+      - name: Upload the Simulator app
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArcherMobile-simulator-app
+          path: /tmp/ArcherMobile-sim.zip
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: /tmp/xcodebuild.log
+          if-no-files-found: ignore

@@ -1,0 +1,38 @@
+source 'https://cdn.cocoapods.org/'
+
+platform :ios, '15.0'
+
+target 'ArcherMobile' do
+  pod 'Lynx', '3.8.0', :subspecs => [
+    'Framework',
+  ]
+
+  pod 'PrimJS', '3.8.0', :subspecs => ['quickjs', 'napi']
+
+  # image-service, log-service, and http-service (http is what powers fetch())
+  pod 'LynxService', '3.8.0', :subspecs => [
+    'Image',
+    'Log',
+    'Http',
+  ]
+
+  # ImageService dependencies
+  pod 'SDWebImage', '5.15.5'
+  pod 'SDWebImageWebPCoder', '0.11.0'
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |t|
+    t.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      # Lynx 3.8 source trips new iOS 26 SDK deprecations (e.g. UIApplication.keyWindow)
+      # and the pods compile with -Werror. Don't let third-party warnings fail the build.
+      config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
+      %w[OTHER_CFLAGS OTHER_CPLUSPLUSFLAGS].each do |key|
+        flags = config.build_settings[key] || ['$(inherited)']
+        flags = [flags] unless flags.is_a?(Array)
+        config.build_settings[key] = flags + ['-Wno-error']
+      end
+    end
+  end
+end
