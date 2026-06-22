@@ -6,6 +6,7 @@ import {
   appendEvents,
   applyCoverLetterVersionProposal,
   applyVersionProposal,
+  applyVersionProposalAsUser,
   Constants,
   type CoverLetterVersionDecision,
   checkReadiness,
@@ -679,6 +680,48 @@ const gOnboard = mk()
           ? { action: "approve", edits: body.edits, note: body.note }
           : { action: "reject", note: body.note };
       const result = await applyVersionProposal(getDb(), proposalId, decision);
+      return c.json({ proposalId, ...result });
+    },
+  )
+  // Self-serve sibling of the owner decide route (ARC-67): the CANDIDATE approves
+  // or rejects their OWN profile-version proposal with the service secret — no
+  // owner admin secret — scoped to the caller-supplied `user` (which a trusted
+  // gateway maps from `auth.uid()`). Authorization keys on the proposal's own
+  // plan.userId, so a caller can only decide their own proposal; anyone else's is
+  // a 403. The owner-gated /onboarding/proposals/:id/decide stays for operator
+  // Acceptance-Gate actions, which remain separate and intact.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/proposals/{proposalId}/decide/self",
+      security: SERVICE_SECURITY,
+      request: {
+        params: z.object({ proposalId: Uuid }),
+        // `action` is validated in the handler so the service gate (401) runs first.
+        body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Self-decision"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { proposalId } = c.req.valid("param");
+      const body = c.req.valid("json") as {
+        userId?: string;
+        action?: string;
+        edits?: { attributes?: Json; label?: string | null };
+        note?: string | null;
+      };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      if (body.action !== "approve" && body.action !== "reject") {
+        return c.json({ error: "'action' must be approve or reject" }, 400);
+      }
+      const decision: VersionDecision =
+        body.action === "approve"
+          ? { action: "approve", edits: body.edits, note: body.note }
+          : { action: "reject", note: body.note };
+      const result = await applyVersionProposalAsUser(getDb(), proposalId, user, decision);
+      if ("forbidden" in result) return c.json({ error: "forbidden" }, 403);
       return c.json({ proposalId, ...result });
     },
   );

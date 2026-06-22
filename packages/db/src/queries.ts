@@ -1056,6 +1056,38 @@ export async function applyVersionProposal(
   return { proposalStatus: "completed", versionStatus: await versionStatus(db, versionId) };
 }
 
+/** The owner + kind behind a proposal, read from its immutable `plan` jsonb.
+ *  Returns undefined for an unknown proposal. */
+async function proposalOwner(
+  db: Db,
+  proposalId: string,
+): Promise<{ kind: string; userId: string | null } | undefined> {
+  const rows = await db<{ kind: string; user_id: string | null }[]>`
+    select kind, plan->>'userId' as user_id from proposals where id = ${proposalId}`;
+  const row = rows[0];
+  return row ? { kind: row.kind, userId: row.user_id } : undefined;
+}
+
+/** Self-serve sibling of {@link applyVersionProposal}: lets a CANDIDATE decide
+ *  their OWN submitted profile_version proposal without the owner admin secret
+ *  (ARC-67). The owner Acceptance-Gate path (`applyVersionProposal` behind the
+ *  admin secret) stays intact for operator actions. Authorization keys on the
+ *  proposal's own immutable `plan.userId`: a proposal that isn't a profile_version
+ *  owned by `userId` (or doesn't exist) returns `{ forbidden: true }` so the caller
+ *  answers 403 without acting on — or leaking — another user's proposal. */
+export async function applyVersionProposalAsUser(
+  db: Db,
+  proposalId: string,
+  userId: string,
+  decision: VersionDecision,
+): Promise<VersionApplyResult | { forbidden: true }> {
+  const owner = await proposalOwner(db, proposalId);
+  if (!owner || owner.kind !== "profile_version" || owner.userId !== userId) {
+    return { forbidden: true };
+  }
+  return await applyVersionProposal(db, proposalId, decision);
+}
+
 // ── version read + cycle/rollback ──────────────────────────────────────────
 /** The user's whole version history in stable ordinal order (draft → live →
  *  superseded), so a client can render the timeline and pick a target to cycle to. */
