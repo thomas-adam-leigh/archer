@@ -25,6 +25,12 @@ export interface StructureResumeOptions {
   llm?: LlmProvider;
 }
 
+export interface StructureProfileOptions extends StructureResumeOptions {
+  /** Override the system prompt. The conversational path (ARC-79) supplies its own
+   *  while reusing the same schema, builders, and JSON-extraction below. */
+  systemPrompt?: string;
+}
+
 export interface StructuredResume {
   /** Profile-wide snapshot (full_name, email, links, summary, …) for the version. */
   attributes: Record<string, Json>;
@@ -278,27 +284,28 @@ function buildSpine(s: Structured): ProfileSpineDraft {
 }
 
 /**
- * Structure résumé text into a profile draft (attributes + spine) via the LLM.
- *
- * Sends the text to the configured provider at temperature 0 for a faithful,
- * deterministic reconstruction, then parses + validates the JSON reply. Throws a
- * {@link ResumeStructureError} when the model returns no parseable JSON. The
- * returned draft is what the caller attaches to a PROPOSED version (ARC-64/65).
+ * Structure free text into a profile draft (attributes + spine) via the LLM — the
+ * shared core behind both résumé structuring (ARC-64) and conversational onboarding
+ * (ARC-79). Sends the text to the configured provider at temperature 0 for a
+ * faithful, deterministic reconstruction against the same structuring schema, then
+ * parses + validates the JSON reply. The caller supplies the system prompt for its
+ * source (a résumé parser vs an onboarding-conversation reader). Throws a
+ * {@link ResumeStructureError} when the model returns no parseable JSON.
  */
-export async function structureResume(
-  resumeText: string,
-  opts: StructureResumeOptions = {},
+export async function structureProfileText(
+  text: string,
+  opts: StructureProfileOptions = {},
 ): Promise<StructuredResume> {
   const provider = opts.llm ?? resolveLlm();
-  const { text, model } = await provider.complete(
+  const { text: reply, model } = await provider.complete(
     [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: resumeText },
+      { role: "system", content: opts.systemPrompt ?? SYSTEM_PROMPT },
+      { role: "user", content: text },
     ],
     { temperature: 0, maxTokens: 4000 },
   );
 
-  const parsed = StructuredSchema.safeParse(parseModelJson(text));
+  const parsed = StructuredSchema.safeParse(parseModelJson(reply));
   if (!parsed.success) {
     throw new ResumeStructureError(`structured profile failed validation: ${parsed.error.message}`);
   }
@@ -307,4 +314,16 @@ export async function structureResume(
     spine: buildSpine(parsed.data),
     model,
   };
+}
+
+/**
+ * Structure résumé text into a profile draft (attributes + spine) via the LLM. A
+ * thin wrapper over {@link structureProfileText} with the résumé-parser prompt; the
+ * returned draft is what the caller attaches to a PROPOSED version (ARC-64/65).
+ */
+export async function structureResume(
+  resumeText: string,
+  opts: StructureResumeOptions = {},
+): Promise<StructuredResume> {
+  return structureProfileText(resumeText, { llm: opts.llm });
 }

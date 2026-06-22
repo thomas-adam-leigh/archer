@@ -293,6 +293,17 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects guided onboarding with an invalid threadId", async () => {
+    const res = await app.request("/onboarding/guided", post({ threadId: "not-a-uuid" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies guided onboarding with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request("/onboarding/guided", post({ threadId: VALID_UUID }));
+    expect(res.status).toBe(401);
+  });
+
   it("rejects voicenote ingest with an invalid threadId", async () => {
     const res = await app.request(
       "/onboarding/voicenote",

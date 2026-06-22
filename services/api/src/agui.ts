@@ -8,7 +8,7 @@
 // `StubArgs.reply` — the route fills it with real LLM output (./brain.ts, ARC-60),
 // and it falls back to a canned greeting when absent so the ordering contract stays
 // unit-testable with no DB, no IO, and no live model.
-import type { Enums, Json } from "@archer/db";
+import type { Enums, Json, ProfileSpineDraft } from "@archer/db";
 import { type AutonomyPolicy, needsApproval } from "./autonomy.js";
 
 /** The persisted enum vocabulary — the event log's `type` column. */
@@ -299,6 +299,108 @@ export function onboardingRun({
 export function draftAttributes(state: Json): Json {
   const draft = (state as { draft?: { attributes?: Json } } | null)?.draft;
   return draft?.attributes ?? {};
+}
+
+// ── The guided onboarding run: conversation → draft (incl. spine) → version ────
+// "Start from scratch" made real (ARC-79). Where the single-shot onboardingRun
+// accretes only profile-wide attributes from a canned draft, the guided run is the
+// finalize step of the multi-turn conversation: the route structures the gathered
+// conversation into a full draft (attributes + the typed spine — work, education,
+// skills, …) with the real LLM, then this run accretes that draft into shared state
+// via JSON-Patch deltas and converges on the SAME terminal shape as the résumé
+// ingest run (`phase:"complete"` + versionId/proposalId, in both the outcome and
+// shared state) — so the conversational path lands on the shared review screen
+// exactly like the résumé path. Pure + deterministic: the route does the IO
+// (structure/persist), this builds the event log.
+
+const GUIDED_STEP = "onboard";
+const GUIDED_GREETING = "Thanks — I've got what I need. Building your profile now.";
+const GUIDED_CLOSING = "Here's your draft profile — review and approve it to go live.";
+
+export interface GuidedOnboardingArgs {
+  threadId: string;
+  runId: string;
+  parentRunId?: string | null;
+  /** The structured draft assembled from the conversation: profile-wide attributes
+   *  plus the typed spine. Only non-empty spine lists are accreted. */
+  draft: { attributes: Record<string, Json>; spine: ProfileSpineDraft };
+  /** The proposed version this run produced; rides on the terminal outcome + state. */
+  versionId: string;
+  /** The proposal awaiting the candidate's review; rides on the terminal outcome + state. */
+  proposalId: string;
+}
+
+/**
+ * Produce the ordered event log for one guided-onboarding finalize run. Confirms in
+ * text, opens an empty draft in shared state, accretes the draft field by field
+ * (one StateDelta per attribute + one per non-empty spine list), then flips to
+ * `complete` carrying the proposed `versionId`/`proposalId` — both in the terminal
+ * outcome and in shared state. The final folded shared state is
+ * `{ phase: "complete", draft: { attributes, spine }, versionId, proposalId }`.
+ */
+export function guidedOnboardingRun({
+  threadId,
+  runId,
+  parentRunId = null,
+  draft,
+  versionId,
+  proposalId,
+}: GuidedOnboardingArgs): AgUiEvent[] {
+  const open = `${runId}:m1`;
+  const close = `${runId}:m2`;
+  const events: AgUiEvent[] = [
+    { type: "run_started", data: { threadId, runId, parentRunId } },
+    { type: "step_started", data: { stepName: GUIDED_STEP } },
+    { type: "text_message_start", data: { messageId: open, role: "assistant" } },
+    { type: "text_message_content", data: { messageId: open, delta: GUIDED_GREETING } },
+    { type: "text_message_end", data: { messageId: open } },
+    {
+      type: "state_snapshot",
+      data: { snapshot: { phase: "building", draft: { attributes: {}, spine: {} } } },
+    },
+  ];
+  // Accrete the profile-wide attributes, one JSON-Patch delta per field.
+  for (const [key, value] of Object.entries(draft.attributes)) {
+    events.push({
+      type: "state_delta",
+      data: { delta: [{ op: "add", path: `/draft/attributes/${escapePointer(key)}`, value }] },
+    });
+  }
+  // Accrete each non-empty spine list as a single delta (the rows land together).
+  for (const [list, rows] of Object.entries(draft.spine)) {
+    if (Array.isArray(rows) && rows.length > 0) {
+      events.push({
+        type: "state_delta",
+        data: {
+          delta: [{ op: "add", path: `/draft/spine/${escapePointer(list)}`, value: rows as Json }],
+        },
+      });
+    }
+  }
+  // Converge on the shared review: same terminal shape as resumeIngestRun.
+  events.push({
+    type: "state_delta",
+    data: {
+      delta: [
+        { op: "replace", path: "/phase", value: "complete" },
+        { op: "add", path: "/versionId", value: versionId },
+        { op: "add", path: "/proposalId", value: proposalId },
+      ],
+    },
+  });
+  events.push({ type: "text_message_start", data: { messageId: close, role: "assistant" } });
+  events.push({ type: "text_message_content", data: { messageId: close, delta: GUIDED_CLOSING } });
+  events.push({ type: "text_message_end", data: { messageId: close } });
+  events.push({ type: "step_finished", data: { stepName: GUIDED_STEP } });
+  events.push({
+    type: "run_finished",
+    data: {
+      threadId,
+      runId,
+      outcome: { type: "success", phase: "complete", versionId, proposalId },
+    },
+  });
+  return events;
 }
 
 // ── The résumé-ingest run: streamed 3-phase progress → proposed version ───────
