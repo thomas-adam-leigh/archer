@@ -5,8 +5,10 @@ import {
   fetchOnboardingProgress,
   type OnboardingStep,
 } from '../lib/onboarding.js';
+import type { IngestStarted } from '../lib/resume.js';
 import { HomeScreen } from './HomeScreen.js';
 import { IntroScreen, type OnboardingPath } from './IntroScreen.js';
+import { ResumeUploadScreen } from './ResumeUploadScreen.js';
 import { StageScreen } from './StageScreen.js';
 
 /** The label + blurb shown for a resumed step whose screen lands in a later
@@ -33,16 +35,10 @@ const RESUME_COPY: Record<
   },
 };
 
-/** Copy for the chosen-path stand-in, until each path's flow exists. */
-const PATH_COPY: Record<OnboardingPath, { title: string; subtitle: string }> = {
-  resume: {
-    title: 'Upload my résumé',
-    subtitle: "Résumé upload is coming soon — we'll pick this up here.",
-  },
-  scratch: {
-    title: 'Start from scratch',
-    subtitle: "The guided chat is coming soon — we'll pick this up here.",
-  },
+/** Copy for the start-from-scratch stand-in, until the guided chat exists (ARC-80). */
+const SCRATCH_COPY = {
+  title: 'Start from scratch',
+  subtitle: "The guided chat is coming soon — we'll pick this up here.",
 };
 
 type Status =
@@ -63,6 +59,7 @@ export function OnboardingRouter(props: {
   const { session, onLogout } = props;
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [path, setPath] = useState<OnboardingPath | null>(null);
+  const [ingest, setIngest] = useState<IngestStarted | null>(null);
 
   const load = useCallback(() => {
     setStatus({ kind: 'loading' });
@@ -97,13 +94,35 @@ export function OnboardingRouter(props: {
   }
 
   if (status.step === 'intro') {
-    // A chosen path leads to its flow (built in ARC-74 / ARC-80); until then,
-    // show a stand-in the user can back out of so both paths stay reachable.
-    if (path) {
+    // Once the résumé ingest run has started, hand off to the processing screen
+    // (the real, Realtime-subscribed screen lands in ARC-75); show its stand-in.
+    if (ingest) {
+      const copy = RESUME_COPY.processing;
       return (
         <StageScreen
-          title={PATH_COPY[path].title}
-          subtitle={PATH_COPY[path].subtitle}
+          title={copy.title}
+          subtitle={copy.subtitle}
+          secondaryLabel="Sign out"
+          onSecondary={onLogout}
+        />
+      );
+    }
+    // The résumé path: pick → upload → start ingest (ARC-74). The guided chat
+    // (ARC-80) is still a stand-in. Both stay reachable via Back.
+    if (path === 'resume') {
+      return (
+        <ResumeUploadScreen
+          session={session}
+          onIngestStarted={setIngest}
+          onBack={() => setPath(null)}
+        />
+      );
+    }
+    if (path === 'scratch') {
+      return (
+        <StageScreen
+          title={SCRATCH_COPY.title}
+          subtitle={SCRATCH_COPY.subtitle}
           secondaryLabel="Back"
           onSecondary={() => setPath(null)}
         />
