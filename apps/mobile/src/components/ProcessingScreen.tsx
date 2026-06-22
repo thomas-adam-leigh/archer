@@ -8,7 +8,6 @@ import {
   type ThreadView,
 } from '../lib/agui/index.js';
 import type { Session } from '../lib/auth.js';
-import type { IngestStarted } from '../lib/resume.js';
 
 /** The proposed version an ingest run produced — handed to the review step (ARC-76). */
 export interface IngestComplete {
@@ -62,7 +61,10 @@ function lowerFirst(s: string): string {
  */
 export function ProcessingScreen(props: {
   session: Session;
-  ingest: IngestStarted;
+  /** The run's thread to reattach to. A freshly-started run passes its full
+   *  {@link IngestStarted}; a resumed run (ARC-82) passes just the resolved
+   *  thread id — the screen only needs the thread to seed history + Realtime. */
+  ingest: { threadId: string };
   onComplete: (result: IngestComplete) => void;
   onRetry: () => void;
   /** The ordered phases to render; defaults to the résumé ingest phases. */
