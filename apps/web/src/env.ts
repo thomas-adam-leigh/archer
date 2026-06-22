@@ -14,6 +14,15 @@ export const env = createEnv({
 
 	client: {
 		VITE_APP_TITLE: z.string().min(1).optional(),
+		/**
+		 * Archer backend config (the bits the web onboarding client needs). Kept
+		 * optional here so importing `env` never throws at build time — CI builds
+		 * `apps/web` without secrets — while the lib's accessors (`src/lib/config.ts`,
+		 * `src/lib/supabase.ts`) assert their presence at call time in dev/prod.
+		 */
+		VITE_SUPABASE_URL: z.string().url().optional(),
+		VITE_SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
+		VITE_ARCHER_API_URL: z.string().url().optional(),
 	},
 
 	/**
