@@ -118,10 +118,15 @@ jobs:
   # ── Web E2E (apps/web): Cypress — NON-REQUIRED until M9 (ARC-93) ─────────────
   # Path-filtered to apps/web (+ this workflow) so it never runs on unrelated
   # PRs, and deliberately NOT in the `ci-ok` gate, so a flaky E2E can't block a
-  # merge until the suite is promoted (ARC-118). cypress-io/github-action runs
-  # `cypress install` explicitly and caches the binary at ~/.cache/Cypress —
-  # which is why the workflow-level CYPRESS_INSTALL_BINARY=0 (kept for the heavy
-  # `node` job) is harmless here; this job overrides it so the binary downloads.
+  # merge until the suite is promoted (ARC-118).
+  #
+  # The pnpm workspace lockfile lives at the repo root, so we install deps + the
+  # Cypress binary ourselves (the action's own install only detects a lockfile
+  # inside its working-directory) and run the action with `install: false`. It
+  # still does the build -> serve -> wait-on -> run dance so specs never race the
+  # server. This job overrides the workflow-level CYPRESS_INSTALL_BINARY=0 (which
+  # keeps the ~300 MB binary out of the heavy `node` install) so the binary here
+  # does download, into the cached ~/.cache/Cypress.
   web-e2e:
     needs: changes
     if: needs.changes.outputs.web == 'true'
@@ -135,13 +140,22 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      # The action installs workspace deps + the Cypress binary (cached), builds
-      # the app, serves it (node .output/server/index.mjs on :3000), waits for
-      # the server, then runs the specs — so they never race the server.
+      - run: pnpm install --frozen-lockfile
+      # Cache the Cypress binary (the classic "Cannot find cached binary"
+      # failure, gh#474), then install it for the web workspace.
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: cypress-${{ runner.os }}-
+      - name: Install Cypress binary
+        run: pnpm --filter web exec cypress install
       - name: Cypress (build → serve → wait-on → e2e)
         uses: cypress-io/github-action@v6
         with:
           working-directory: apps/web
+          install: false
           build: pnpm build
           start: pnpm serve
           wait-on: "http://localhost:3000"
