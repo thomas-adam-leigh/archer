@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from '@lynx-js/react';
 
 import './App.css';
 import { AuthScreen } from './components/AuthScreen.js';
-import { HomeScreen } from './components/HomeScreen.js';
+import { OnboardingRouter } from './components/OnboardingRouter.js';
 import type { Session } from './lib/auth.js';
 import { clearSession, loadSession, saveSession } from './lib/session-store.js';
 
@@ -31,7 +31,7 @@ export function App() {
     <view className="Root">
       <view className="Background" />
       {restoring ? null : session ? (
-        <HomeScreen session={session} onLogout={onLogout} />
+        <OnboardingRouter session={session} onLogout={onLogout} />
       ) : (
         <AuthScreen onAuthed={onAuthed} />
       )}
