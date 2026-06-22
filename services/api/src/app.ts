@@ -10,6 +10,7 @@ import {
   Constants,
   type CoverLetterVersionDecision,
   checkReadiness,
+  completeOnboarding,
   createCoverLetterVersion,
   createInterruptProposal,
   createProfileVersion,
@@ -798,6 +799,46 @@ const gOnboard = mk()
       }
       const titles = await setTargetTitles(getDb(), user, cleaned);
       return c.json({ user, titles });
+    },
+  )
+  // Complete onboarding (ARC-69): the candidate's final action. Onboarding is
+  // "complete" only when the readiness check passes — an approved profile version,
+  // 1–5 active target titles, and ≥1 negative criterion. When ready, submit the
+  // account for the owner's Acceptance Gate (kept by design, ARC-31); otherwise
+  // refuse with the unmet reasons (409), leaving the account untouched. Background
+  // search still starts only on owner acceptance — completion lands at 'submitted',
+  // not at live search. Same own-rows service-role auth as the other onboarding
+  // routes; `progress`/`/accounts/state` then drive the "in review → searching once
+  // accepted" home state.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/onboarding/complete",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Complete onboarding"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 409: ERR[409] },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as { userId?: string };
+      const user = body.userId ?? c.req.query("user") ?? process.env.ARCHER_USER_ID;
+      if (!user || !UUID_RE.test(user)) return c.json({ error: "invalid user" }, 400);
+      const result = await completeOnboarding(getDb(), user);
+      // Not complete yet (readiness unmet) is a 409 conflict, not a submit.
+      if (!result.submitted) {
+        return c.json(
+          {
+            user,
+            status: result.status ?? "onboarding",
+            readiness: result.readiness,
+            error: `onboarding incomplete: ${result.readiness.reasons.join("; ")}`,
+          },
+          409,
+        );
+      }
+      return c.json({ user, status: result.status, readiness: result.readiness });
     },
   );
 

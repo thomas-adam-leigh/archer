@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   applyVersionProposal,
   checkReadiness,
+  completeOnboarding,
   createProfileVersion,
   decideAccount,
   getAccount,
@@ -123,6 +124,30 @@ describe.skipIf(!TEST_DB_URL)("acceptance gate", () => {
     // A rejected user may resubmit for another review.
     const resubmitted = await submitAccountForReview(sql, userId);
     expect(resubmitted.status).toBe("submitted");
+  });
+
+  // ── Onboarding completion → Acceptance Gate (ARC-69) ──────────────────────
+  it("completion is refused while onboarding is incomplete, leaving no account row", async () => {
+    const result = await completeOnboarding(sql, userId);
+    expect(result.submitted).toBe(false);
+    expect(result.readiness.ready).toBe(false);
+    expect(result.readiness.reasons).toHaveLength(3); // no titles, criteria, profile
+    expect(result.status).toBeNull(); // a refused completion never provisions an account
+    expect(await getAccount(sql, userId)).toBeUndefined();
+  });
+
+  it("completion submits a ready account for the Acceptance Gate", async () => {
+    await makeReady(sql);
+    const result = await completeOnboarding(sql, userId);
+    expect(result.submitted).toBe(true);
+    expect(result.readiness.ready).toBe(true);
+    expect(result.status).toBe("submitted");
+
+    // It lands at 'submitted' (the owner gate), NOT accepted — search stays gated.
+    expect(await isAccepted(sql, userId)).toBe(false);
+    const account = await getAccount(sql, userId);
+    expect(account?.status).toBe("submitted");
+    expect(account?.submitted_at).not.toBeNull();
   });
 
   it("deciding an account that is not awaiting review is refused", async () => {

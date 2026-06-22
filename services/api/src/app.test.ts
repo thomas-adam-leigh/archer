@@ -365,6 +365,19 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  // ── Onboarding completion → Acceptance Gate (ARC-69) ──────────────────────
+  it("rejects onboarding completion with no resolvable user", async () => {
+    delete process.env.ARCHER_USER_ID;
+    const res = await app.request("/onboarding/complete", post({}));
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies onboarding completion with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request("/onboarding/complete", post({ userId: VALID_UUID }));
+    expect(res.status).toBe(401);
+  });
+
   // ── Candidate self-approval (ARC-67) ──────────────────────────────────────
   // The self-serve decide route is reachable with the SERVICE secret (no owner
   // admin secret), unlike the owner-gated /onboarding/proposals/:id/decide.
