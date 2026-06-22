@@ -25,14 +25,24 @@ post_install do |installer|
   installer.pods_project.targets.each do |t|
     t.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
-      # Lynx 3.8 source trips new iOS 26 SDK deprecations (e.g. UIApplication.keyWindow)
-      # and the pods compile with -Werror. Don't let third-party warnings fail the build.
       config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
-      %w[OTHER_CFLAGS OTHER_CPLUSPLUSFLAGS].each do |key|
-        flags = config.build_settings[key] || ['$(inherited)']
-        flags = [flags] unless flags.is_a?(Array)
-        config.build_settings[key] = flags + ['-Wno-error']
-      end
+    end
+
+    # Lynx 3.8 sets -Werror as a PER-FILE compiler flag (podspec `compiler_flags`),
+    # which lands after target-level OTHER_CFLAGS on the clang line — so a deprecation
+    # in Lynx's own source (e.g. UIApplication.keyWindow, deprecated since iOS 13) fails
+    # the build under newer SDKs no matter what we set at the target level. Strip -Werror
+    # from each file's flags and disable the deprecation warning outright.
+    next unless t.respond_to?(:source_build_phase) && t.source_build_phase
+    t.source_build_phase.files.each do |f|
+      settings = f.settings
+      next unless settings && settings['COMPILER_FLAGS']
+      flags = settings['COMPILER_FLAGS']
+      flags = flags.join(' ') if flags.is_a?(Array)
+      kept = flags.split(/\s+/).reject { |x| x =~ /\A-Werror(=.*)?\z/ }
+      kept << '-Wno-deprecated-declarations'
+      settings['COMPILER_FLAGS'] = kept.join(' ')
+      f.settings = settings
     end
   end
 end
