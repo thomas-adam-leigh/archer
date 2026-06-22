@@ -28,9 +28,13 @@ const SYSTEM_PROMPT =
 const LLM_ROLES: ReadonlySet<string> = new Set<LlmRole>(["system", "user", "assistant"]);
 
 /** Project the run input's message turns onto the LLM chat contract, prefixing the
- *  system prompt. A bare run with no turns still completes — the model greets per
- *  the system prompt. */
-function toMessages(input: RunAgentInput): LlmMessage[] {
+ *  system prompt. Conversational onboarding opens with Archer greeting first — a run
+ *  with no candidate turns — but some providers (notably MiniMax) reject a chat that
+ *  is *only* a system message ("invalid params, chat content is empty"). So when no
+ *  candidate turn is present we seed a minimal user turn to open on; the model then
+ *  greets per the system prompt. That seed primes the model only — it is never
+ *  persisted to the thread's event log. */
+export function toMessages(input: RunAgentInput): LlmMessage[] {
   const messages: LlmMessage[] = [{ role: "system", content: SYSTEM_PROMPT }];
   for (const m of input.messages ?? []) {
     const content = m.content?.trim();
@@ -38,6 +42,11 @@ function toMessages(input: RunAgentInput): LlmMessage[] {
     const role: LlmRole = LLM_ROLES.has(m.role) ? (m.role as LlmRole) : "user";
     if (role === "system") continue; // the system frame is ours, not the caller's
     messages.push({ role, content });
+  }
+  // Never send a system-only chat (MiniMax 400s on it). On the opening turn, give
+  // the model a user message to respond to so it produces its greeting.
+  if (messages.length === 1) {
+    messages.push({ role: "user", content: "Let's get started." });
   }
   return messages;
 }
