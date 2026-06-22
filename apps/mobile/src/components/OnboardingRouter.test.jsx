@@ -16,16 +16,26 @@ vi.mock('../lib/supabase.js', () => ({
 // client env at import; stub it (no network is made in these render tests).
 vi.mock('../lib/config.js', () => ({ ARCHER_API_URL: 'https://api.test' }));
 
-const { fetchMock, draftMock } = vi.hoisted(() => ({
-  fetchMock: vi.fn(),
-  draftMock: vi.fn(),
-}));
+const { fetchMock, draftMock, accountStateMock, completeMock } = vi.hoisted(
+  () => ({
+    fetchMock: vi.fn(),
+    draftMock: vi.fn(),
+    accountStateMock: vi.fn(),
+    completeMock: vi.fn(),
+  }),
+);
 vi.mock('../lib/onboarding.js', () => ({ fetchOnboardingProgress: fetchMock }));
 // The review step renders the profile-review screen, which self-resolves the
 // proposed draft; mock that fetch so the router test drives routing, not network.
 vi.mock('../lib/profile.js', async (importActual) => ({
   ...(await importActual()),
   fetchProposedProfileDraft: draftMock,
+}));
+// The done step renders home (reads account state) and the submitting step submits
+// the account; mock both so the router test drives routing, not network.
+vi.mock('../lib/accounts.js', () => ({
+  fetchAccountState: accountStateMock,
+  completeOnboarding: completeMock,
 }));
 
 import { OnboardingRouter } from './OnboardingRouter.js';
@@ -47,6 +57,8 @@ function renderAt(step) {
 beforeEach(() => {
   fetchMock.mockReset();
   draftMock.mockReset();
+  accountStateMock.mockReset();
+  completeMock.mockReset();
   onLogout.mockReset();
 });
 
@@ -81,8 +93,28 @@ test('a returning user resumes at their step (step=review)', async () => {
   expect(await findByText('Resumed Draft')).toBeInTheDocument();
 });
 
-test('a completed user (step=done) lands on home', async () => {
+test('a completed user (step=done) lands on the status-aware home', async () => {
+  accountStateMock.mockResolvedValue('accepted');
   const { findByText } = renderAt('done');
 
-  expect(await findByText("You're signed in")).toBeInTheDocument();
+  expect(
+    await findByText('Archer is searching for opportunities…'),
+  ).toBeInTheDocument();
+});
+
+test('the submitting step submits the account, then lands on home', async () => {
+  // First read is `submitting`; once completion lands, the re-read returns `done`.
+  fetchMock
+    .mockResolvedValueOnce({ user: 'user-1', step: 'submitting' })
+    .mockResolvedValueOnce({ user: 'user-1', step: 'done' });
+  completeMock.mockResolvedValue('submitted');
+  accountStateMock.mockResolvedValue('submitted');
+
+  render(<OnboardingRouter session={session} onLogout={onLogout} />);
+  const { findByText } = getQueriesForElement(elementTree.root);
+
+  expect(
+    await findByText('Archer is reviewing your profile'),
+  ).toBeInTheDocument();
+  expect(completeMock).toHaveBeenCalledTimes(1);
 });
