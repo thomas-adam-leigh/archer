@@ -24,11 +24,14 @@ import {
 import {
 	addNegativeCriterion,
 	approveTitles,
+	hasWorkPreferences,
 	listNegativeCriteria,
 	type NegativeCriterion,
 	removeNegativeCriterion,
 	type SuggestTitlesInput,
+	submitWorkPreferences,
 	suggestTitles,
+	type WorkPreferences,
 } from "#/lib/preferences.ts";
 import {
 	approveProposedDraft,
@@ -272,18 +275,26 @@ export function useRemoveNegativeCriterion() {
 }
 
 /**
- * Submit the hunt setup — the single "Send to Archer →" action (ARC-111). Approves
+ * Submit the hunt setup — the single "Send to Archer →" action (ARC-111). Persists
+ * the candidate's work preferences (ARC-133, only when any were entered), approves
  * the confirmed target titles, then completes onboarding (the Acceptance-Gate
  * submit), then invalidates onboarding progress so the resume guard sees the now
- * `done` step and forwards the candidate to home. One mutation so the two writes
- * stay atomic from the screen's point of view.
+ * `done` step and forwards the candidate to home. One mutation so the writes stay
+ * atomic from the screen's point of view.
  */
 export function useSubmitHuntSetup() {
 	const session = useSession();
 	const queryClient = useQueryClient();
-	return useMutation<AccountStatus, Error, { titles: string[] }>({
+	return useMutation<
+		AccountStatus,
+		Error,
+		{ titles: string[]; preferences?: WorkPreferences }
+	>({
 		mutationFn: async (vars) => {
 			const active = requireSession(session);
+			if (vars.preferences && hasWorkPreferences(vars.preferences)) {
+				await submitWorkPreferences(active, vars.preferences);
+			}
 			await approveTitles(active, vars.titles);
 			return completeOnboarding(active);
 		},

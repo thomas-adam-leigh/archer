@@ -107,9 +107,14 @@ function stubCriteriaBackend(ctrl: CriteriaCtrl) {
 		req.reply({ statusCode: 200, body: {} });
 	}).as("removeCriterion");
 
-	// Submit (hooks.ts → useSubmitHuntSetup): approve the confirmed titles, then
-	// complete onboarding — the completion flips `ctrl.step` to `done` so the
-	// invalidated progress poll carries the candidate to home.
+	// Submit (hooks.ts → useSubmitHuntSetup): persist the work preferences (ARC-133,
+	// only when any were entered) → approve the confirmed titles → complete
+	// onboarding — the completion flips `ctrl.step` to `done` so the invalidated
+	// progress poll carries the candidate to home.
+	cy.intercept("POST", "**/profile/preferences", {
+		statusCode: 200,
+		body: { user: "test-user-id", profile: {} },
+	}).as("submitPreferences");
 	cy.intercept("POST", "**/onboarding/titles/approve", {
 		statusCode: 200,
 		body: {},
@@ -181,9 +186,27 @@ describe("Hunt setup (M7)", () => {
 			"no on-call rotations",
 		);
 
-		// "Send to Archer →": approve titles + complete onboarding → the step flips
-		// to `done` and the resume guard forwards the candidate to home.
+		// Capture the optional work preferences (ARC-133): pick a work mode, opt into
+		// remote, and answer salary + notice. These land on the typed `profiles`
+		// columns via POST /profile/preferences when the candidate submits.
+		cy.get('[data-testid="work-preferences"]').should("be.visible");
+		cy.get('[data-testid="work-pref-hybrid"]').click();
+		cy.get('[data-testid="willing-remote-toggle"]').click();
+		cy.get('[data-testid="current-salary-input"]').type("R900k");
+		cy.get('[data-testid="preferred-salary-input"]').type("R1.1m");
+		cy.get('[data-testid="notice-period-input"]').type("30 days");
+
+		// "Send to Archer →": persist preferences → approve titles → complete
+		// onboarding → the step flips to `done` and the resume guard forwards home.
 		cy.get('[data-testid="hunt-setup-submit"]').should("be.enabled").click();
+		cy.wait("@submitPreferences").its("request.body").should("deep.equal", {
+			userId: "test-user-id",
+			workPref: "hybrid",
+			willingRemote: true,
+			currentSalary: "R900k",
+			preferredSalary: "R1.1m",
+			noticePeriod: "30 days",
+		});
 		cy.wait("@approveTitles");
 		cy.wait("@complete");
 		cy.location("pathname").should("eq", "/onboarding/home");

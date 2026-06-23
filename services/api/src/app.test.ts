@@ -136,6 +136,28 @@ describe("archer-api", () => {
     expect(res.status).toBe(400);
   });
 
+  it("POST /profile/preferences rejects an invalid work_pref", async () => {
+    const res = await app.request(
+      "/profile/preferences",
+      post({ userId: VALID_UUID, workPref: "nope" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /profile/preferences rejects a payload with no recognised fields", async () => {
+    const res = await app.request("/profile/preferences", post({ userId: VALID_UUID }));
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies POST /profile/preferences with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(
+      "/profile/preferences",
+      post({ userId: VALID_UUID, workPref: "remote" }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("rejects an agui run with a missing or invalid threadId", async () => {
     const missing = await app.request("/agui/run", post({}));
     expect(missing.status).toBe(400);
