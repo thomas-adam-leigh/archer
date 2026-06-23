@@ -95,7 +95,8 @@ jobs:
   # ── Web (apps/web): the TanStack Start onboarding app ───────────────────────
   # apps/web keeps its OWN biome config (tab indent, recommended lint) and is
   # excluded from the backend biome, so it's linted/typechecked/built here with
-  # its own tooling. Cypress E2E is a separate, non-required `web-e2e` job (ARC-93).
+  # its own tooling. Cypress E2E is a separate `web-e2e` job (ARC-93), now a
+  # required gate via `ci-ok` (ARC-118).
   web:
     needs: changes
     if: needs.changes.outputs.web == 'true'
@@ -115,10 +116,13 @@ jobs:
       - name: Build
         run: pnpm --filter web build
 
-  # ── Web E2E (apps/web): Cypress — NON-REQUIRED until M9 (ARC-93) ─────────────
+  # ── Web E2E (apps/web): Cypress — REQUIRED on web PRs (ARC-93 → ARC-118) ─────
   # Path-filtered to apps/web (+ this workflow) so it never runs on unrelated
-  # PRs, and deliberately NOT in the `ci-ok` gate, so a flaky E2E can't block a
-  # merge until the suite is promoted (ARC-118).
+  # PRs. Now that the suite is stable (retries.runMode: 2, alias-waits only,
+  # deterministic cy.intercept fixtures, binary cached + retried), it is folded
+  # into the `ci-ok` gate (ARC-118), so a failing web E2E blocks web merges. On
+  # non-web PRs it's skipped, which `ci-ok` treats as passing — so non-web PRs
+  # and the release pipeline (release.yml's own `verify`) are unaffected.
   #
   # The pnpm workspace lockfile lives at the repo root, so we install deps + the
   # Cypress binary ourselves (the action's own install only detects a lockfile
@@ -274,7 +278,7 @@ jobs:
 
   # ── Required status check (point branch protection at this one) ─────────────
   ci-ok:
-    needs: [changes, node, web, db, python, docker, security]
+    needs: [changes, node, web, web-e2e, db, python, docker, security]
     if: always()
     runs-on: ubuntu-latest
     steps:
