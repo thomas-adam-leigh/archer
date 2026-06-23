@@ -72,7 +72,8 @@ export interface ExtractResumeOptions {
   // --- default-downloader config (ignored when `download` is supplied) ---
   /** Supabase project URL (default `process.env.SUPABASE_URL`). */
   supabaseUrl?: string;
-  /** Service-role key for the private-bucket read (default `process.env.SUPABASE_SERVICE_ROLE_KEY`). */
+  /** Service-role key for the private-bucket read (default `process.env.SUPABASE_SERVICE_ROLE_KEY`,
+   *  falling back to `process.env.SUPABASE_SECRET_KEY` — the name the deployed container provides). */
   serviceRoleKey?: string;
   /** Injected for tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
@@ -105,11 +106,17 @@ function toObjectPath(storageRef: string): string {
 function defaultDownloader(opts: ExtractResumeOptions): ResumeDownloader {
   return async (storageRef) => {
     const supabaseUrl = opts.supabaseUrl ?? process.env.SUPABASE_URL;
-    const serviceRoleKey = opts.serviceRoleKey ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // Accept both the legacy env name and the current one the deployed `archer-api`
+    // container actually provides (`SUPABASE_SECRET_KEY`) — otherwise the private-bucket
+    // read 500s in prod even though the file uploaded fine (ARC-121, mirrors auth.ts).
+    const serviceRoleKey =
+      opts.serviceRoleKey ??
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SECRET_KEY;
     if (!supabaseUrl || !serviceRoleKey) {
       throw new ResumeExtractError(
         "download_failed",
-        "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured",
+        "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) are not configured",
       );
     }
     const doFetch = opts.fetchImpl ?? fetch;
