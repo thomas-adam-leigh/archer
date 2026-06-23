@@ -82,6 +82,49 @@ describe("structureResume", () => {
     expect(spine.projects?.[0]).toMatchObject({ name: "Archer", url: "https://archer.dev" });
   });
 
+  it("extracts profile-wide years_experience and the three distinct links (ARC-132)", async () => {
+    const payload = JSON.stringify({
+      attributes: {
+        fullName: "Alan Turing",
+        summary: "Computing pioneer.",
+        location: "Manchester, UK",
+        yearsExperience: "12",
+        links: {
+          linkedin: "https://linkedin.com/in/turing",
+          github: "https://github.com/turing",
+          website: "https://turing.dev",
+        },
+      },
+    });
+    const { attributes } = await structureResume("text", { llm: replyWith(payload) });
+
+    // years_experience snake_cased and coerced "12" → 12; about/location map cleanly;
+    // portfolio (website), linkedin, and github stay distinct for the materialize step.
+    expect(attributes).toEqual({
+      full_name: "Alan Turing",
+      summary: "Computing pioneer.",
+      location: "Manchester, UK",
+      years_experience: 12,
+      links: {
+        linkedin: "https://linkedin.com/in/turing",
+        github: "https://github.com/turing",
+        website: "https://turing.dev",
+      },
+    });
+  });
+
+  it("keeps years_experience 0 but drops it when absent", async () => {
+    const fresh = await structureResume("text", {
+      llm: replyWith(JSON.stringify({ attributes: { fullName: "Grad", yearsExperience: 0 } })),
+    });
+    expect(fresh.attributes).toEqual({ full_name: "Grad", years_experience: 0 });
+
+    const none = await structureResume("text", {
+      llm: replyWith(JSON.stringify({ attributes: { fullName: "Nobody" } })),
+    });
+    expect(none.attributes).toEqual({ full_name: "Nobody" });
+  });
+
   it("omits empty spine lists and drops free-text dates", async () => {
     const sparse = JSON.stringify({
       attributes: { fullName: "Grace Hopper" },
