@@ -88,3 +88,12 @@ export function apiPost<T>(
 ): Promise<T> {
 	return request<T>(path, { method: "POST", accessToken, body, fetchImpl });
 }
+
+/** Authenticated DELETE, parsing the JSON response as `T`. */
+export function apiDelete<T>(
+	path: string,
+	accessToken: string,
+	fetchImpl?: typeof fetch,
+): Promise<T> {
+	return request<T>(path, { method: "DELETE", accessToken, fetchImpl });
+}

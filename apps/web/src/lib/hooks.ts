@@ -23,7 +23,9 @@ import {
 import {
 	addNegativeCriterion,
 	approveTitles,
+	listNegativeCriteria,
 	type NegativeCriterion,
+	removeNegativeCriterion,
 	type SuggestTitlesInput,
 	suggestTitles,
 } from "#/lib/preferences.ts";
@@ -48,6 +50,8 @@ export const queryKeys = {
 		["onboarding", "progress", userId] as const,
 	proposedProfileDraft: (userId: string) =>
 		["profile", "proposed-draft", userId] as const,
+	negativeCriteria: (userId: string) =>
+		["preferences", "negative-criteria", userId] as const,
 };
 
 /** Read the current session or throw — used inside authenticated mutations. */
@@ -200,11 +204,48 @@ export function useApproveTitles() {
 	});
 }
 
-/** Capture one negative criterion (a rule-out). */
+/** List the candidate's saved negative criteria; disabled until signed in. */
+export function useNegativeCriteria() {
+	const session = useSession();
+	return useQuery<NegativeCriterion[]>({
+		queryKey: session
+			? queryKeys.negativeCriteria(session.user.id)
+			: ["preferences", "negative-criteria", "anonymous"],
+		queryFn: () => listNegativeCriteria(requireSession(session)),
+		enabled: Boolean(session),
+	});
+}
+
+/** Capture one negative criterion (a rule-out), refreshing the cached list. */
 export function useAddNegativeCriterion() {
 	const session = useSession();
+	const queryClient = useQueryClient();
 	return useMutation<NegativeCriterion, Error, { text: string }>({
 		mutationFn: (vars) =>
 			addNegativeCriterion(requireSession(session), vars.text),
+		onSuccess: () => {
+			if (session) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.negativeCriteria(session.user.id),
+				});
+			}
+		},
+	});
+}
+
+/** Remove a saved negative criterion by id, refreshing the cached list. */
+export function useRemoveNegativeCriterion() {
+	const session = useSession();
+	const queryClient = useQueryClient();
+	return useMutation<void, Error, { id: string }>({
+		mutationFn: (vars) =>
+			removeNegativeCriterion(requireSession(session), vars.id),
+		onSuccess: () => {
+			if (session) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.negativeCriteria(session.user.id),
+				});
+			}
+		},
 	});
 }

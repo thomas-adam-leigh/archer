@@ -3,6 +3,8 @@ import type { Session } from "#/lib/auth.ts";
 import {
 	addNegativeCriterion,
 	approveTitles,
+	listNegativeCriteria,
+	removeNegativeCriterion,
 	suggestTitles,
 } from "#/lib/preferences.ts";
 
@@ -47,6 +49,42 @@ describe("approveTitles", () => {
 				titles: ["A", "B"],
 			},
 		);
+	});
+});
+
+describe("listNegativeCriteria", () => {
+	test("reads the user-scoped list and returns the rows", async () => {
+		const get = vi.fn().mockResolvedValue({
+			user: "user-1",
+			criteria: [
+				{ id: "c1", text: "nothing in .NET" },
+				{ id: "c2", text: "no on-site" },
+			],
+		});
+
+		const result = await listNegativeCriteria(session, get);
+
+		expect(get).toHaveBeenCalledWith("/criteria?user=user-1", "access-1");
+		expect(result).toEqual([
+			{ id: "c1", text: "nothing in .NET" },
+			{ id: "c2", text: "no on-site" },
+		]);
+	});
+
+	test("defaults to an empty list when none are returned", async () => {
+		const get = vi.fn().mockResolvedValue({ user: "user-1" });
+
+		expect(await listNegativeCriteria(session, get)).toEqual([]);
+	});
+});
+
+describe("removeNegativeCriterion", () => {
+	test("deletes the row by id", async () => {
+		const del = vi.fn().mockResolvedValue({ removed: "c1" });
+
+		await removeNegativeCriterion(session, "c1", del);
+
+		expect(del).toHaveBeenCalledWith("/criteria/c1", "access-1");
 	});
 });
 
