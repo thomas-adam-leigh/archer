@@ -969,12 +969,34 @@ export interface VersionApplyResult {
   error?: string;
 }
 
+/** Map an approved version's `attributes` + `details` snapshot onto the typed
+ *  `profiles` columns this executor owns (ARC-130). Profile-wide jsonb stays the
+ *  source of truth; these columns are the materialised, queryable projection of
+ *  it. `resume_url` (ARC-131) and `work_pref`/salary/`notice_period` (ARC-133)
+ *  are owned elsewhere and deliberately left untouched here. */
+function materializedProfileColumns(attributes: Json, details: Json) {
+  const attr = (attributes ?? {}) as Record<string, unknown>;
+  const det = (details ?? {}) as Record<string, unknown>;
+  const links = (attr.links ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    about: str(attr.summary),
+    location: str(attr.location),
+    linkedin_url: str(links.linkedin),
+    portfolio_url: str(links.website) ?? str(links.github),
+    resume_text: str(det.resumeText),
+    years_experience: num(attr.years_experience),
+  };
+}
+
 /**
  * The profile-version apply executor. Decides a submitted 'profile_version'
  * proposal:
  *  - approve / approve-with-edits: in ONE transaction, optionally apply the
  *    edited payload, supersede the prior live version, flip the target version to
- *    'approved', and sync profiles.attributes from its snapshot. The proposal
+ *    'approved', and sync profiles.attributes (plus the typed profile columns it
+ *    materialises) from its snapshot. The proposal
  *    becomes 'completed'. Any failure rolls the transaction back (the live profile
  *    is untouched) and the proposal is marked 'failed'.
  *  - reject: mark the proposal 'rejected' and the version 'rejected'; the live
@@ -1027,18 +1049,35 @@ export async function applyVersionProposal(
         update profile_versions set status = 'superseded'
         where user_id = ${userId} and status = 'approved'`;
       // Flip the target version live — only a still-proposable version qualifies.
-      const approved = await tx<{ attributes: Json }[]>`
+      const approved = await tx<{ attributes: Json; details: Json }[]>`
         update profile_versions set status = 'approved'
         where id = ${versionId} and user_id = ${userId} and status in ('proposed', 'draft')
-        returning attributes`;
+        returning attributes, details`;
       if (!approved[0]) {
         throw new Error(`version ${versionId} is not in a proposable state`);
       }
-      // Sync the live profile-wide jsonb from the now-live version's snapshot.
+      // Sync the live profile-wide jsonb AND materialise the typed profile columns
+      // from the now-live version's snapshot (ARC-130). Overwriting on re-approval
+      // keeps the row a faithful projection of the live version (idempotent).
+      const cols = materializedProfileColumns(approved[0].attributes, approved[0].details);
       await tx`
-        insert into profiles (user_id, attributes)
-        values (${userId}, ${tx.json(approved[0].attributes as never)})
-        on conflict (user_id) do update set attributes = excluded.attributes`;
+        insert into profiles (
+          user_id, attributes,
+          about, location, linkedin_url, portfolio_url, resume_text, years_experience
+        )
+        values (
+          ${userId}, ${tx.json(approved[0].attributes as never)},
+          ${cols.about}, ${cols.location}, ${cols.linkedin_url},
+          ${cols.portfolio_url}, ${cols.resume_text}, ${cols.years_experience}
+        )
+        on conflict (user_id) do update set
+          attributes = excluded.attributes,
+          about = excluded.about,
+          location = excluded.location,
+          linkedin_url = excluded.linkedin_url,
+          portfolio_url = excluded.portfolio_url,
+          resume_text = excluded.resume_text,
+          years_experience = excluded.years_experience`;
       await tx`update proposals set status = 'completed' where id = ${proposalId}`;
     });
   } catch (err) {
