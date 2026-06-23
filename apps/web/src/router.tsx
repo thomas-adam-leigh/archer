@@ -23,4 +23,10 @@ declare module "@tanstack/react-router" {
 	interface Register {
 		router: ReturnType<typeof getRouter>;
 	}
+
+	/** Per-route onboarding metadata read by the app shell's progress indicator. */
+	interface StaticDataRouteOption {
+		/** The 1-based progress segment this route lights, or omitted to hide it. */
+		onboardingStep?: number;
+	}
 }

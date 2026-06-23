@@ -1,14 +1,20 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "#/components/ui/button.tsx";
 import { useAuthRedirect } from "#/lib/auth-guard.ts";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({
+	component: Home,
+	// The welcome screen sits at the start of the flow (segment 1); "Get started"
+	// hands off to /onboarding, which resumes the candidate at their live step.
+	staticData: { onboardingStep: 1 },
+});
 
 function Home() {
 	// The onboarding root is gated: signed-out visitors are sent to /auth, and
-	// nothing guarded renders until hydration settles. The per-stage resume
-	// (reading /onboarding/progress to land on the exact step) arrives with the
-	// onboarding router in ARC-99 once the stage routes exist.
+	// nothing guarded renders until hydration settles. "Get started" enters the
+	// onboarding router (/onboarding), which reads /onboarding/progress and lands
+	// the candidate on their exact stage (ARC-99).
+	const navigate = useNavigate();
 	const { ready } = useAuthRedirect("protected");
 	if (!ready) return <HomePending />;
 
@@ -22,7 +28,12 @@ function Home() {
 				Archer reads your résumé, learns what you want, and hunts for roles so
 				you don't have to.
 			</p>
-			<Button variant="brand" size="lg" className="mt-10 rounded-xl px-7">
+			<Button
+				variant="brand"
+				size="lg"
+				className="mt-10 rounded-xl px-7"
+				onClick={() => navigate({ to: "/onboarding" })}
+			>
 				Get started
 			</Button>
 		</div>

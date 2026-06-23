@@ -4,6 +4,7 @@ import {
 	createRootRouteWithContext,
 	HeadContent,
 	Scripts,
+	useRouterState,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { AppShell } from "#/components/app-shell.tsx";
@@ -44,14 +45,26 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 	// signed in across reloads (and route guards know when to act).
 	useHydrateSession();
 
+	// The progress indicator is route-driven: each onboarding stage declares its
+	// segment via `staticData.onboardingStep`; the deepest match that sets one
+	// wins, and routes outside the flow (e.g. /auth) leave it hidden.
+	const step = useRouterState({
+		select: (state) => {
+			for (let i = state.matches.length - 1; i >= 0; i--) {
+				const segment = state.matches[i].staticData.onboardingStep;
+				if (segment != null) return segment;
+			}
+			return undefined;
+		},
+	});
+
 	return (
 		<html lang="en">
 			<head>
 				<HeadContent />
 			</head>
 			<body>
-				{/* step wiring (route-driven progress) lands in ARC-99 */}
-				<AppShell step={1}>{children}</AppShell>
+				<AppShell step={step}>{children}</AppShell>
 				<TanStackDevtools
 					config={{
 						position: "bottom-right",
