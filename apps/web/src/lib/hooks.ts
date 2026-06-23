@@ -8,9 +8,14 @@
  * hook — they never thread tokens around. Auth mutations keep the store in sync.
  */
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Session } from "#/lib/auth.ts";
 import { signIn, signOut, signUp } from "#/lib/auth.ts";
+import {
+	buildProfileFromAnswers,
+	type GuidedOnboardingResult,
+	type ScratchFlowDeps,
+} from "#/lib/conversation.ts";
 import {
 	fetchOnboardingProgress,
 	type OnboardingProgress,
@@ -121,6 +126,32 @@ export function useUploadResume() {
 	>({
 		mutationFn: (vars) =>
 			uploadResumeAndStartIngest(requireSession(session), vars.file, vars.deps),
+	});
+}
+
+/**
+ * Finalize the scripted "start from scratch" onboarding: persist the captured
+ * answers to the thread, structure them into a PROPOSED profile version, and
+ * advance to review. Invalidates the cached onboarding progress on success so the
+ * review route's resume guard sees the new `review` step instead of bouncing back.
+ */
+export function useFinalizeScratchOnboarding() {
+	const session = useSession();
+	const queryClient = useQueryClient();
+	return useMutation<
+		GuidedOnboardingResult,
+		Error,
+		{ answers: readonly string[]; deps: ScratchFlowDeps }
+	>({
+		mutationFn: (vars) =>
+			buildProfileFromAnswers(requireSession(session), vars.answers, vars.deps),
+		onSuccess: () => {
+			if (session) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.onboardingProgress(session.user.id),
+				});
+			}
+		},
 	});
 }
 
