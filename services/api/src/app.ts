@@ -87,6 +87,7 @@ import { verifySupabaseJwt } from "./auth.js";
 import { getBrain } from "./brain.js";
 import { runCli } from "./cli.js";
 import { getDb } from "./db.js";
+import { signResumeUrl } from "./ingest/sign.js";
 import { extractResume } from "./ingest.js";
 import { buildTranscript, hasSpine, structureConversation } from "./onboarding/converse.js";
 import { reviseDraft } from "./onboarding/revise.js";
@@ -879,8 +880,11 @@ const gOnboard = mk()
       // Re-use the draft's source so the revision keeps facts the feedback doesn't
       // touch: the retained résumé text if this is a résumé draft, else the thread's
       // conversation transcript (the résumé thread has no candidate turns to fold).
-      const details = (current.details ?? {}) as { resumeText?: unknown };
+      const details = (current.details ?? {}) as { resumeText?: unknown; resumeUrl?: unknown };
       const resumeText = typeof details.resumeText === "string" ? details.resumeText : undefined;
+      // Carry the durable résumé URL forward too, so approving a revised draft keeps
+      // profiles.resume_url pointing at the uploaded file rather than nulling it (ARC-131).
+      const resumeUrl = typeof details.resumeUrl === "string" ? details.resumeUrl : undefined;
       const source =
         resumeText ??
         buildTranscript(restoreThread(await loadThreadEvents(db, threadId)).messages) ??
@@ -903,10 +907,15 @@ const gOnboard = mk()
           userId,
           label: "revised draft",
           attributes: revised.attributes as Json,
-          // Carry the résumé text forward so a re-revision still has its source.
-          details: resumeText
-            ? { source: "revision", revisedFrom: open.versionId, model: revised.model, resumeText }
-            : { source: "revision", revisedFrom: open.versionId, model: revised.model },
+          // Carry the résumé text + durable URL forward so a re-revision still has its
+          // source and approval keeps profiles.resume_url (ARC-85, ARC-131).
+          details: {
+            source: "revision",
+            revisedFrom: open.versionId,
+            model: revised.model,
+            ...(resumeText ? { resumeText } : {}),
+            ...(resumeUrl ? { resumeUrl } : {}),
+          },
         });
         if (hasSpine(revised.spine)) await writeProfileSpine(db, userId, version.id, revised.spine);
         const proposal = await submitVersionProposal(db, {
@@ -1509,6 +1518,18 @@ const gIngest = mk()
             },
           },
         );
+        // Mint a durable, resolvable URL for the uploaded résumé and keep it on the
+        // version's details, so approval materialises it into profiles.resume_url
+        // (ARC-131). Best-effort: the bucket read already succeeded above, so signing
+        // almost always does too — but a sign failure must not fail the ingest, so we
+        // omit the URL and leave resume_url null rather than aborting onboarding.
+        let resumeUrl: string | null = null;
+        try {
+          resumeUrl = await signResumeUrl(storageRef);
+        } catch {
+          resumeUrl = null;
+        }
+        const details = { ...(extraction.details as Record<string, Json>), resumeUrl };
         const result = await ingestProposedVersion(db, {
           userId: user,
           source: kind,
@@ -1516,7 +1537,7 @@ const gIngest = mk()
           filename,
           attributes: extraction.attributes as Json,
           spine: extraction.spine,
-          details: extraction.details as Json,
+          details: details as Json,
         });
         await appendEvents(
           db,

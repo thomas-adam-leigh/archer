@@ -972,8 +972,9 @@ export interface VersionApplyResult {
 /** Map an approved version's `attributes` + `details` snapshot onto the typed
  *  `profiles` columns this executor owns (ARC-130). Profile-wide jsonb stays the
  *  source of truth; these columns are the materialised, queryable projection of
- *  it. `resume_url` (ARC-131) and `work_pref`/salary/`notice_period` (ARC-133)
- *  are owned elsewhere and deliberately left untouched here. */
+ *  it. `resume_url` is the durable signed URL minted at ingest and carried on the
+ *  version's `details` (ARC-131); `work_pref`/salary/`notice_period` (ARC-133) are
+ *  owned elsewhere and deliberately left untouched here. */
 function materializedProfileColumns(attributes: Json, details: Json) {
   const attr = (attributes ?? {}) as Record<string, unknown>;
   const det = (details ?? {}) as Record<string, unknown>;
@@ -986,6 +987,7 @@ function materializedProfileColumns(attributes: Json, details: Json) {
     linkedin_url: str(links.linkedin),
     portfolio_url: str(links.website) ?? str(links.github),
     resume_text: str(det.resumeText),
+    resume_url: str(det.resumeUrl),
     years_experience: num(attr.years_experience),
   };
 }
@@ -1063,12 +1065,12 @@ export async function applyVersionProposal(
       await tx`
         insert into profiles (
           user_id, attributes,
-          about, location, linkedin_url, portfolio_url, resume_text, years_experience
+          about, location, linkedin_url, portfolio_url, resume_text, resume_url, years_experience
         )
         values (
           ${userId}, ${tx.json(approved[0].attributes as never)},
           ${cols.about}, ${cols.location}, ${cols.linkedin_url},
-          ${cols.portfolio_url}, ${cols.resume_text}, ${cols.years_experience}
+          ${cols.portfolio_url}, ${cols.resume_text}, ${cols.resume_url}, ${cols.years_experience}
         )
         on conflict (user_id) do update set
           attributes = excluded.attributes,
@@ -1077,6 +1079,7 @@ export async function applyVersionProposal(
           linkedin_url = excluded.linkedin_url,
           portfolio_url = excluded.portfolio_url,
           resume_text = excluded.resume_text,
+          resume_url = excluded.resume_url,
           years_experience = excluded.years_experience`;
       await tx`update proposals set status = 'completed' where id = ${proposalId}`;
     });

@@ -136,6 +136,27 @@ describe.skipIf(!TEST_DB_URL)("profile-version apply executor", () => {
     expect(profile[0].portfolio_url).toBe("https://github.com/cara");
   });
 
+  it("materialises the durable résumé URL from the version's details (ARC-131)", async () => {
+    const resumeUrl =
+      "https://proj.supabase.co/storage/v1/object/sign/resumes/uid/cv.pdf?token=abc";
+    const v = await createProfileVersion(sql, {
+      userId,
+      attributes: { summary: "Has a résumé." },
+      details: { storageRef: "resumes/uid/cv.pdf", resumeUrl },
+    });
+    const { id: proposalId } = await submitVersionProposal(sql, {
+      userId,
+      versionId: v.id,
+      title: "Approve with résumé URL",
+    });
+
+    await applyVersionProposal(sql, proposalId, { action: "approve" });
+
+    const profile = await sql<{ resume_url: string | null }[]>`
+      select resume_url from profiles where user_id = ${userId}`;
+    expect(profile[0].resume_url).toBe(resumeUrl);
+  });
+
   it("re-materialises typed columns when a new version supersedes the prior one", async () => {
     const v1 = await createProfileVersion(sql, {
       userId,
