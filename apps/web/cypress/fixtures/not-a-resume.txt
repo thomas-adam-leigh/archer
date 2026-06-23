@@ -1,0 +1,2 @@
+This is a plain text file, not a PDF or Word résumé — used to exercise the
+dropzone's unsupported-type rejection in the résumé upload E2E (ARC-103).
