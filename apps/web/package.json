@@ -21,6 +21,7 @@
     "e2e": "pnpm build:e2e && start-server-and-test serve http://localhost:3000 cypress:run"
   },
   "dependencies": {
+    "@archer/agui-client": "workspace:*",
     "@faker-js/faker": "^10.3.0",
     "@t3-oss/env-core": "^0.13.10",
     "@tailwindcss/vite": "^4.1.18",
