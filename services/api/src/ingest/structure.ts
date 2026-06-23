@@ -126,6 +126,7 @@ const StructuredSchema = z.object({
       phone: optStr,
       location: optStr,
       summary: optStr,
+      yearsExperience: optNum,
       links: z.object({ linkedin: optStr, github: optStr, website: optStr }).partial().nullish(),
     })
     .partial()
@@ -144,7 +145,7 @@ const SYSTEM_PROMPT = `You are a résumé parser. Read the résumé text and rec
 
 Return ONLY a single JSON object (no markdown, no commentary) with this shape:
 {
-  "attributes": { "fullName": string|null, "email": string|null, "phone": string|null, "location": string|null, "summary": string|null, "links": { "linkedin": string|null, "github": string|null, "website": string|null } },
+  "attributes": { "fullName": string|null, "email": string|null, "phone": string|null, "location": string|null, "summary": string|null, "yearsExperience": number|null, "links": { "linkedin": string|null, "github": string|null, "website": string|null } },
   "workExperiences": [ { "title": string, "organization": string|null, "employmentType": string|null, "location": string|null, "startDate": "YYYY-MM-DD"|null, "endDate": "YYYY-MM-DD"|null, "isCurrent": boolean, "description": string|null } ],
   "education": [ { "institution": string, "degree": string|null, "fieldOfStudy": string|null, "startDate": "YYYY-MM-DD"|null, "endDate": "YYYY-MM-DD"|null, "grade": string|null } ],
   "skills": [ { "name": string, "category": string|null, "proficiency": string|null, "yearsExperience": number|null } ],
@@ -157,6 +158,8 @@ Rules:
 - Reconstruct faithfully. NEVER invent employers, schools, dates, or skills not present in the text.
 - Leave anything you cannot find as null, and omit list items you cannot fill (empty arrays are fine).
 - Dates: use YYYY-MM-DD; if only a month or year is given, use the first of that period. Mark a role with no end date as "isCurrent": true.
+- "yearsExperience": the candidate's total years of professional experience, inferred from the work history (sum the spans of paid roles, counting an ongoing role up to the present). Round to a whole number; null if there is no work history to infer from. Do not invent.
+- "links": keep the three distinct — "linkedin" is the LinkedIn profile, "github" is the GitHub profile, and "website" is a personal portfolio/site (anything that is neither LinkedIn nor GitHub). Never put a portfolio URL in "github" or vice versa.
 - Output JSON only.`;
 
 /** Pull a JSON object out of the model's reply: strip a ```json fence if present,
@@ -197,6 +200,7 @@ function buildAttributes(a: Structured["attributes"]): Record<string, Json> {
   if (a?.phone) out.phone = a.phone;
   if (a?.location) out.location = a.location;
   if (a?.summary) out.summary = a.summary;
+  if (a?.yearsExperience != null) out.years_experience = a.yearsExperience;
   const links: Record<string, Json> = {};
   if (a?.links?.linkedin) links.linkedin = a.links.linkedin;
   if (a?.links?.github) links.github = a.links.github;
