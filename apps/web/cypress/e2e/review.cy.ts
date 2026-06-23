@@ -1,29 +1,145 @@
 /// <reference types="cypress" />
 
-// ARC-109 (M6 · Profile review) — the profile-review E2E. It reaches the review
-// screen via BOTH onboarding paths (résumé upload and the scripted conversation
-// finalize — the two ways a candidate arrives at "Here's you, as I understand
-// you."), then exercises the review-specific behaviours ARC-107/108 added: the
-// proposed draft renders résumé-style (every section), free-text feedback re-runs
-// the draft and the updated version re-renders, and "Looks right" approves the
-// proposal and advances to negative criteria (M7).
+// ARC-109 (M6 · Profile review) + ARC-129 — the profile-review E2E. It reaches the
+// review screen via BOTH onboarding paths (résumé upload and the scripted
+// conversation finalize — the two ways a candidate arrives at "Here's you, as I
+// understand you."), then exercises the review-specific behaviours: the proposed
+// draft renders résumé-style (every section), free-text feedback re-runs the draft,
+// and "Looks right" approves the proposal and advances to negative criteria (M7).
+//
+// From ARC-129 the feedback loop is driven by the **live AG-UI revise run**, not a
+// dead spinner: clicking "Send to Archer" opens the "Archer is reworking your draft"
+// overlay (profile-revising.tsx), which seeds from `GET /agui/threads/:id/history`,
+// subscribes to Supabase Realtime, and folds the streamed `state.phase` (`reading →
+// revising → complete`). These specs mock the Realtime stream by stubbing
+// `window.WebSocket` (the transport uses the global directly), so a test pushes
+// `events` rows and watches the overlay advance, hand off to the fresh version, or
+// fail on `run_error`. The `/onboarding/progress` poll remains the reconnect fallback.
 //
 // The backend is mocked at the network layer, mirroring resume.cy.ts/scratch.cy.ts:
-// a seeded session (the way ARC-96 restores a returning user) plus stubs for every
-// seam — the thread lookup (RLS), the path-specific ingest/finalize, the proposed
-// profile version list + detail (profile.ts), `GET /onboarding/progress`, and the
-// approve/revise decide calls. The proposed draft never changes the `step` (it
-// stays `review`); a revise lands a NEW proposed version id, which is the only
-// "revision ready" signal the web client polls for (profile-review-flow.ts), so
-// the stubs flip that id rather than the step. Under CYPRESS_LIVE=1 (where the
-// custom commands are no-ops) the spec self-skips, since a real backend won't
-// reproduce the mocked transitions deterministically.
+// a seeded session plus stubs for every seam — the thread lookup (RLS), the
+// path-specific ingest/finalize, the proposed profile version list + detail
+// (profile.ts), the AG-UI history restore, `GET /onboarding/progress`, and the
+// approve/revise decide calls. A revise lands a NEW proposed version id; the stubs
+// flip that id (the draft detail re-reads it) so the refreshed draft shows the
+// revised copy. Under CYPRESS_LIVE=1 (where the custom commands are no-ops) the spec
+// self-skips, since a real backend won't reproduce the mocked transitions.
 
 import { SESSION_KEY, seededSession } from "../support/commands";
 
 /** The revised summary a feedback run lands, distinct from the fixture's. */
 const REVISED_SUMMARY =
 	"Revised: staff-level frontend leader focused on accessibility and design systems.";
+
+/** The revise run's thread + run ids (the mocked `POST /onboarding/revise` reply). */
+const THREAD_ID = "test-thread-id";
+const RUN_ID = "test-run-id";
+
+/** One persisted `events` row, the shape Realtime delivers (snake-case run_id). */
+interface EventRow {
+	type: string;
+	data: Record<string, unknown> | null;
+	seq: number;
+	run_id: string;
+}
+
+/** A `state_delta` row that replaces `/phase` (the backend's revise `flip(phase)`). */
+function phaseRow(seq: number, phase: string): EventRow {
+	return {
+		type: "state_delta",
+		data: { delta: [{ op: "replace", path: "/phase", value: phase }] },
+		seq,
+		run_id: RUN_ID,
+	};
+}
+
+/** The terminal `complete` delta carrying the FRESH revised draft's ids. */
+function completeRow(seq: number, versionId: string): EventRow {
+	return {
+		type: "state_delta",
+		data: {
+			delta: [
+				{ op: "replace", path: "/phase", value: "complete" },
+				{ op: "add", path: "/versionId", value: versionId },
+				{ op: "add", path: "/proposalId", value: "test-proposal-id-2" },
+			],
+		},
+		seq,
+		run_id: RUN_ID,
+	};
+}
+
+/** A `run_error` row (the backend's failure tail) — a terminal run failure. */
+function errorRow(seq: number): EventRow {
+	return {
+		type: "run_error",
+		data: { message: "revise failed" },
+		seq,
+		run_id: RUN_ID,
+	};
+}
+
+/**
+ * Install a fake `window.WebSocket` so the shared client's Realtime transport
+ * delivers events we control. The whole cumulative event set is redelivered on
+ * every push and on socket-open — the client's event log dedupes by `(run_id,
+ * seq)`, so this is race-free regardless of when the socket finishes opening.
+ */
+function installFakeRealtime(win: Cypress.AUTWindow) {
+	const w = win as unknown as {
+		WebSocket: unknown;
+		__rtEvents: EventRow[];
+		__rtSockets: Array<{ flush(): void }>;
+		__pushEvent(row: EventRow): void;
+	};
+	w.__rtEvents = [];
+	w.__rtSockets = [];
+
+	class FakeWebSocket {
+		onopen: (() => void) | null = null;
+		onmessage: ((ev: { data: string }) => void) | null = null;
+		onerror: (() => void) | null = null;
+		onclose: (() => void) | null = null;
+
+		constructor(_url: string) {
+			w.__rtSockets.push(this);
+			// Defer open so the transport finishes assigning handlers first.
+			setTimeout(() => {
+				this.onopen?.();
+				this.flush();
+			}, 0);
+		}
+		send() {}
+		close() {
+			this.onclose?.();
+		}
+		flush() {
+			for (const row of w.__rtEvents) {
+				this.onmessage?.({
+					data: JSON.stringify({
+						topic: `realtime:thread:${THREAD_ID}`,
+						event: "postgres_changes",
+						payload: { data: { record: row } },
+						ref: null,
+					}),
+				});
+			}
+		}
+	}
+
+	w.WebSocket = FakeWebSocket;
+	w.__pushEvent = (row: EventRow) => {
+		w.__rtEvents.push(row);
+		for (const s of w.__rtSockets) s.flush();
+	};
+}
+
+/** Push one Realtime `events` row into the running app. */
+function pushEvent(row: EventRow) {
+	cy.window({ log: false }).then((win) => {
+		(win as unknown as { __pushEvent(r: EventRow): void }).__pushEvent(row);
+	});
+}
 
 /**
  * The mutable backend state the review stubs read. `step` drives the progress
@@ -42,18 +158,26 @@ interface ReviewCtrl {
 
 /**
  * Stub the review-screen backend (shared by both arrival paths): the thread
- * lookup, the proposed profile version list + detail, the progress poll, and the
- * approve/revise decide calls. The path-specific seams (résumé ingest, or the
- * conversation finalize) are layered on by {@link stubResumeArrival} /
- * {@link stubConversationArrival}, which also flip `ctrl.step` to `review`.
+ * lookup, the proposed profile version list + detail, the AG-UI history restore,
+ * the progress poll, and the approve/revise decide calls. The path-specific seams
+ * (résumé ingest, or the conversation finalize) are layered on by
+ * {@link stubResumeArrival} / {@link stubConversationArrival}, which also flip
+ * `ctrl.step` to `review`.
  */
 function stubReviewBackend(ctrl: ReviewCtrl) {
 	// The user's primary thread, read under RLS (threads.ts) — used by both the
 	// path arrivals and the feedback run's fetchPrimaryThreadId.
 	cy.intercept("GET", "**/rest/v1/threads*", {
 		statusCode: 200,
-		body: [{ id: "test-thread-id" }],
+		body: [{ id: THREAD_ID }],
 	}).as("threads");
+
+	// AG-UI history restore: the shared client (résumé processing + the revise
+	// overlay) seeds from this, then streams live. Empty so the live deltas drive.
+	cy.intercept("GET", "**/agui/threads/*/history", {
+		statusCode: 200,
+		body: { threadId: THREAD_ID, state: {}, events: [] },
+	}).as("history");
 
 	// The proposed profile draft (profile.ts): the user-scoped version list, then
 	// the chosen version's detail (attributes + spine). The fixture supplies the
@@ -118,12 +242,12 @@ function stubReviewBackend(ctrl: ReviewCtrl) {
 		req.reply({ statusCode: 200, body: {} });
 	}).as("approve");
 
-	// Start a revise run (profile.ts → reviseProposedDraft). The new version is
-	// landed by the test (flipping `ctrl`) once this POST is observed, so the
-	// poll-for-a-fresh-version loop has something to detect.
+	// Start a revise run (profile.ts → reviseProposedDraft). The overlay then streams
+	// the run's events (pushed by the test) and the new version is landed by flipping
+	// `ctrl`, so both the live `complete` and the poll fallback have a fresh id to see.
 	cy.intercept("POST", "**/onboarding/revise", {
 		statusCode: 200,
-		body: { threadId: "test-thread-id", runId: "test-run-id" },
+		body: { threadId: THREAD_ID, runId: RUN_ID },
 	}).as("revise");
 }
 
@@ -136,7 +260,7 @@ function stubResumeArrival(ctrl: ReviewCtrl) {
 	}).as("upload");
 	cy.intercept("POST", "**/onboarding/resume", {
 		statusCode: 200,
-		body: { threadId: "test-thread-id", runId: "test-run-id" },
+		body: { threadId: THREAD_ID, runId: RUN_ID },
 	}).as("ingest");
 }
 
@@ -163,11 +287,12 @@ function stubConversationArrival(ctrl: ReviewCtrl) {
 	}).as("guided");
 }
 
-/** Visit `path` with a session already persisted so the route guard admits us. */
+/** Visit `path` with a session persisted + the fake Realtime transport installed. */
 function visitSignedIn(path: string) {
 	cy.visit(path, {
 		onBeforeLoad(win) {
 			win.localStorage.setItem(SESSION_KEY, JSON.stringify(seededSession()));
+			installFakeRealtime(win);
 		},
 	});
 }
@@ -273,7 +398,7 @@ describe("Profile review (M6)", () => {
 		cy.get('[data-testid="onboarding-stage-criteria"]').should("be.visible");
 	});
 
-	it("conversation path → review → feedback re-runs the draft → approve advances", () => {
+	it("conversation path → review → feedback streams a live revise → fresh version lands → approve advances", () => {
 		const ctrl = newCtrl();
 		stubConversationArrival(ctrl);
 
@@ -281,23 +406,45 @@ describe("Profile review (M6)", () => {
 		cy.get('[data-testid="onboarding-stage-review"]').should("be.visible");
 		assertAllSectionsRender();
 
-		// Send free-text feedback: the revise run starts, the "reworking" overlay
-		// takes over, and once a fresh proposed version lands the updated draft
-		// re-renders with the revised summary.
+		// Send free-text feedback: the revise run starts and the live "reworking"
+		// overlay takes over, driven by the run's real AG-UI phases.
 		cy.get('[data-testid="profile-feedback-input"]').type(
 			"Lead with my staff-level ambition and accessibility focus.",
 		);
 		cy.get('[data-testid="profile-feedback-submit"]').click();
 		cy.wait("@revise");
+		cy.wait("@history");
 		cy.get('[data-testid="profile-review-reworking"]').should("be.visible");
 
-		// Land the revised version (a new id + summary) — the poll detects it.
+		// Stream the backend's revise phases and watch the overlay advance — no timer.
+		pushEvent(phaseRow(0, "reading"));
+		cy.get('[data-testid="profile-reworking-stage"]').should(
+			"contain.text",
+			"Reading your notes",
+		);
+
+		pushEvent(phaseRow(1, "revising"));
+		cy.get('[data-testid="profile-reworking-log"]').should(
+			"contain.text",
+			"Took your notes on board",
+		);
+
+		// The fresh draft lands: flip `ctrl` so the refetched draft carries the new
+		// id + revised summary, then stream the terminal `complete` (its versionId
+		// differs from the one on screen — the live "revision ready" signal).
 		cy.then(() => {
 			ctrl.versionId = "test-version-id-2";
 			ctrl.versionNo = 2;
 			ctrl.summary = REVISED_SUMMARY;
 		});
+		pushEvent(completeRow(2, "test-version-id-2"));
+
+		// The overlay hands off: it disappears, the revised draft animates in, and the
+		// transient "revision landed" cue confirms the new version.
 		cy.get('[data-testid="profile-review-reworking"]').should("not.exist");
+		cy.get('[data-testid="profile-revision-landed"]')
+			.should("be.visible")
+			.and("contain.text", "v2");
 		cy.get('[data-testid="profile-summary"]').should(
 			"contain.text",
 			"Revised: staff-level frontend leader",
@@ -308,5 +455,30 @@ describe("Profile review (M6)", () => {
 		cy.wait("@approve");
 		cy.location("pathname").should("eq", "/onboarding/criteria");
 		cy.get('[data-testid="onboarding-stage-criteria"]').should("be.visible");
+	});
+
+	it("surfaces a revise run failure as a recoverable error", () => {
+		const ctrl = newCtrl();
+		stubConversationArrival(ctrl);
+
+		reachReviewViaConversation();
+		cy.get('[data-testid="onboarding-stage-review"]').should("be.visible");
+
+		cy.get('[data-testid="profile-feedback-input"]').type(
+			"Tighten the summary.",
+		);
+		cy.get('[data-testid="profile-feedback-submit"]').click();
+		cy.wait("@revise");
+		cy.wait("@history");
+		cy.get('[data-testid="profile-review-reworking"]').should("be.visible");
+
+		// A run_error mid-stream surfaces the recoverable error — not the 90s
+		// backstop — and the overlay closes so the candidate can retry.
+		pushEvent(phaseRow(0, "reading"));
+		pushEvent(errorRow(1));
+		cy.get('[data-testid="profile-review-reworking"]').should("not.exist");
+		cy.get('[data-testid="profile-review-error"]')
+			.should("be.visible")
+			.and("contain.text", "Couldn't rework your profile");
 	});
 });
