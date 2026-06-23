@@ -10,6 +10,19 @@
 // (apps/mobile/src/lib/{auth,onboarding}.ts) so the web client (ARC-92/96/99)
 // can wire onto them unchanged.
 
+// The a11y gate (ARC-116): inject axe-core and assert the current screen has no
+// critical/serious violations. We scope to those two impact levels — the bar the
+// issue sets ("no critical a11y violations") — so the gate is meaningful without
+// failing on cosmetic best-practice hints. `injectAxe` is cheap and idempotent,
+// so each stage re-injects (covering full-reload visits) before checking.
+Cypress.Commands.add("a11y", (label?: string) => {
+	if (label) cy.log(`a11y · ${label}`);
+	cy.injectAxe();
+	cy.checkA11y(undefined, {
+		includedImpacts: ["critical", "serious"],
+	});
+});
+
 /** A GoTrue session payload, matching what `/auth/v1/token` returns. */
 function sessionBody(email: string) {
 	return {

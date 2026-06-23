@@ -34,12 +34,13 @@ export function TargetTitles({
 			</p>
 
 			{loading ? (
-				<div
+				<output
 					className="flex min-h-[96px] items-center justify-center"
 					aria-busy="true"
+					aria-label="Loading target titles"
 				>
 					<Loader2 className="size-5 animate-spin text-[var(--accent)]" />
-				</div>
+				</output>
 			) : error ? (
 				<div className="flex flex-col items-start gap-2.5">
 					<p

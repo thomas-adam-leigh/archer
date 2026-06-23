@@ -19,7 +19,10 @@
   --line-2: rgba(255, 255, 255, 0.055);
   --txt: #f6f5f3;
   --txt2: #a4a39f;
-  --txt3: #6d6c69;
+  /* Tertiary text. Nudged up from the spec's #6d6c69 (~3.8:1) to clear WCAG AA
+   * (4.5:1) for small text on both the base and card surfaces — the dark theme's
+   * one contrast shortfall (ARC-116). */
+  --txt3: #807f7c;
   --glow: color-mix(in srgb, var(--accent) 40%, transparent);
   --glow-soft: color-mix(in srgb, var(--accent) 16%, transparent);
 
