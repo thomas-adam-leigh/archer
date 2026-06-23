@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import {
 	ArrowLeft,
 	ArrowRight,
@@ -9,6 +10,8 @@ import {
 import { type FormEvent, useCallback, useState } from "react";
 import { ArcherOrb } from "#/components/archer-orb.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
+import { useFinalizeScratchOnboarding } from "#/lib/hooks.ts";
+import { routePath } from "#/lib/onboarding-flow.ts";
 import {
 	answerStep,
 	capturedEntries,
@@ -21,6 +24,7 @@ import {
 	type ScriptState,
 	skipStep,
 } from "#/lib/onboarding-script.ts";
+import { fetchPrimaryThreadId } from "#/lib/threads.ts";
 import {
 	type UseVoiceCapture,
 	useVoiceCapture,
@@ -32,10 +36,11 @@ import {
  * question at a time (no LLM generates them — see `onboarding-script.ts`); each
  * answer is captured and accreted into the live "profile, taking shape" panel.
  *
- * Answers are captured by TEXT here — the documented fallback. Voice-first capture
- * (`MediaRecorder` → transcribe) layers on in ARC-119, and per-answer AI
- * extraction + the finalize → profile-review hand-off arrive in ARC-105; this
- * component owns the deterministic step machine they build on.
+ * Voice is the primary input (`MediaRecorder` → transcribe, ARC-119) with the text
+ * box as the fallback; each captured answer accretes into the live "profile, taking
+ * shape" panel. When the script completes, finalize (ARC-105) structures the
+ * answers into a PROPOSED profile draft and hands off to review — see
+ * {@link CompletePanel}.
  */
 export function ScriptedConversation() {
 	const [state, setState] = useState<ScriptState>(initialScriptState);
@@ -262,8 +267,30 @@ function VoiceControl({ voice }: { voice: UseVoiceCapture }) {
 	);
 }
 
-/** The terminal summary once every question has been passed. */
+/**
+ * The terminal step once every question has been passed: finalize the captured
+ * answers into a PROPOSED profile draft (ARC-105) and converge on review (M6).
+ *
+ * Finalize persists the answers to the thread and runs the guided structurer
+ * (`buildProfileFromAnswers`) — the only AI in this path. On success the candidate
+ * is sent to the profile review; a failure is recoverable in place with "Try again".
+ */
 function CompletePanel({ state }: { state: ScriptState }) {
+	const navigate = useNavigate();
+	const finalize = useFinalizeScratchOnboarding();
+
+	const build = useCallback(() => {
+		finalize.mutate(
+			{
+				answers: capturedEntries(state).map((c) => c.value),
+				deps: { resolveThreadId: (s) => fetchPrimaryThreadId(s) },
+			},
+			{ onSuccess: () => navigate({ to: routePath("review"), replace: true }) },
+		);
+	}, [finalize, state, navigate]);
+
+	const captured = capturedEntries(state).length;
+
 	return (
 		<div data-testid="conversation-complete" className="a-fadeup max-w-[560px]">
 			<header className="mb-[22px] flex items-center gap-3.5">
@@ -280,13 +307,42 @@ function CompletePanel({ state }: { state: ScriptState }) {
 					That's everything I need.
 				</p>
 				<p className="mt-3 text-sm text-[var(--txt2)]">
-					I've captured your answers — next I'll structure them into your
-					profile for you to review.
+					{finalize.isPending
+						? "Structuring your answers into your profile…"
+						: "I've captured your answers — I'll structure them into your profile for you to review."}
 				</p>
 				<div className="mt-5 inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card-2)] px-3.5 py-1.5 text-xs font-semibold text-[var(--txt2)]">
 					<Sparkles className="size-3.5 text-brand" />
-					{capturedEntries(state).length} answers captured
+					{captured} answers captured
 				</div>
+
+				{finalize.isError ? (
+					<p
+						data-testid="finalize-error"
+						role="alert"
+						className="mt-4 text-sm text-[#f0936c]"
+					>
+						I couldn't build your profile just now. Please try again.
+					</p>
+				) : null}
+
+				<button
+					type="button"
+					data-testid="conversation-finalize"
+					onClick={build}
+					disabled={finalize.isPending}
+					className="mt-5 flex items-center gap-1.5 rounded-xl bg-[linear-gradient(135deg,var(--accent-2),var(--accent))] px-6 py-3 text-[15px] font-bold text-[#160a02] shadow-[0_10px_28px_var(--glow)] transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+				>
+					{finalize.isPending ? (
+						<Loader2 className="size-4 animate-spin" />
+					) : null}
+					{finalize.isPending
+						? "Building…"
+						: finalize.isError
+							? "Try again"
+							: "Build my profile"}
+					{finalize.isPending ? null : <ArrowRight className="size-4" />}
+				</button>
 			</div>
 		</div>
 	);
