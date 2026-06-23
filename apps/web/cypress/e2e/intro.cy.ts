@@ -64,9 +64,7 @@ describe("Intro — path choice", () => {
 		cy.get('[data-testid="intro-path-conversation"]').click();
 
 		cy.location("pathname").should("eq", "/onboarding/conversation");
-		cy.get('[data-testid="onboarding-stage-conversation"]').should(
-			"be.visible",
-		);
+		cy.get('[data-testid="scripted-conversation"]').should("be.visible");
 	});
 
 	it("the /onboarding resolver lands an intro-step user on the intro", () => {

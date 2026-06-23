@@ -146,8 +146,6 @@ describe("Résumé upload path", () => {
 		cy.get('[data-testid="resume-talk-instead"]').click();
 
 		cy.location("pathname").should("eq", "/onboarding/conversation");
-		cy.get('[data-testid="onboarding-stage-conversation"]').should(
-			"be.visible",
-		);
+		cy.get('[data-testid="scripted-conversation"]').should("be.visible");
 	});
 });

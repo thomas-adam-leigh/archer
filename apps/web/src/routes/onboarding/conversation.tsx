@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { OnboardingStagePlaceholder } from "#/components/onboarding-stage-placeholder.tsx";
+import { ScriptedConversation } from "#/components/scripted-conversation.tsx";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
 import { OnboardingPending } from "./route.tsx";
@@ -9,15 +9,13 @@ export const Route = createFileRoute("/onboarding/conversation")({
 	staticData: { onboardingStep: progressSegmentForRoute("conversation") },
 });
 
-/** The start-from-scratch scripted voice Q&A path (M5: ARC-104/105/119). */
+/**
+ * The start-from-scratch path (M5): the scripted, preset onboarding sequence
+ * (ARC-104). Voice capture (ARC-119) and per-answer AI extraction + the finalize
+ * → profile-review hand-off (ARC-105) build on the step machine this screen drives.
+ */
 function ConversationRoute() {
 	const { status } = useOnboardingResume("conversation");
 	if (status !== "ready") return <OnboardingPending />;
-	return (
-		<OnboardingStagePlaceholder
-			stage="conversation"
-			title="Let's talk it through"
-			issue="M5 (ARC-104/105/119)"
-		/>
-	);
+	return <ScriptedConversation />;
 }
