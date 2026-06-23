@@ -169,7 +169,12 @@ jobs:
         with:
           working-directory: apps/web
           install: false
-          build: pnpm build
+          # Build in `e2e` mode so the dummy PUBLIC Supabase/API config in
+          # apps/web/.env.e2e is inlined — the auth client needs a configured
+          # URL to issue the GoTrue request the specs mock (it throws otherwise,
+          # and no request reaches cy.intercept). Not secrets; the backend is
+          # fully mocked by path. Real values are injected at deploy time.
+          build: pnpm build:e2e
           start: pnpm serve
           wait-on: "http://localhost:3000"
           wait-on-timeout: 120

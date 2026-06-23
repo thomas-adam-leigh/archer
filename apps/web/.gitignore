@@ -4,6 +4,9 @@ dist
 dist-ssr
 *.local
 .env
+# Track the dummy PUBLIC e2e build config (no secrets) — the root .gitignore's
+# `.env.*` rule would otherwise exclude it; the Cypress web-e2e build needs it.
+!.env.e2e
 .nitro
 .tanstack
 .wrangler
