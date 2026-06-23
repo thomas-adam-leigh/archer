@@ -55,7 +55,7 @@ describe("Intro — path choice", () => {
 		cy.get('[data-testid="intro-path-resume"]').click();
 
 		cy.location("pathname").should("eq", "/onboarding/resume");
-		cy.get('[data-testid="onboarding-stage-resume"]').should("be.visible");
+		cy.get('[data-testid="resume-dropzone"]').should("be.visible");
 	});
 
 	it("'Start from scratch' routes to the conversation stage", () => {
