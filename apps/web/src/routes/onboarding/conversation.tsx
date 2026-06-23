@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ScriptedConversation } from "#/components/scripted-conversation.tsx";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
-import { OnboardingPending } from "./route.tsx";
+import { OnboardingGate } from "./route.tsx";
 
 export const Route = createFileRoute("/onboarding/conversation")({
 	component: ConversationRoute,
@@ -15,7 +15,7 @@ export const Route = createFileRoute("/onboarding/conversation")({
  * → profile-review hand-off (ARC-105) build on the step machine this screen drives.
  */
 function ConversationRoute() {
-	const { status } = useOnboardingResume("conversation");
-	if (status !== "ready") return <OnboardingPending />;
+	const resume = useOnboardingResume("conversation");
+	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
 	return <ScriptedConversation />;
 }

@@ -5,7 +5,7 @@ import { ArcherOrb } from "#/components/archer-orb.tsx";
 import { progressSegmentForRoute, routePath } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
 import { cn } from "#/lib/utils.ts";
-import { OnboardingPending } from "./route.tsx";
+import { OnboardingGate } from "./route.tsx";
 
 export const Route = createFileRoute("/onboarding/intro")({
 	component: IntroRoute,
@@ -20,8 +20,8 @@ export const Route = createFileRoute("/onboarding/intro")({
  */
 function IntroRoute() {
 	const navigate = useNavigate();
-	const { status } = useOnboardingResume("intro");
-	if (status !== "ready") return <OnboardingPending />;
+	const resume = useOnboardingResume("intro");
+	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
 
 	return (
 		<div className="a-fadeup mx-auto flex max-w-[760px] flex-col items-center pt-[5vh] text-center">

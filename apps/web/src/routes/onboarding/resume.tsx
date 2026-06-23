@@ -12,7 +12,7 @@ import { ResumeUploadError } from "#/lib/resume.ts";
 import { isDraftReady } from "#/lib/resume-processing.ts";
 import { useSession } from "#/lib/session.ts";
 import { fetchPrimaryThreadId } from "#/lib/threads.ts";
-import { OnboardingPending } from "./route.tsx";
+import { OnboardingGate } from "./route.tsx";
 
 export const Route = createFileRoute("/onboarding/resume")({
 	component: ResumeRoute,
@@ -46,7 +46,7 @@ type Stage =
 function ResumeRoute() {
 	const navigate = useNavigate();
 	const session = useSession();
-	const { status } = useOnboardingResume("resume");
+	const resume = useOnboardingResume("resume");
 	const upload = useUploadResume();
 	const [stage, setStage] = useState<Stage>({ kind: "intake" });
 
@@ -107,7 +107,7 @@ function ResumeRoute() {
 		setStage({ kind: "intake" });
 	}, [upload]);
 
-	if (status !== "ready") return <OnboardingPending />;
+	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
 
 	if (stage.kind === "intake") {
 		return (
