@@ -10,11 +10,24 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
+import { Route as OnboardingReviewRouteImport } from './routes/onboarding/review'
+import { Route as OnboardingResumeRouteImport } from './routes/onboarding/resume'
+import { Route as OnboardingIntroRouteImport } from './routes/onboarding/intro'
+import { Route as OnboardingHomeRouteImport } from './routes/onboarding/home'
+import { Route as OnboardingCriteriaRouteImport } from './routes/onboarding/criteria'
+import { Route as OnboardingConversationRouteImport } from './routes/onboarding/conversation'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRouteRoute = OnboardingRouteRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -22,30 +35,119 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OnboardingIndexRoute = OnboardingIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => OnboardingRouteRoute,
+} as any)
+const OnboardingReviewRoute = OnboardingReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => OnboardingRouteRoute,
+} as any)
+const OnboardingResumeRoute = OnboardingResumeRouteImport.update({
+  id: '/resume',
+  path: '/resume',
+  getParentRoute: () => OnboardingRouteRoute,
+} as any)
+const OnboardingIntroRoute = OnboardingIntroRouteImport.update({
+  id: '/intro',
+  path: '/intro',
+  getParentRoute: () => OnboardingRouteRoute,
+} as any)
+const OnboardingHomeRoute = OnboardingHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
+  getParentRoute: () => OnboardingRouteRoute,
+} as any)
+const OnboardingCriteriaRoute = OnboardingCriteriaRouteImport.update({
+  id: '/criteria',
+  path: '/criteria',
+  getParentRoute: () => OnboardingRouteRoute,
+} as any)
+const OnboardingConversationRoute = OnboardingConversationRouteImport.update({
+  id: '/conversation',
+  path: '/conversation',
+  getParentRoute: () => OnboardingRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/onboarding/conversation': typeof OnboardingConversationRoute
+  '/onboarding/criteria': typeof OnboardingCriteriaRoute
+  '/onboarding/home': typeof OnboardingHomeRoute
+  '/onboarding/intro': typeof OnboardingIntroRoute
+  '/onboarding/resume': typeof OnboardingResumeRoute
+  '/onboarding/review': typeof OnboardingReviewRoute
+  '/onboarding/': typeof OnboardingIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/onboarding/conversation': typeof OnboardingConversationRoute
+  '/onboarding/criteria': typeof OnboardingCriteriaRoute
+  '/onboarding/home': typeof OnboardingHomeRoute
+  '/onboarding/intro': typeof OnboardingIntroRoute
+  '/onboarding/resume': typeof OnboardingResumeRoute
+  '/onboarding/review': typeof OnboardingReviewRoute
+  '/onboarding': typeof OnboardingIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/onboarding/conversation': typeof OnboardingConversationRoute
+  '/onboarding/criteria': typeof OnboardingCriteriaRoute
+  '/onboarding/home': typeof OnboardingHomeRoute
+  '/onboarding/intro': typeof OnboardingIntroRoute
+  '/onboarding/resume': typeof OnboardingResumeRoute
+  '/onboarding/review': typeof OnboardingReviewRoute
+  '/onboarding/': typeof OnboardingIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth'
+  fullPaths:
+    | '/'
+    | '/onboarding'
+    | '/auth'
+    | '/onboarding/conversation'
+    | '/onboarding/criteria'
+    | '/onboarding/home'
+    | '/onboarding/intro'
+    | '/onboarding/resume'
+    | '/onboarding/review'
+    | '/onboarding/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth'
-  id: '__root__' | '/' | '/auth'
+  to:
+    | '/'
+    | '/auth'
+    | '/onboarding/conversation'
+    | '/onboarding/criteria'
+    | '/onboarding/home'
+    | '/onboarding/intro'
+    | '/onboarding/resume'
+    | '/onboarding/review'
+    | '/onboarding'
+  id:
+    | '__root__'
+    | '/'
+    | '/onboarding'
+    | '/auth'
+    | '/onboarding/conversation'
+    | '/onboarding/criteria'
+    | '/onboarding/home'
+    | '/onboarding/intro'
+    | '/onboarding/resume'
+    | '/onboarding/review'
+    | '/onboarding/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  OnboardingRouteRoute: typeof OnboardingRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
 }
 
@@ -58,6 +160,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -65,11 +174,85 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/onboarding/': {
+      id: '/onboarding/'
+      path: '/'
+      fullPath: '/onboarding/'
+      preLoaderRoute: typeof OnboardingIndexRouteImport
+      parentRoute: typeof OnboardingRouteRoute
+    }
+    '/onboarding/review': {
+      id: '/onboarding/review'
+      path: '/review'
+      fullPath: '/onboarding/review'
+      preLoaderRoute: typeof OnboardingReviewRouteImport
+      parentRoute: typeof OnboardingRouteRoute
+    }
+    '/onboarding/resume': {
+      id: '/onboarding/resume'
+      path: '/resume'
+      fullPath: '/onboarding/resume'
+      preLoaderRoute: typeof OnboardingResumeRouteImport
+      parentRoute: typeof OnboardingRouteRoute
+    }
+    '/onboarding/intro': {
+      id: '/onboarding/intro'
+      path: '/intro'
+      fullPath: '/onboarding/intro'
+      preLoaderRoute: typeof OnboardingIntroRouteImport
+      parentRoute: typeof OnboardingRouteRoute
+    }
+    '/onboarding/home': {
+      id: '/onboarding/home'
+      path: '/home'
+      fullPath: '/onboarding/home'
+      preLoaderRoute: typeof OnboardingHomeRouteImport
+      parentRoute: typeof OnboardingRouteRoute
+    }
+    '/onboarding/criteria': {
+      id: '/onboarding/criteria'
+      path: '/criteria'
+      fullPath: '/onboarding/criteria'
+      preLoaderRoute: typeof OnboardingCriteriaRouteImport
+      parentRoute: typeof OnboardingRouteRoute
+    }
+    '/onboarding/conversation': {
+      id: '/onboarding/conversation'
+      path: '/conversation'
+      fullPath: '/onboarding/conversation'
+      preLoaderRoute: typeof OnboardingConversationRouteImport
+      parentRoute: typeof OnboardingRouteRoute
+    }
   }
 }
 
+interface OnboardingRouteRouteChildren {
+  OnboardingConversationRoute: typeof OnboardingConversationRoute
+  OnboardingCriteriaRoute: typeof OnboardingCriteriaRoute
+  OnboardingHomeRoute: typeof OnboardingHomeRoute
+  OnboardingIntroRoute: typeof OnboardingIntroRoute
+  OnboardingResumeRoute: typeof OnboardingResumeRoute
+  OnboardingReviewRoute: typeof OnboardingReviewRoute
+  OnboardingIndexRoute: typeof OnboardingIndexRoute
+}
+
+const OnboardingRouteRouteChildren: OnboardingRouteRouteChildren = {
+  OnboardingConversationRoute: OnboardingConversationRoute,
+  OnboardingCriteriaRoute: OnboardingCriteriaRoute,
+  OnboardingHomeRoute: OnboardingHomeRoute,
+  OnboardingIntroRoute: OnboardingIntroRoute,
+  OnboardingResumeRoute: OnboardingResumeRoute,
+  OnboardingReviewRoute: OnboardingReviewRoute,
+  OnboardingIndexRoute: OnboardingIndexRoute,
+}
+
+const OnboardingRouteRouteWithChildren = OnboardingRouteRoute._addFileChildren(
+  OnboardingRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  OnboardingRouteRoute: OnboardingRouteRouteWithChildren,
   AuthRoute: AuthRoute,
 }
 export const routeTree = rootRouteImport
