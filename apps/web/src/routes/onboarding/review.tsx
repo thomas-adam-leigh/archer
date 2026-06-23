@@ -7,6 +7,7 @@ import {
 	ProfileReviewActions,
 	type ReviewBusy,
 } from "#/components/profile-review-actions.tsx";
+import { Button } from "#/components/ui/button.tsx";
 import type { Session } from "#/lib/auth.ts";
 import {
 	queryKeys,
@@ -22,7 +23,7 @@ import { toProfileReviewView } from "#/lib/profile-review.ts";
 import { isRevisionReady } from "#/lib/profile-review-flow.ts";
 import { useSession } from "#/lib/session.ts";
 import { fetchPrimaryThreadId } from "#/lib/threads.ts";
-import { OnboardingPending } from "./route.tsx";
+import { OnboardingGate } from "./route.tsx";
 
 export const Route = createFileRoute("/onboarding/review")({
 	component: ReviewRoute,
@@ -54,7 +55,8 @@ const MAX_WAIT_MS = 90_000;
 function ReviewRoute() {
 	const session = useSession();
 	const queryClient = useQueryClient();
-	const { status, progress } = useOnboardingResume("review");
+	const resume = useOnboardingResume("review");
+	const { progress } = resume;
 	const draft = useProposedProfileDraft();
 	const approve = useApproveDraft();
 	const revise = useReviseDraft();
@@ -146,7 +148,7 @@ function ReviewRoute() {
 		[action, session, progress?.proposedVersionId, revise],
 	);
 
-	if (status !== "ready") return <OnboardingPending />;
+	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
 
 	const reworking = reviseFrom !== null;
 
@@ -174,10 +176,18 @@ function ReviewRoute() {
 						<h1 className="font-heading text-2xl font-bold tracking-tight">
 							I couldn't load your profile.
 						</h1>
-						<p className="max-w-sm text-sm text-[var(--txt2)]">
-							Something went wrong fetching your draft. Please refresh to try
-							again.
+						<p className="max-w-sm text-sm text-[var(--txt2)]" role="alert">
+							Something went wrong fetching your draft. Please try again.
 						</p>
+						<Button
+							type="button"
+							variant="outline"
+							className="mt-1"
+							data-testid="review-retry"
+							onClick={() => draft.refetch()}
+						>
+							Try again
+						</Button>
 					</ReviewState>
 				)
 			) : (

@@ -8,7 +8,7 @@ import {
 import { nextRun } from "#/lib/next-run.ts";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
-import { OnboardingPending } from "./route.tsx";
+import { OnboardingGate } from "./route.tsx";
 
 export const Route = createFileRoute("/onboarding/home")({
 	component: HomeRoute,
@@ -26,12 +26,12 @@ export const Route = createFileRoute("/onboarding/home")({
  * forwards the now-signed-out user to `/auth`.
  */
 function HomeRoute() {
-	const { status } = useOnboardingResume("home");
+	const resume = useOnboardingResume("home");
 	const titles = useSuggestedTitles();
 	const criteria = useNegativeCriteria();
 	const signOut = useSignOut();
 
-	if (status !== "ready") return <OnboardingPending />;
+	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
 
 	return (
 		<HomeDashboard

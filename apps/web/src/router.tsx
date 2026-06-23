@@ -1,5 +1,6 @@
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
+import { ErrorState } from "./components/ui/error-state";
 import { getContext } from "./integrations/tanstack-query/root-provider";
 import { routeTree } from "./routeTree.gen";
 
@@ -12,6 +13,15 @@ export function getRouter() {
 		scrollRestoration: true,
 		defaultPreload: "intent",
 		defaultPreloadStaleTime: 0,
+		// A last-resort boundary so an unexpected render/load error shows a
+		// friendly, retryable surface instead of a blank screen.
+		defaultErrorComponent: ({ reset }) => (
+			<ErrorState
+				testId="route-error"
+				message="We hit an unexpected error. Please try again."
+				onRetry={reset}
+			/>
+		),
 	});
 
 	setupRouterSsrQueryIntegration({ router, queryClient: context.queryClient });

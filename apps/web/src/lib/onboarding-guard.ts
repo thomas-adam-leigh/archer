@@ -14,7 +14,7 @@
  */
 
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useOnboardingProgress } from "#/lib/hooks.ts";
 import type { OnboardingProgress } from "#/lib/onboarding.ts";
 import {
@@ -25,10 +25,16 @@ import {
 
 /** What an onboarding route should do right now. */
 export interface ResumeState {
-	/** `pending` until progress loads, then `ready` to render or `redirecting`. */
-	status: "pending" | "ready" | "redirecting";
+	/**
+	 * `pending` until progress loads, then `ready` to render or `redirecting`;
+	 * `error` if the progress read failed (a recoverable, retryable state rather
+	 * than spinning on `pending` forever).
+	 */
+	status: "pending" | "ready" | "redirecting" | "error";
 	/** The resolved progress once loaded, else `undefined`. */
 	progress: OnboardingProgress | undefined;
+	/** Re-read progress after an `error` (wired to the route's "Try again"). */
+	retry: () => void;
 }
 
 /**
@@ -43,7 +49,10 @@ export function useOnboardingResume(
 	current: OnboardingRoute | null,
 ): ResumeState {
 	const navigate = useNavigate();
-	const { data: progress } = useOnboardingProgress();
+	const { data: progress, isError, refetch } = useOnboardingProgress();
+	const retry = useCallback(() => {
+		void refetch();
+	}, [refetch]);
 
 	const target = progress
 		? resolveOnboardingTarget(current, progress.step)
@@ -53,7 +62,10 @@ export function useOnboardingResume(
 		if (target) navigate({ to: routePath(target), replace: true });
 	}, [target, navigate]);
 
-	if (!progress) return { status: "pending", progress: undefined };
-	if (target) return { status: "redirecting", progress };
-	return { status: "ready", progress };
+	// A failed read is recoverable: surface it (with retry) instead of leaving
+	// the route stuck on its neutral pending state.
+	if (isError) return { status: "error", progress: undefined, retry };
+	if (!progress) return { status: "pending", progress: undefined, retry };
+	if (target) return { status: "redirecting", progress, retry };
+	return { status: "ready", progress, retry };
 }

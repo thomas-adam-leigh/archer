@@ -12,7 +12,7 @@ import {
 } from "#/lib/hooks.ts";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
-import { OnboardingPending } from "./route.tsx";
+import { OnboardingGate } from "./route.tsx";
 
 export const Route = createFileRoute("/onboarding/criteria")({
 	component: CriteriaRoute,
@@ -30,7 +30,7 @@ export const Route = createFileRoute("/onboarding/criteria")({
  * keeps the review E2E's "approve advances to criteria" assertion green.
  */
 function CriteriaRoute() {
-	const { status } = useOnboardingResume("criteria");
+	const resume = useOnboardingResume("criteria");
 	const titles = useSuggestedTitles();
 	const criteria = useNegativeCriteria();
 	const add = useAddNegativeCriterion();
@@ -44,7 +44,7 @@ function CriteriaRoute() {
 		remove.mutate({ id }, { onSettled: () => setRemovingId(null) });
 	};
 
-	if (status !== "ready") return <OnboardingPending />;
+	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
 
 	const criteriaError =
 		add.isError || remove.isError
