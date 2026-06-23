@@ -1,60 +1,120 @@
-import { useEffect, useState } from "react";
+import type { createThreadSession, ThreadView } from "@archer/agui-client";
+import { useEffect, useRef, useState } from "react";
+import { createWebThreadSession } from "#/lib/agui.ts";
+import type { Session } from "#/lib/auth.ts";
 import {
-	INGEST_PHASES,
 	PROCESSING_SUBTEXT,
 	processingView,
+	readIngestView,
 } from "#/lib/resume-processing.ts";
 
 /**
- * The résumé "reading every line" processing screen (ARC-102): a full-screen,
- * non-interruptible state shown while the ingest run builds the draft profile.
+ * The résumé "reading every line" processing screen (ARC-102/ARC-125): a
+ * full-screen, non-interruptible state shown while the ingest run builds the
+ * draft profile.
  *
- * It renders the spec's build experience — a breathing orb, an advancing heading
- * (`buildStageText`), a progress bar (`buildPct`), and an accreting build log
- * (`buildLog`) — driven by a presentational cadence ({@link processingView} over a
- * ticking counter). That cadence is reassurance only: it advances through the
- * phases and then *holds* on the last one. The owning route ends the wait on the
- * real `/onboarding/progress` readiness signal, never on this timer.
+ * It subscribes to the run's AG-UI `events` via the shared client
+ * (`createWebThreadSession`) — seeding from history, streaming live over Supabase
+ * Realtime, and folding the run response — and renders the spec's build
+ * experience (breathing orb, advancing heading, progress bar, accreting log)
+ * **from the live `state.phase`** the backend emits (`reading → extracting →
+ * building → complete`). There is no timer: the card only ever shows progress the
+ * backend has actually made.
  *
- * On failure the route flips `status` to `"error"` and the card offers a single
- * **Try again** — the only action available in this otherwise actionless stage.
+ * It signals upward rather than navigating: {@link onComplete} fires once the
+ * proposed draft lands (`state.phase === 'complete'` with ids, or the run finishes
+ * successfully), and {@link onError} fires on a terminal run failure (`run_error`
+ * / `state.phase === 'error'`). The owning route keeps polling
+ * `/onboarding/progress` as a reconnect/fallback, so a dropped socket still
+ * advances the flow.
+ *
+ * On failure the card shows a single **Try again** — the only action in this
+ * otherwise actionless stage.
  */
 interface ResumeProcessingProps {
+	/** The authenticated session (its access token authorizes history + Realtime). */
+	session: Session;
+	/** The ingest run's thread; `null` until the upload's ingest start resolves it. */
+	threadId: string | null;
 	/** The chosen résumé's filename, shown as the eyebrow above the heading. */
 	fileName: string;
-	/** `processing` runs the build cadence; `error` shows the recoverable failure. */
+	/** `processing` streams the live build; `error` shows the recoverable failure. */
 	status: "processing" | "error";
 	/** Body copy for the failure card; defaults to the résumé ingest wording. */
 	failureMessage?: string;
+	/** Fired once when the proposed draft lands — the route advances to review. */
+	onComplete: () => void;
+	/** Fired once on a terminal run failure — the route surfaces the error stage. */
+	onError: (message?: string) => void;
 	/** Restart the résumé path from intake (the failure card's only action). */
 	onRetry: () => void;
-	/** Milliseconds between revealed phases; overridable so tests/Cypress run fast. */
-	cadenceMs?: number;
+	/** Injectable thread-session factory so the suite runs without a real socket. */
+	createSession?: typeof createThreadSession;
 }
 
 const DEFAULT_FAILURE =
 	"Archer couldn't finish reading your résumé. Please try again.";
 
 export function ResumeProcessing({
+	session,
+	threadId,
 	fileName,
 	status,
 	failureMessage = DEFAULT_FAILURE,
+	onComplete,
+	onError,
 	onRetry,
-	cadenceMs = 1500,
+	createSession,
 }: ResumeProcessingProps) {
-	// The presentational cadence: how many phases have been revealed so far.
-	const [revealed, setRevealed] = useState(0);
+	const [view, setView] = useState<ThreadView | null>(null);
+	// Fire each upward signal at most once per run.
+	const completed = useRef(false);
+	const errored = useRef(false);
 
+	// Open the live session while processing a known thread. Seed from history,
+	// stream live; a failed seed is non-fatal (Realtime + the poll still drive).
+	useEffect(() => {
+		if (status !== "processing" || !threadId) return;
+		completed.current = false;
+		errored.current = false;
+		const ts = createWebThreadSession({
+			session,
+			threadId,
+			onChange: setView,
+			createSession,
+		});
+		try {
+			ts.subscribe();
+		} catch {
+			// Opening the socket is best-effort: a host that can't (no WebSocket,
+			// a bad URL) still gets history + the route's progress poll.
+		}
+		ts.loadHistory()
+			.then(setView)
+			.catch(() => {
+				// Non-fatal: the live stream + the route's progress poll still advance.
+			});
+		return () => {
+			ts.close();
+			setView(null);
+		};
+	}, [status, threadId, session, createSession]);
+
+	const ingest = readIngestView(view);
+
+	// Signal completion / failure exactly once, while still processing.
 	useEffect(() => {
 		if (status !== "processing") return;
-		setRevealed(0);
-		const id = setInterval(() => {
-			setRevealed((n) => Math.min(n + 1, INGEST_PHASES.length));
-		}, cadenceMs);
-		return () => clearInterval(id);
-	}, [status, cadenceMs]);
+		if (ingest.failed && !errored.current) {
+			errored.current = true;
+			onError();
+		} else if (ingest.complete && !completed.current) {
+			completed.current = true;
+			onComplete();
+		}
+	}, [status, ingest.failed, ingest.complete, onComplete, onError]);
 
-	if (status === "error") {
+	if (status === "error" || ingest.failed) {
 		return (
 			<div className="a-fadeup mx-auto w-full max-w-[460px] pt-[9vh] text-center">
 				<h1 className="font-heading text-[clamp(22px,2.6vw,28px)] font-bold tracking-tight">
@@ -78,7 +138,7 @@ export function ResumeProcessing({
 		);
 	}
 
-	const view = processingView(revealed);
+	const card = processingView(ingest.phase);
 
 	return (
 		<div
@@ -111,7 +171,7 @@ export function ResumeProcessing({
 				data-testid="resume-processing-stage"
 				className="min-h-[34px] font-heading text-[clamp(22px,2.6vw,26px)] font-bold tracking-tight"
 			>
-				{view.title}
+				{card.title}
 			</h1>
 			<p className="mt-2 text-[15px] text-[var(--txt2)]">
 				{PROCESSING_SUBTEXT}
@@ -121,7 +181,7 @@ export function ResumeProcessing({
 				<div className="h-1.5 overflow-hidden rounded-[6px] bg-[rgba(255,255,255,0.08)]">
 					<div
 						className="h-full rounded-[6px] bg-[linear-gradient(90deg,var(--accent-2),var(--accent))] transition-[width] duration-500 ease-out"
-						style={{ width: `${view.pct}%` }}
+						style={{ width: `${card.pct}%` }}
 					/>
 				</div>
 			</div>
@@ -130,7 +190,7 @@ export function ResumeProcessing({
 				data-testid="resume-build-log"
 				className="mx-auto flex max-w-[380px] flex-col gap-2.5 text-left"
 			>
-				{view.log.map((line) => (
+				{card.log.map((line) => (
 					<li
 						key={line}
 						className="a-fadeup flex items-center gap-3 text-sm text-[var(--txt2)]"
