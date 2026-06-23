@@ -19,11 +19,12 @@ export const Route = createFileRoute("/onboarding/resume")({
 	staticData: { onboardingStep: progressSegmentForRoute("resume") },
 });
 
-/** How often to poll `/onboarding/progress` while the ingest run builds the draft. */
+/** How often to poll `/onboarding/progress` as the reconnect/fallback signal. */
 const POLL_MS = 2000;
-/** How long to wait for the draft before surfacing a recoverable failure. The web
- *  client has no Realtime run-error channel (mobile's `state.phase === 'error'`),
- *  so an ingest that never completes is caught here rather than spinning forever. */
+/** A last-resort backstop: a stalled ingest that never streams a phase nor a
+ *  progress update still surfaces a recoverable failure rather than spinning
+ *  forever. The live AG-UI stream (`run_error` / `state.phase === 'error'`) is the
+ *  primary failure signal now; this only catches a wholly silent stall. */
 const MAX_WAIT_MS = 90_000;
 
 /** The résumé path's local stage: intake → processing → (recoverable) error. */
@@ -33,15 +34,18 @@ type Stage =
 	| { kind: "error"; fileName: string; message?: string };
 
 /**
- * The résumé upload path (M4). The dropzone (ARC-101) collects a file; confirming
- * it uploads to Storage and starts the ingest run, then the "reading every line"
- * processing screen polls `/onboarding/progress` until the draft profile is ready
- * and advances to review (ARC-102). Upload failures and a stalled ingest both land
- * on a recoverable error with "Try again".
+ * The résumé upload path (M4 + ARC-125). The dropzone (ARC-101) collects a file;
+ * confirming it uploads to Storage and starts the ingest run, then the "reading
+ * every line" processing screen subscribes to the run's AG-UI events and renders
+ * the **live** backend phases as Archer reads the résumé. The screen signals
+ * completion (the proposed draft landed) and failure upward; the route advances to
+ * review or surfaces a recoverable error.
  *
- * The backend step machine keeps this route mounted through `processing` (it maps
- * back to `resume`); once the draft lands the step flips to `review` and we — and
- * the route guard — send the candidate onward.
+ * `/onboarding/progress` is still polled as a reconnect/fallback: if the live
+ * socket drops, the readiness signal it exposes (`step → review`) still advances
+ * the candidate. The backend step machine keeps this route mounted through
+ * `processing` (it maps back to `resume`); once the draft lands the step flips to
+ * `review` and we — and the route guard — send the candidate onward.
  */
 function ResumeRoute() {
 	const navigate = useNavigate();
@@ -49,6 +53,9 @@ function ResumeRoute() {
 	const resume = useOnboardingResume("resume");
 	const upload = useUploadResume();
 	const [stage, setStage] = useState<Stage>({ kind: "intake" });
+	// The ingest run's thread, learned when the upload's ingest start resolves;
+	// the processing screen attaches its live session to it.
+	const [threadId, setThreadId] = useState<string | null>(null);
 
 	const processing = stage.kind === "processing";
 
@@ -63,16 +70,21 @@ function ResumeRoute() {
 		refetchInterval: processing ? POLL_MS : false,
 	});
 
-	// Advance to review the moment the polled progress reports the draft is ready.
+	const goToReview = useCallback(() => {
+		navigate({ to: routePath("review"), replace: true });
+	}, [navigate]);
+
+	// Reconnect/fallback: advance to review the moment the polled progress reports
+	// the draft is ready, in case the live socket never delivered the completion.
 	useEffect(() => {
 		if (stage.kind !== "processing") return;
 		if (progressQuery.data && isDraftReady(progressQuery.data)) {
-			navigate({ to: routePath("review"), replace: true });
+			goToReview();
 		}
-	}, [stage, progressQuery.data, navigate]);
+	}, [stage, progressQuery.data, goToReview]);
 
-	// Cap the wait: a stalled ingest falls back to a recoverable error rather than
-	// spinning forever (the web client has no Realtime run-error signal).
+	// Backstop: a wholly silent ingest (no phase stream, no progress update) falls
+	// back to a recoverable error rather than spinning forever.
 	useEffect(() => {
 		if (stage.kind !== "processing") return;
 		const { fileName } = stage;
@@ -85,10 +97,12 @@ function ResumeRoute() {
 
 	const onUpload = useCallback(
 		(file: File) => {
+			setThreadId(null);
 			setStage({ kind: "processing", fileName: file.name });
 			upload.mutate(
 				{ file, deps: { resolveThreadId: (s) => fetchPrimaryThreadId(s) } },
 				{
+					onSuccess: (started) => setThreadId(started.threadId),
 					onError: (err) =>
 						setStage({
 							kind: "error",
@@ -102,8 +116,18 @@ function ResumeRoute() {
 		[upload],
 	);
 
+	// A terminal run failure from the live stream surfaces the error stage.
+	const onIngestError = useCallback((message?: string) => {
+		setStage((prev) =>
+			prev.kind === "processing"
+				? { kind: "error", fileName: prev.fileName, message }
+				: prev,
+		);
+	}, []);
+
 	const onRetry = useCallback(() => {
 		upload.reset();
+		setThreadId(null);
 		setStage({ kind: "intake" });
 	}, [upload]);
 
@@ -122,9 +146,13 @@ function ResumeRoute() {
 
 	return (
 		<ResumeProcessing
+			session={session as Session}
+			threadId={threadId}
 			fileName={stage.fileName}
 			status={stage.kind === "error" ? "error" : "processing"}
 			failureMessage={stage.kind === "error" ? stage.message : undefined}
+			onComplete={goToReview}
+			onError={onIngestError}
 			onRetry={onRetry}
 		/>
 	);

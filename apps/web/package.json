@@ -6,10 +6,11 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "build:deps": "pnpm --filter @archer/agui-client build",
+    "dev": "pnpm build:deps && vite dev --port 3000",
     "generate-routes": "tsr generate",
-    "build": "vite build",
-    "build:e2e": "vite build --mode e2e",
+    "build": "pnpm build:deps && vite build",
+    "build:e2e": "pnpm build:deps && vite build --mode e2e",
     "preview": "vite preview",
     "serve": "node .output/server/index.mjs",
     "test": "vitest run",
