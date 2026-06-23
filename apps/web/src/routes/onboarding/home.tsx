@@ -1,5 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { OnboardingStagePlaceholder } from "#/components/onboarding-stage-placeholder.tsx";
+import { HomeDashboard } from "#/components/home-dashboard.tsx";
+import {
+	useNegativeCriteria,
+	useSignOut,
+	useSuggestedTitles,
+} from "#/lib/hooks.ts";
+import { nextRun } from "#/lib/next-run.ts";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
 import { OnboardingPending } from "./route.tsx";
@@ -10,15 +16,30 @@ export const Route = createFileRoute("/onboarding/home")({
 	staticData: { onboardingStep: progressSegmentForRoute("home") },
 });
 
-/** The post-onboarding home the candidate is handed off to (M8: ARC-113/114). */
+/**
+ * The post-onboarding home the candidate is handed off to (M8: ARC-113). Reads
+ * the onboarding outputs Archer hunts with — the approved target titles and the
+ * captured rule-outs — and shows the resting dashboard with the next scheduled
+ * run. "Start over" ends the session and returns to sign-in: the backend has no
+ * onboarding-reset endpoint (the account only moves forward through the
+ * Acceptance Gate), so re-onboarding means a fresh account; the auth guard
+ * forwards the now-signed-out user to `/auth`.
+ */
 function HomeRoute() {
 	const { status } = useOnboardingResume("home");
+	const titles = useSuggestedTitles();
+	const criteria = useNegativeCriteria();
+	const signOut = useSignOut();
+
 	if (status !== "ready") return <OnboardingPending />;
+
 	return (
-		<OnboardingStagePlaceholder
-			stage="home"
-			title="You're all set"
-			issue="M8 (ARC-113/114)"
+		<HomeDashboard
+			nextRun={nextRun(new Date())}
+			titles={titles.data ?? []}
+			ruleOuts={criteria.data ?? []}
+			onStartOver={() => signOut.mutate()}
+			startingOver={signOut.isPending}
 		/>
 	);
 }
