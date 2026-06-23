@@ -104,6 +104,7 @@ export function ResumeDropzone({
 				<input
 					type="file"
 					accept={ACCEPT}
+					aria-label="Upload your résumé — PDF or Word (.docx)"
 					className="sr-only"
 					data-testid="resume-input"
 					onChange={(e) => {

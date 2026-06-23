@@ -226,9 +226,9 @@ function Section({
 }) {
 	return (
 		<section>
-			<div className="mb-3 text-xs font-bold uppercase tracking-[0.09em] text-[var(--txt3)]">
+			<h2 className="mb-3 text-xs font-bold uppercase tracking-[0.09em] text-[var(--txt3)]">
 				{title}
-			</div>
+			</h2>
 			{children}
 		</section>
 	);
