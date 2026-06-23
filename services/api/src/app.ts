@@ -75,8 +75,10 @@ import {
   type RunAgentInput,
   restoreThread,
   resumeIngestRun,
+  resumeIngestSegments,
   reviseDraftRun,
   runError,
+  runErrorTail,
   runStub,
   scribeRun,
   statusFromEvents,
@@ -1487,9 +1489,26 @@ const gIngest = mk()
       const filename = typeof body.filename === "string" ? body.filename : undefined;
 
       const run = await createRun(db, { threadId, input: body as unknown as Json });
+      // Stream the ingest phases live: append each phase's events as that phase's work
+      // runs (reading → extracting → building → complete) rather than one terminal
+      // batch, so subscribers see real progress. The segments concatenate to exactly
+      // resumeIngestRun(...), preserving the replay invariant (ARC-123).
+      const segments = resumeIngestSegments({ threadId, runId: run.id });
+      // Tracks whether `run_started` has streamed, so a mid-phase failure appends a bare
+      // run_error tail instead of a duplicate run_started.
+      let started = false;
       try {
-        // Real extraction: file → text (ARC-63) → structured draft incl. spine (ARC-64).
-        const extraction = await extractResume({ kind, storageRef, filename });
+        // Real extraction: file → text (ARC-63) → structured draft incl. spine (ARC-64),
+        // streaming reading/extracting/building as each phase's work begins.
+        const extraction = await extractResume(
+          { kind, storageRef, filename },
+          {
+            onPhase: async (phase) => {
+              if (phase === "reading") started = true;
+              await appendEvents(db, threadId, run.id, segments[phase]);
+            },
+          },
+        );
         const result = await ingestProposedVersion(db, {
           userId: user,
           source: kind,
@@ -1499,13 +1518,20 @@ const gIngest = mk()
           spine: extraction.spine,
           details: extraction.details as Json,
         });
+        await appendEvents(
+          db,
+          threadId,
+          run.id,
+          segments.complete({ versionId: result.versionId, proposalId: result.proposalId }),
+        );
+        // The one-shot log equals the streamed accumulation — use it as the replay
+        // reference for the run's terminal status + outcome.
         const events = resumeIngestRun({
           threadId,
           runId: run.id,
           versionId: result.versionId,
           proposalId: result.proposalId,
         });
-        await appendEvents(db, threadId, run.id, events);
         await finishRun(db, run.id, {
           status: statusFromEvents(events),
           outcome: outcomeFromEvents(events) ?? null,
@@ -1519,9 +1545,13 @@ const gIngest = mk()
         });
       } catch (err) {
         // Ingestion failed (download/parse/LLM): record it as an auditable, replayable
-        // run_error so the processing screen can surface a retry, then 500.
+        // run_error so the processing screen can surface a retry, then 500. If the run
+        // already streamed its start, append only the run_error tail (no duplicate
+        // run_started); otherwise emit a full run_started + run_error.
         const message = err instanceof Error ? err.message : "résumé ingestion failed";
-        const events = runError(threadId, run.id, message);
+        const events = started
+          ? runErrorTail(threadId, run.id, message)
+          : runError(threadId, run.id, message);
         await appendEvents(db, threadId, run.id, events);
         await finishRun(db, run.id, { status: "error", error: message });
         return c.json({ error: message }, 500);

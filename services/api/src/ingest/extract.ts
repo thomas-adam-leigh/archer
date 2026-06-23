@@ -69,6 +69,9 @@ export interface ExtractResumeOptions {
   maxBytes?: number;
   /** PDF page cap (default {@link MAX_RESUME_PAGES}). */
   maxPages?: number;
+  /** Fired once the file bytes are downloaded and size-validated, before text is
+   *  parsed out — the seam the ingest run uses to stream the `extracting` phase. */
+  onDownloaded?: () => void | Promise<void>;
   // --- default-downloader config (ignored when `download` is supplied) ---
   /** Supabase project URL (default `process.env.SUPABASE_URL`). */
   supabaseUrl?: string;
@@ -246,6 +249,8 @@ export async function extractResumeText(
   if (bytes.length > maxBytes) {
     throw new ResumeExtractError("too_large", `résumé is ${bytes.length} bytes (max ${maxBytes})`);
   }
+  // The file is in hand and valid — reading is done, text extraction begins next.
+  await opts.onDownloaded?.();
 
   const format = detectFormat(bytes, opts.filename, contentType);
   if (!format) {

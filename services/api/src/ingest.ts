@@ -38,11 +38,18 @@ export interface ExtractorInput {
   filename?: string | null;
 }
 
+/** The work phases an ingest streams, in order, as each phase's work runs (ARC-123). */
+export type IngestPhase = "reading" | "extracting" | "building";
+
 export interface ResumeExtractOptions {
   /** Override the Storage downloader (tests feed fixture bytes; default hits Storage). */
   download?: ResumeDownloader;
   /** Override the LLM provider (tests inject a deterministic mock). */
   llm?: LlmProvider;
+  /** Phase progress hook, fired as each phase's work begins — `reading` (before the
+   *  download), `extracting` (after the file is read, before parse) and `building`
+   *  (before LLM structuring) — so the ingest run can stream each phase live (ARC-123). */
+  onPhase?: (phase: IngestPhase) => void | Promise<void>;
 }
 
 /**
@@ -55,10 +62,13 @@ export async function extractResume(
   input: ExtractorInput,
   opts: ResumeExtractOptions = {},
 ): Promise<Extraction> {
+  await opts.onPhase?.("reading");
   const { text, meta } = await extractResumeText(input.storageRef, {
     download: opts.download,
     filename: input.filename,
+    onDownloaded: () => opts.onPhase?.("extracting"),
   });
+  await opts.onPhase?.("building");
   const { attributes, spine, model } = await structureResume(text, { llm: opts.llm });
   return {
     attributes,
