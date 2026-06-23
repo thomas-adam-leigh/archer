@@ -57,6 +57,21 @@ describe("extractResume", () => {
     expect((extraction.details.resumeText as string).length).toBeGreaterThan(0);
   });
 
+  it("fires onPhase in order — reading (pre-download) → extracting (post-read) → building (pre-LLM)", async () => {
+    const phases: string[] = [];
+    await extractResume(
+      { kind: "resume", storageRef: "uid/cv.pdf", filename: "cv.pdf" },
+      {
+        download: serve(PDF),
+        llm: createMockProvider({ reply: () => STRUCTURED }),
+        onPhase: (p) => {
+          phases.push(p);
+        },
+      },
+    );
+    expect(phases).toEqual(["reading", "extracting", "building"]);
+  });
+
   it("propagates a text-extraction failure (unsupported file) before the LLM runs", async () => {
     // No filename, no content-type, non-PDF/DOCX magic bytes → unsupported_type.
     const notADoc: ResumeDownloader = async () => ({

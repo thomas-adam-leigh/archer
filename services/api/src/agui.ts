@@ -467,13 +467,90 @@ export interface ResumeIngestArgs {
   proposalId: string;
 }
 
+/** The proposed version + proposal a finished ingest run surfaces — supplied to the
+ *  `complete` segment once the proposal exists. */
+export interface ResumeIngestIds {
+  versionId: string;
+  proposalId: string;
+}
+
+/** One résumé-ingest run, sliced into the ordered segments that map to its real
+ *  work boundaries: `reading` (before the download), `extracting` (before text
+ *  extraction), `building` (before LLM structuring) and `complete` (after the
+ *  proposal). Concatenating `reading ++ extracting ++ building ++ complete(ids)`
+ *  is **exactly** {@link resumeIngestRun}'s log, so the route can `appendEvents`
+ *  each segment as its phase runs (genuinely live) without changing the replayed
+ *  outcome — the AG-UI invariant that a replay equals the live accumulation. */
+export interface ResumeIngestSegments {
+  reading: AgUiEvent[];
+  extracting: AgUiEvent[];
+  building: AgUiEvent[];
+  complete: (ids: ResumeIngestIds) => AgUiEvent[];
+}
+
 /**
- * Produce the ordered event log for one résumé-ingest run. Opens shared state at
- * the first phase, then walks the three phases (each a `/phase` StateDelta plus an
- * assistant status line), and finishes successfully — surfacing the proposed
- * `versionId`/`proposalId` both in the terminal `run_finished` outcome and in
- * shared state. The final folded shared state is
- * `{ phase: "complete", versionId, proposalId }`.
+ * Slice a résumé-ingest run into its ordered, per-phase event segments. Opens
+ * shared state at the first phase (`reading`); each later phase flips `state.phase`
+ * (a `/phase` StateDelta) then narrates it; `complete` lands the proposed
+ * `versionId`/`proposalId` in both the terminal `run_finished` outcome and shared
+ * state. The final folded shared state is `{ phase: "complete", versionId, proposalId }`.
+ */
+export function resumeIngestSegments({
+  threadId,
+  runId,
+  parentRunId = null,
+}: Omit<ResumeIngestArgs, "versionId" | "proposalId">): ResumeIngestSegments {
+  const say = (n: number, text: string): AgUiEvent[] => {
+    const id = `${runId}:m${n}`;
+    return [
+      { type: "text_message_start", data: { messageId: id, role: "assistant" } },
+      { type: "text_message_content", data: { messageId: id, delta: text } },
+      { type: "text_message_end", data: { messageId: id } },
+    ];
+  };
+  const flip = (phase: string): AgUiEvent => ({
+    type: "state_delta",
+    data: { delta: [{ op: "replace", path: "/phase", value: phase }] },
+  });
+  const [reading, extracting, building] = INGEST_PHASES;
+  return {
+    reading: [
+      { type: "run_started", data: { threadId, runId, parentRunId } },
+      { type: "step_started", data: { stepName: INGEST_STEP } },
+      { type: "state_snapshot", data: { snapshot: { phase: reading.phase } } },
+      ...say(1, reading.message),
+    ],
+    extracting: [flip(extracting.phase), ...say(2, extracting.message)],
+    building: [flip(building.phase), ...say(3, building.message)],
+    complete: ({ versionId, proposalId }) => [
+      {
+        type: "state_delta",
+        data: {
+          delta: [
+            { op: "replace", path: "/phase", value: "complete" },
+            { op: "add", path: "/versionId", value: versionId },
+            { op: "add", path: "/proposalId", value: proposalId },
+          ],
+        },
+      },
+      { type: "step_finished", data: { stepName: INGEST_STEP } },
+      {
+        type: "run_finished",
+        data: {
+          threadId,
+          runId,
+          outcome: { type: "success", phase: "complete", versionId, proposalId },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Produce the full ordered event log for one résumé-ingest run, as a single batch
+ * (the concatenation of {@link resumeIngestSegments}). The route streams the same
+ * log incrementally via the segments; this one-shot form is the replay/invariant
+ * reference and the source for the run's terminal status + outcome.
  */
 export function resumeIngestRun({
   threadId,
@@ -482,47 +559,8 @@ export function resumeIngestRun({
   versionId,
   proposalId,
 }: ResumeIngestArgs): AgUiEvent[] {
-  const [first, ...rest] = INGEST_PHASES;
-  const events: AgUiEvent[] = [
-    { type: "run_started", data: { threadId, runId, parentRunId } },
-    { type: "step_started", data: { stepName: INGEST_STEP } },
-    { type: "state_snapshot", data: { snapshot: { phase: first.phase } } },
-  ];
-  const say = (n: number, text: string) => {
-    const id = `${runId}:m${n}`;
-    events.push({ type: "text_message_start", data: { messageId: id, role: "assistant" } });
-    events.push({ type: "text_message_content", data: { messageId: id, delta: text } });
-    events.push({ type: "text_message_end", data: { messageId: id } });
-  };
-  say(1, first.message);
-  // Each subsequent phase flips `state.phase` (a JSON-Patch delta) then narrates it.
-  rest.forEach((p, i) => {
-    events.push({
-      type: "state_delta",
-      data: { delta: [{ op: "replace", path: "/phase", value: p.phase }] },
-    });
-    say(i + 2, p.message);
-  });
-  events.push({
-    type: "state_delta",
-    data: {
-      delta: [
-        { op: "replace", path: "/phase", value: "complete" },
-        { op: "add", path: "/versionId", value: versionId },
-        { op: "add", path: "/proposalId", value: proposalId },
-      ],
-    },
-  });
-  events.push({ type: "step_finished", data: { stepName: INGEST_STEP } });
-  events.push({
-    type: "run_finished",
-    data: {
-      threadId,
-      runId,
-      outcome: { type: "success", phase: "complete", versionId, proposalId },
-    },
-  });
-  return events;
+  const s = resumeIngestSegments({ threadId, runId, parentRunId });
+  return [...s.reading, ...s.extracting, ...s.building, ...s.complete({ versionId, proposalId })];
 }
 
 // ── The draft-revise run: streamed feedback→amended version progress ──────────
@@ -818,6 +856,14 @@ export function coverLetterSubmitRun({
 
 /** The RunError event pair for a request that violates a contract rule. Bounded
  *  by run_started so a rejected request is still an auditable, persisted run. */
+/** The terminal `run_error` event on its own — appended when the run has *already*
+ *  emitted its `run_started` (e.g. a résumé ingest that failed mid-phase after the
+ *  `reading` segment streamed), so the failure doesn't write a duplicate
+ *  `run_started`. A full {@link runError} is `run_started ++ runErrorTail`. */
+export function runErrorTail(threadId: string, runId: string, reason: string): AgUiEvent[] {
+  return [{ type: "run_error", data: { threadId, runId, message: reason } }];
+}
+
 export function runError(
   threadId: string,
   runId: string,
@@ -826,7 +872,7 @@ export function runError(
 ): AgUiEvent[] {
   return [
     { type: "run_started", data: { threadId, runId, parentRunId } },
-    { type: "run_error", data: { threadId, runId, message: reason } },
+    ...runErrorTail(threadId, runId, reason),
   ];
 }
 

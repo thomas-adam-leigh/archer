@@ -15,8 +15,10 @@ import {
   REVISE_PHASES,
   restoreThread,
   resumeIngestRun,
+  resumeIngestSegments,
   reviseDraftRun,
   runError,
+  runErrorTail,
   runStub,
   scribeRun,
   statusFromEvents,
@@ -531,6 +533,62 @@ describe("resumeIngestRun — streamed 3-phase ingest → proposed version", () 
     const events = resumeIngestRun(args);
     const { state } = restoreThread(events.map((e) => ({ type: e.type, data: e.data })));
     expect(state).toEqual({ phase: "complete", versionId: "v-1", proposalId: "p-1" });
+  });
+});
+
+describe("resumeIngestSegments — per-phase live emission (ARC-123)", () => {
+  const args = { threadId: THREAD, runId: RUN, versionId: "v-1", proposalId: "p-1" };
+
+  it("concatenates to exactly resumeIngestRun (the replay-equals-accumulation invariant)", () => {
+    const s = resumeIngestSegments({ threadId: THREAD, runId: RUN });
+    const streamed = [
+      ...s.reading,
+      ...s.extracting,
+      ...s.building,
+      ...s.complete({ versionId: "v-1", proposalId: "p-1" }),
+    ];
+    expect(streamed).toEqual(resumeIngestRun(args));
+  });
+
+  it("opens the run in the first segment and finishes only in complete", () => {
+    const s = resumeIngestSegments({ threadId: THREAD, runId: RUN });
+    expect(types(s.reading)[0]).toBe("run_started");
+    // The work segments never start or finish the run — they only advance state.
+    for (const seg of [s.extracting, s.building]) {
+      expect(types(seg)).not.toContain("run_started");
+      expect(types(seg)).not.toContain("run_finished");
+    }
+    const complete = s.complete({ versionId: "v-1", proposalId: "p-1" });
+    expect(types(complete).at(-1)).toBe("run_finished");
+  });
+
+  it("streams the three phases in order, each narrated once", () => {
+    const s = resumeIngestSegments({ threadId: THREAD, runId: RUN });
+    const lineOf = (seg: AgUiEvent[]) =>
+      seg
+        .filter((e) => e.type === "text_message_content")
+        .map((e) => (e.data as { delta: string }).delta);
+    expect([...lineOf(s.reading), ...lineOf(s.extracting), ...lineOf(s.building)]).toEqual(
+      INGEST_PHASES.map((p) => p.message),
+    );
+    // Only the opening segment seeds shared state with a snapshot.
+    expect(types(s.reading)).toContain("state_snapshot");
+    expect(types(s.extracting)).not.toContain("state_snapshot");
+  });
+});
+
+describe("runErrorTail — bare run_error for an already-started run (ARC-123)", () => {
+  it("emits only run_error, no run_started", () => {
+    const tail = runErrorTail(THREAD, RUN, "boom");
+    expect(types(tail)).toEqual(["run_error"]);
+    expect(statusFromEvents(tail)).toBe("error");
+  });
+
+  it("runError is run_started followed by the tail", () => {
+    expect(runError(THREAD, RUN, "boom")).toEqual([
+      { type: "run_started", data: { threadId: THREAD, runId: RUN, parentRunId: null } },
+      ...runErrorTail(THREAD, RUN, "boom"),
+    ]);
   });
 });
 
