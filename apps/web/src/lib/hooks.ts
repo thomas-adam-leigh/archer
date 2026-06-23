@@ -9,6 +9,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type AccountStatus, completeOnboarding } from "#/lib/accounts.ts";
 import type { Session } from "#/lib/auth.ts";
 import { signIn, signOut, signUp } from "#/lib/auth.ts";
 import {
@@ -52,6 +53,8 @@ export const queryKeys = {
 		["profile", "proposed-draft", userId] as const,
 	negativeCriteria: (userId: string) =>
 		["preferences", "negative-criteria", userId] as const,
+	suggestedTitles: (userId: string) =>
+		["preferences", "suggested-titles", userId] as const,
 };
 
 /** Read the current session or throw — used inside authenticated mutations. */
@@ -196,6 +199,24 @@ export function useSuggestTitles() {
 	});
 }
 
+/**
+ * Read Archer's ~5 ranked target titles for the hunt-setup stage (ARC-111). The
+ * suggestion derives from the approved profile, so this is a read-on-mount query
+ * (disabled until signed in); the candidate confirms the set on submit. Cached
+ * for the session so the list is stable across re-renders of the criteria stage.
+ */
+export function useSuggestedTitles() {
+	const session = useSession();
+	return useQuery<string[]>({
+		queryKey: session
+			? queryKeys.suggestedTitles(session.user.id)
+			: ["preferences", "suggested-titles", "anonymous"],
+		queryFn: () => suggestTitles(requireSession(session)),
+		enabled: Boolean(session),
+		staleTime: Number.POSITIVE_INFINITY,
+	});
+}
+
 /** Persist the chosen target titles. */
 export function useApproveTitles() {
 	const session = useSession();
@@ -244,6 +265,32 @@ export function useRemoveNegativeCriterion() {
 			if (session) {
 				queryClient.invalidateQueries({
 					queryKey: queryKeys.negativeCriteria(session.user.id),
+				});
+			}
+		},
+	});
+}
+
+/**
+ * Submit the hunt setup — the single "Send to Archer →" action (ARC-111). Approves
+ * the confirmed target titles, then completes onboarding (the Acceptance-Gate
+ * submit), then invalidates onboarding progress so the resume guard sees the now
+ * `done` step and forwards the candidate to home. One mutation so the two writes
+ * stay atomic from the screen's point of view.
+ */
+export function useSubmitHuntSetup() {
+	const session = useSession();
+	const queryClient = useQueryClient();
+	return useMutation<AccountStatus, Error, { titles: string[] }>({
+		mutationFn: async (vars) => {
+			const active = requireSession(session);
+			await approveTitles(active, vars.titles);
+			return completeOnboarding(active);
+		},
+		onSuccess: () => {
+			if (session) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.onboardingProgress(session.user.id),
 				});
 			}
 		},
