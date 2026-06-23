@@ -14,7 +14,7 @@
  * contract) on top of the bearer token.
  */
 
-import { apiPost } from "#/lib/api.ts";
+import { apiDelete, apiGet, apiPost } from "#/lib/api.ts";
 import type { Session } from "#/lib/auth.ts";
 
 /** The POST surface these calls need — injectable so they can be tested offline. */
@@ -22,6 +22,18 @@ export type PreferencesPost = <T>(
 	path: string,
 	accessToken: string,
 	body?: unknown,
+) => Promise<T>;
+
+/** The GET surface the reads need — injectable so they can be tested offline. */
+export type PreferencesGet = <T>(
+	path: string,
+	accessToken: string,
+) => Promise<T>;
+
+/** The DELETE surface the removals need — injectable so they can be tested offline. */
+export type PreferencesDelete = <T>(
+	path: string,
+	accessToken: string,
 ) => Promise<T>;
 
 interface SuggestResponse {
@@ -83,6 +95,23 @@ interface CriterionResponse {
 	criterion: NegativeCriterion;
 }
 
+interface CriteriaListResponse {
+	user: string;
+	criteria: NegativeCriterion[];
+}
+
+/** List the candidate's saved negative criteria (their rule-outs). */
+export async function listNegativeCriteria(
+	session: Session,
+	get: PreferencesGet = apiGet,
+): Promise<NegativeCriterion[]> {
+	const resp = await get<CriteriaListResponse>(
+		`/criteria?user=${encodeURIComponent(session.user.id)}`,
+		session.accessToken,
+	);
+	return resp.criteria ?? [];
+}
+
 /** Capture one negative criterion (a rule-out) into `negative_criteria`. */
 export async function addNegativeCriterion(
 	session: Session,
@@ -94,4 +123,13 @@ export async function addNegativeCriterion(
 		text,
 	});
 	return resp.criterion;
+}
+
+/** Remove a saved negative criterion by its id. */
+export async function removeNegativeCriterion(
+	session: Session,
+	id: string,
+	del: PreferencesDelete = apiDelete,
+): Promise<void> {
+	await del(`/criteria/${encodeURIComponent(id)}`, session.accessToken);
 }
