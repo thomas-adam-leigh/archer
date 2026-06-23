@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { NegativeCriteria } from "#/components/negative-criteria.tsx";
+import { TargetTitles } from "#/components/target-titles.tsx";
 import {
 	useAddNegativeCriterion,
 	useNegativeCriteria,
 	useRemoveNegativeCriterion,
+	useSubmitHuntSetup,
+	useSuggestedTitles,
 } from "#/lib/hooks.ts";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
@@ -17,19 +20,22 @@ export const Route = createFileRoute("/onboarding/criteria")({
 });
 
 /**
- * Negative-criteria capture — "Here's what I'll hunt for" (M7: ARC-110). The
- * candidate adds the rule-outs Archer should never surface; each one persists via
- * the criteria contract and renders as a removable chip, with the spec's empty
- * state until the first is captured. Hunt setup + the "Send to Archer →" submit
- * that advances to home land in ARC-111, so the stage shows only the rule-outs
- * card for now — wrapped in the shared `onboarding-stage-criteria` testid so the
- * review E2E's "approve advances to criteria" assertion stays green.
+ * Hunt setup — "Here's what I'll hunt for" (M7: ARC-110 + ARC-111). Archer's
+ * ranked target titles (suggested from the approved profile) sit above the
+ * rule-outs the candidate adds; the single "Send to Archer →" submit confirms the
+ * titles and captures completion (the Acceptance-Gate submit), after which the
+ * resume guard forwards the now-`done` user to home. The submit is gated until
+ * the readiness inputs exist — at least one target title and one rule-out — so it
+ * never trips the backend's 409. The shared `onboarding-stage-criteria` testid
+ * keeps the review E2E's "approve advances to criteria" assertion green.
  */
 function CriteriaRoute() {
 	const { status } = useOnboardingResume("criteria");
+	const titles = useSuggestedTitles();
 	const criteria = useNegativeCriteria();
 	const add = useAddNegativeCriterion();
 	const remove = useRemoveNegativeCriterion();
+	const submit = useSubmitHuntSetup();
 	const [removingId, setRemovingId] = useState<string | null>(null);
 
 	const onAdd = (text: string) => add.mutate({ text });
@@ -40,10 +46,21 @@ function CriteriaRoute() {
 
 	if (status !== "ready") return <OnboardingPending />;
 
-	const error =
+	const criteriaError =
 		add.isError || remove.isError
 			? "Couldn't save that just now. Please try again."
 			: null;
+
+	const titleList = titles.data ?? [];
+	const ruleOuts = criteria.data ?? [];
+	// Readiness needs ≥1 target title and ≥1 rule-out before /onboarding/complete.
+	const canSubmit =
+		titleList.length > 0 && ruleOuts.length > 0 && !submit.isPending;
+
+	const onSubmit = () => {
+		if (!canSubmit) return;
+		submit.mutate({ titles: titleList });
+	};
 
 	return (
 		<div
@@ -55,27 +72,66 @@ function CriteriaRoute() {
 					Here's what I'll hunt for.
 				</h2>
 				<p className="m-0 text-[15px] text-[var(--txt2)]">
-					A few deal-breakers help me filter sharply from day one.
+					Your target roles, plus a few deal-breakers so I filter sharply from
+					day one.
 				</p>
 			</header>
 
+			<TargetTitles
+				titles={titleList}
+				loading={titles.isPending}
+				error={
+					titles.isError ? "Couldn't load your target titles just now." : null
+				}
+				onRetry={() => titles.refetch()}
+			/>
+
 			{criteria.isPending ? (
 				<div
-					className="flex min-h-[30vh] items-center justify-center"
+					className="flex min-h-[20vh] items-center justify-center"
 					aria-busy="true"
 				>
 					<Loader2 className="size-5 animate-spin text-[var(--accent)]" />
 				</div>
 			) : (
 				<NegativeCriteria
-					criteria={criteria.data ?? []}
+					criteria={ruleOuts}
 					onAdd={onAdd}
 					onRemove={onRemove}
 					adding={add.isPending}
 					removingId={removingId}
-					error={error}
+					error={criteriaError}
 				/>
 			)}
+
+			<div className="mt-6 flex flex-col items-end gap-2">
+				<button
+					type="button"
+					data-testid="hunt-setup-submit"
+					onClick={onSubmit}
+					disabled={!canSubmit}
+					className="flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,var(--accent-2),var(--accent))] px-6 py-3 text-[15px] font-bold text-[#160a02] shadow-[0_10px_28px_var(--glow)] transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+				>
+					{submit.isPending ? (
+						<Loader2 className="size-[18px] animate-spin" />
+					) : null}
+					Send to Archer
+					<ArrowRight className="size-[18px]" />
+				</button>
+				{submit.isError ? (
+					<p
+						data-testid="hunt-setup-error"
+						className="text-[13px] font-semibold text-[#f0936c]"
+						role="alert"
+					>
+						Couldn't send that to Archer just now. Please try again.
+					</p>
+				) : ruleOuts.length === 0 ? (
+					<p className="text-[13px] text-[var(--txt3)]">
+						Add at least one rule-out to continue.
+					</p>
+				) : null}
+			</div>
 		</div>
 	);
 }
