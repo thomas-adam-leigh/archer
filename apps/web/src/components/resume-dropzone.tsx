@@ -18,11 +18,14 @@ import { cn } from "#/lib/utils.ts";
  * ".doc/.docx", but the bucket accepts PDF + DOCX, not legacy binary .doc; the
  * copy here follows what actually uploads.)
  *
- * This is the intake only: choosing a valid file lands in the selected-file state
- * with a change action. Uploading it + the "reading every line" processing screen
- * arrive in ARC-102.
+ * Choosing a valid file lands in the selected-file state, from which the candidate
+ * can confirm ("Read my résumé →", handed to {@link ResumeDropzoneProps.onUpload})
+ * or swap the file. The upload + "reading every line" processing screen the upload
+ * leads to live in the résumé route (ARC-102).
  */
 interface ResumeDropzoneProps {
+	/** Upload the chosen file and start its ingest ("Read my résumé →"). */
+	onUpload: (file: File) => void;
 	/** Switch to the conversational path ("Talk to me instead →"). */
 	onTalkInstead: () => void;
 }
@@ -36,7 +39,10 @@ const HOW_IT_WORKS = [
 	"You review what I built — and tell me anything to fix.",
 ];
 
-export function ResumeDropzone({ onTalkInstead }: ResumeDropzoneProps) {
+export function ResumeDropzone({
+	onUpload,
+	onTalkInstead,
+}: ResumeDropzoneProps) {
 	const [dragging, setDragging] = useState(false);
 	const [selected, setSelected] = useState<File | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -142,6 +148,17 @@ export function ResumeDropzone({ onTalkInstead }: ResumeDropzoneProps) {
 					</div>
 				)}
 			</label>
+
+			{selected ? (
+				<button
+					type="button"
+					data-testid="resume-upload"
+					onClick={() => onUpload(selected)}
+					className="mt-5 block w-full rounded-2xl bg-[linear-gradient(135deg,var(--accent-2),var(--accent))] px-6 py-3.5 text-[15px] font-bold text-[#160a02] shadow-[0_10px_28px_var(--glow)] transition-transform hover:-translate-y-px"
+				>
+					Read my résumé →
+				</button>
+			) : null}
 
 			{error ? (
 				<p
