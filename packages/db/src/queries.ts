@@ -1284,22 +1284,22 @@ export async function writeProfileSpine(
   versionId: string,
   spine: ProfileSpineDraft,
 ): Promise<void> {
-  for (const w of spine.workExperiences ?? []) {
+  for (const [i, w] of (spine.workExperiences ?? []).entries()) {
     await db`
       insert into work_experiences
-        (user_id, version_id, title, organization, employment_type, location,
+        (user_id, version_id, position, title, organization, employment_type, location,
          start_date, end_date, is_current, description, details)
-      values (${userId}, ${versionId}, ${w.title}, ${w.organization ?? null},
+      values (${userId}, ${versionId}, ${i}, ${w.title}, ${w.organization ?? null},
               ${w.employmentType ?? null}, ${w.location ?? null}, ${w.startDate ?? null},
               ${w.endDate ?? null}, ${w.isCurrent ?? false}, ${w.description ?? null},
               ${asJson(db, w.details)})`;
   }
-  for (const e of spine.education ?? []) {
+  for (const [i, e] of (spine.education ?? []).entries()) {
     await db`
       insert into education
-        (user_id, version_id, institution, degree, field_of_study, start_date,
+        (user_id, version_id, position, institution, degree, field_of_study, start_date,
          end_date, grade, details)
-      values (${userId}, ${versionId}, ${e.institution}, ${e.degree ?? null},
+      values (${userId}, ${versionId}, ${i}, ${e.institution}, ${e.degree ?? null},
               ${e.fieldOfStudy ?? null}, ${e.startDate ?? null}, ${e.endDate ?? null},
               ${e.grade ?? null}, ${asJson(db, e.details)})`;
   }
@@ -1309,25 +1309,25 @@ export async function writeProfileSpine(
       values (${userId}, ${versionId}, ${s.name}, ${s.category ?? null},
               ${s.proficiency ?? null}, ${s.yearsExperience ?? null}, ${asJson(db, s.details)})`;
   }
-  for (const cert of spine.certifications ?? []) {
+  for (const [i, cert] of (spine.certifications ?? []).entries()) {
     await db`
       insert into certifications
-        (user_id, version_id, name, issuer, issued_on, expires_on, credential_id, url, details)
-      values (${userId}, ${versionId}, ${cert.name}, ${cert.issuer ?? null},
+        (user_id, version_id, position, name, issuer, issued_on, expires_on, credential_id, url, details)
+      values (${userId}, ${versionId}, ${i}, ${cert.name}, ${cert.issuer ?? null},
               ${cert.issuedOn ?? null}, ${cert.expiresOn ?? null}, ${cert.credentialId ?? null},
               ${cert.url ?? null}, ${asJson(db, cert.details)})`;
   }
-  for (const co of spine.courses ?? []) {
+  for (const [i, co] of (spine.courses ?? []).entries()) {
     await db`
-      insert into courses (user_id, version_id, name, provider, completed_on, url, details)
-      values (${userId}, ${versionId}, ${co.name}, ${co.provider ?? null},
+      insert into courses (user_id, version_id, position, name, provider, completed_on, url, details)
+      values (${userId}, ${versionId}, ${i}, ${co.name}, ${co.provider ?? null},
               ${co.completedOn ?? null}, ${co.url ?? null}, ${asJson(db, co.details)})`;
   }
-  for (const p of spine.projects ?? []) {
+  for (const [i, p] of (spine.projects ?? []).entries()) {
     await db`
       insert into projects
-        (user_id, version_id, name, role, url, start_date, end_date, description, details)
-      values (${userId}, ${versionId}, ${p.name}, ${p.role ?? null}, ${p.url ?? null},
+        (user_id, version_id, position, name, role, url, start_date, end_date, description, details)
+      values (${userId}, ${versionId}, ${i}, ${p.name}, ${p.role ?? null}, ${p.url ?? null},
               ${p.startDate ?? null}, ${p.endDate ?? null}, ${p.description ?? null},
               ${asJson(db, p.details)})`;
   }
@@ -1352,14 +1352,14 @@ export async function readProfileSpine(
            start_date as "startDate", end_date as "endDate", is_current as "isCurrent",
            description
     from work_experiences where user_id = ${userId} and version_id = ${versionId}
-    order by start_date desc nulls last, created_at`;
+    order by position asc nulls last, start_date desc nulls last, created_at`;
   if (work.length > 0) spine.workExperiences = work;
 
   const education = await db<NewEducation[]>`
     select institution, degree, field_of_study as "fieldOfStudy",
            start_date as "startDate", end_date as "endDate", grade
     from education where user_id = ${userId} and version_id = ${versionId}
-    order by start_date desc nulls last, created_at`;
+    order by position asc nulls last, start_date desc nulls last, created_at`;
   if (education.length > 0) spine.education = education;
 
   const skills = await db<NewSkill[]>`
@@ -1372,19 +1372,19 @@ export async function readProfileSpine(
     select name, issuer, issued_on as "issuedOn", expires_on as "expiresOn",
            credential_id as "credentialId", url
     from certifications where user_id = ${userId} and version_id = ${versionId}
-    order by issued_on desc nulls last, created_at`;
+    order by position asc nulls last, issued_on desc nulls last, created_at`;
   if (certifications.length > 0) spine.certifications = certifications;
 
   const courses = await db<NewCourse[]>`
     select name, provider, completed_on as "completedOn", url
     from courses where user_id = ${userId} and version_id = ${versionId}
-    order by completed_on desc nulls last, created_at`;
+    order by position asc nulls last, completed_on desc nulls last, created_at`;
   if (courses.length > 0) spine.courses = courses;
 
   const projects = await db<NewProject[]>`
     select name, role, url, start_date as "startDate", end_date as "endDate", description
     from projects where user_id = ${userId} and version_id = ${versionId}
-    order by start_date desc nulls last, created_at`;
+    order by position asc nulls last, start_date desc nulls last, created_at`;
   if (projects.length > 0) spine.projects = projects;
 
   return spine;

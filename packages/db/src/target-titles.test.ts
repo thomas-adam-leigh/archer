@@ -108,6 +108,26 @@ describe.skipIf(!TEST_DB_URL)("target titles + profile spine read (ARC-68)", () 
     expect(spine.courses).toBeUndefined();
   });
 
+  it("readProfileSpine preserves the written list order over date ordering (ARC-134)", async () => {
+    const version = await createProfileVersion(sql, { userId, label: "ordered", attributes: {} });
+    // Write in an order that DISAGREES with date ordering: the later-dated item is
+    // written second, so a date sort would flip them. Position must win on read-back.
+    await writeProfileSpine(sql, userId, version.id, {
+      certifications: [
+        { name: "Older Cert", issuedOn: "2019-01-01" },
+        { name: "Newer Cert", issuedOn: "2023-01-01" },
+      ],
+      courses: [
+        { name: "Older Course", completedOn: "2019-01-01" },
+        { name: "Newer Course", completedOn: "2023-01-01" },
+      ],
+    });
+
+    const spine = await readProfileSpine(sql, userId, version.id);
+    expect(spine.certifications?.map((c) => c.name)).toEqual(["Older Cert", "Newer Cert"]);
+    expect(spine.courses?.map((c) => c.name)).toEqual(["Older Course", "Newer Course"]);
+  });
+
   it("readProfileSpine returns an empty draft for a version with no spine rows", async () => {
     const version = await createProfileVersion(sql, { userId, label: "empty", attributes: {} });
     expect(await readProfileSpine(sql, userId, version.id)).toEqual({});

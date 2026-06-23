@@ -241,6 +241,7 @@ export type Database = {
           issued_on: string | null
           issuer: string | null
           name: string
+          position: number | null
           updated_at: string
           url: string | null
           user_id: string
@@ -255,6 +256,7 @@ export type Database = {
           issued_on?: string | null
           issuer?: string | null
           name: string
+          position?: number | null
           updated_at?: string
           url?: string | null
           user_id: string
@@ -269,6 +271,7 @@ export type Database = {
           issued_on?: string | null
           issuer?: string | null
           name?: string
+          position?: number | null
           updated_at?: string
           url?: string | null
           user_id?: string
@@ -387,6 +390,7 @@ export type Database = {
           details: Json
           id: string
           name: string
+          position: number | null
           provider: string | null
           updated_at: string
           url: string | null
@@ -399,6 +403,7 @@ export type Database = {
           details?: Json
           id?: string
           name: string
+          position?: number | null
           provider?: string | null
           updated_at?: string
           url?: string | null
@@ -411,6 +416,7 @@ export type Database = {
           details?: Json
           id?: string
           name?: string
+          position?: number | null
           provider?: string | null
           updated_at?: string
           url?: string | null
@@ -498,6 +504,7 @@ export type Database = {
           grade: string | null
           id: string
           institution: string
+          position: number | null
           start_date: string | null
           updated_at: string
           user_id: string
@@ -512,6 +519,7 @@ export type Database = {
           grade?: string | null
           id?: string
           institution: string
+          position?: number | null
           start_date?: string | null
           updated_at?: string
           user_id: string
@@ -526,6 +534,7 @@ export type Database = {
           grade?: string | null
           id?: string
           institution?: string
+          position?: number | null
           start_date?: string | null
           updated_at?: string
           user_id?: string
@@ -973,6 +982,7 @@ export type Database = {
           end_date: string | null
           id: string
           name: string
+          position: number | null
           role: string | null
           start_date: string | null
           updated_at: string
@@ -987,6 +997,7 @@ export type Database = {
           end_date?: string | null
           id?: string
           name: string
+          position?: number | null
           role?: string | null
           start_date?: string | null
           updated_at?: string
@@ -1001,6 +1012,7 @@ export type Database = {
           end_date?: string | null
           id?: string
           name?: string
+          position?: number | null
           role?: string | null
           start_date?: string | null
           updated_at?: string
@@ -1324,6 +1336,7 @@ export type Database = {
           is_current: boolean
           location: string | null
           organization: string | null
+          position: number | null
           start_date: string | null
           title: string
           updated_at: string
@@ -1340,6 +1353,7 @@ export type Database = {
           is_current?: boolean
           location?: string | null
           organization?: string | null
+          position?: number | null
           start_date?: string | null
           title: string
           updated_at?: string
@@ -1356,6 +1370,7 @@ export type Database = {
           is_current?: boolean
           location?: string | null
           organization?: string | null
+          position?: number | null
           start_date?: string | null
           title?: string
           updated_at?: string
