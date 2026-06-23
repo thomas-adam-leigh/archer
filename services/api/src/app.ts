@@ -17,6 +17,7 @@ import {
   createRun,
   decideAccount,
   decideInterruptProposal,
+  type Enums,
   failActivity,
   finishRun,
   getAccount,
@@ -42,6 +43,7 @@ import {
   listTargetTitles,
   loadThreadEvents,
   loadThreadInterrupts,
+  type ProfilePatch,
   readProfileSpine,
   recordCoverLetterSpokenNote,
   removeNegativeCriterion,
@@ -56,6 +58,7 @@ import {
   submitVersionProposal,
   succeedActivity,
   transitionCandidacy,
+  upsertProfile,
   type VersionDecision,
   writeProfileSpine,
 } from "@archer/db";
@@ -240,6 +243,11 @@ const ERR = {
 
 const SERVICE_SECURITY = [{ serviceSecret: [] }];
 const OWNER_SECURITY = [{ ownerSecret: [] }];
+
+// The allowed `profiles.work_pref` values (ARC-133), straight from the schema's
+// runtime enum so they can't drift from the migration.
+type WorkMode = Enums<"work_mode">;
+const WORK_MODES: readonly WorkMode[] = Constants.public.Enums.work_mode;
 
 // One OpenAPIHono per route group. The route definitions are split across several
 // groups and merged with `.route()` below: a single 35-link `.openapi()` chain
@@ -1742,6 +1750,85 @@ const gProfile = mk()
       const user = resolved.user;
       const profile = await getProfile(getDb(), user);
       return c.json({ user, profile: profile ?? null });
+    },
+  )
+  // Capture the typed work preferences a résumé can't supply (ARC-133): the work
+  // mode + remote willingness, salary expectations, and notice period. Onboarding
+  // asks for these in the hunt-setup/preferences stage and posts the set here,
+  // straight onto the typed `profiles` columns via `upsertProfile` — these fields
+  // are deliberately left untouched by the profile-version approval executor, so
+  // this is their write surface. Every field is optional (the candidate may skip
+  // any), but a payload with no recognised field is rejected so the client only
+  // calls when there's something to save.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/profile/preferences",
+      security: SERVICE_SECURITY,
+      request: {
+        body: jsonBody(
+          z.looseObject({
+            userId: Uuid.optional(),
+            workPref: z.string().optional(),
+            willingRemote: z.boolean().optional(),
+            currentSalary: z.string().optional(),
+            preferredSalary: z.string().optional(),
+            noticePeriod: z.string().optional(),
+          }),
+          "Work preferences",
+        ),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const body = c.req.valid("json") as {
+        userId?: string;
+        workPref?: string;
+        willingRemote?: boolean;
+        currentSalary?: string;
+        preferredSalary?: string;
+        noticePeriod?: string;
+      };
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
+
+      const patch: ProfilePatch = {};
+      if ("workPref" in body) {
+        if (!WORK_MODES.includes(body.workPref as WorkMode)) {
+          return c.json({ error: `workPref must be one of ${WORK_MODES.join(", ")}` }, 400);
+        }
+        patch.work_pref = body.workPref as WorkMode;
+      }
+      if ("willingRemote" in body) {
+        if (typeof body.willingRemote !== "boolean") {
+          return c.json({ error: "willingRemote must be a boolean" }, 400);
+        }
+        patch.willing_remote = body.willingRemote;
+      }
+      // Salary + notice are free text (`text` columns); trim and cap, and treat a
+      // blank string as an explicit clear (null) so a candidate can wipe a field.
+      const textFields = [
+        ["currentSalary", "current_salary"],
+        ["preferredSalary", "preferred_salary"],
+        ["noticePeriod", "notice_period"],
+      ] as const;
+      for (const [key, col] of textFields) {
+        if (!(key in body)) continue;
+        const raw = body[key];
+        if (typeof raw !== "string") return c.json({ error: `${key} must be a string` }, 400);
+        const trimmed = raw.trim();
+        if (trimmed.length > 128) return c.json({ error: `${key} is too long (≤128 chars)` }, 400);
+        patch[col] = trimmed.length > 0 ? trimmed : null;
+      }
+
+      if (Object.keys(patch).length === 0) {
+        return c.json({ error: "at least one preference field is required" }, 400);
+      }
+      const profile = await upsertProfile(getDb(), user, patch);
+      return c.json({ user, profile });
     },
   )
   // The whole version history (timeline) + which one is live.

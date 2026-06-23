@@ -3,6 +3,7 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { NegativeCriteria } from "#/components/negative-criteria.tsx";
 import { TargetTitles } from "#/components/target-titles.tsx";
+import { WorkPreferences } from "#/components/work-preferences.tsx";
 import {
 	useAddNegativeCriterion,
 	useNegativeCriteria,
@@ -12,6 +13,7 @@ import {
 } from "#/lib/hooks.ts";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
+import type { WorkPreferences as Prefs } from "#/lib/preferences.ts";
 import { OnboardingGate } from "./route.tsx";
 
 export const Route = createFileRoute("/onboarding/criteria")({
@@ -37,6 +39,7 @@ function CriteriaRoute() {
 	const remove = useRemoveNegativeCriterion();
 	const submit = useSubmitHuntSetup();
 	const [removingId, setRemovingId] = useState<string | null>(null);
+	const [preferences, setPreferences] = useState<Prefs>({});
 
 	const onAdd = (text: string) => add.mutate({ text });
 	const onRemove = (id: string) => {
@@ -59,7 +62,7 @@ function CriteriaRoute() {
 
 	const onSubmit = () => {
 		if (!canSubmit) return;
-		submit.mutate({ titles: titleList });
+		submit.mutate({ titles: titleList, preferences });
 	};
 
 	return (
@@ -85,6 +88,8 @@ function CriteriaRoute() {
 				}
 				onRetry={() => titles.refetch()}
 			/>
+
+			<WorkPreferences value={preferences} onChange={setPreferences} />
 
 			{criteria.isPending ? (
 				<div

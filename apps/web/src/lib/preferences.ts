@@ -133,3 +133,40 @@ export async function removeNegativeCriterion(
 ): Promise<void> {
 	await del(`/criteria/${encodeURIComponent(id)}`, session.accessToken);
 }
+
+/** How the candidate prefers to work — mirrors the `profiles.work_pref` enum. */
+export type WorkMode = "remote" | "hybrid" | "office" | "unknown";
+
+/**
+ * The typed work preferences a résumé can't supply (ARC-133), captured in the
+ * hunt-setup stage. Every field is optional — the candidate may answer any subset
+ * (or skip the section entirely, in which case the screen never calls this).
+ */
+export interface WorkPreferences {
+	workPref?: WorkMode;
+	willingRemote?: boolean;
+	currentSalary?: string;
+	preferredSalary?: string;
+	noticePeriod?: string;
+}
+
+/** True when there's at least one preference worth persisting (so we skip empty posts). */
+export function hasWorkPreferences(prefs: WorkPreferences): boolean {
+	return Object.values(prefs).some((v) => v !== undefined);
+}
+
+/**
+ * Persist the candidate's work preferences onto the typed `profiles` columns
+ * (`POST /profile/preferences`). Only the supplied fields are sent; the endpoint
+ * leaves the rest untouched.
+ */
+export async function submitWorkPreferences(
+	session: Session,
+	prefs: WorkPreferences,
+	post: PreferencesPost = apiPost,
+): Promise<void> {
+	await post("/profile/preferences", session.accessToken, {
+		userId: session.user.id,
+		...prefs,
+	});
+}

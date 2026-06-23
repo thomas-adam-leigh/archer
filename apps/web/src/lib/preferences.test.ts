@@ -3,8 +3,10 @@ import type { Session } from "#/lib/auth.ts";
 import {
 	addNegativeCriterion,
 	approveTitles,
+	hasWorkPreferences,
 	listNegativeCriteria,
 	removeNegativeCriterion,
+	submitWorkPreferences,
 	suggestTitles,
 } from "#/lib/preferences.ts";
 
@@ -102,5 +104,51 @@ describe("addNegativeCriterion", () => {
 			text: "nothing in .NET",
 		});
 		expect(result).toEqual({ id: "c1", text: "nothing in .NET" });
+	});
+});
+
+describe("submitWorkPreferences", () => {
+	test("posts the supplied fields scoped to the user", async () => {
+		const post = vi.fn().mockResolvedValue({ user: "user-1", profile: {} });
+
+		await submitWorkPreferences(
+			session,
+			{
+				workPref: "hybrid",
+				willingRemote: true,
+				currentSalary: "R900k",
+				preferredSalary: "R1.1m",
+				noticePeriod: "30 days",
+			},
+			post,
+		);
+
+		expect(post).toHaveBeenCalledWith("/profile/preferences", "access-1", {
+			userId: "user-1",
+			workPref: "hybrid",
+			willingRemote: true,
+			currentSalary: "R900k",
+			preferredSalary: "R1.1m",
+			noticePeriod: "30 days",
+		});
+	});
+
+	test("sends only the provided subset", async () => {
+		const post = vi.fn().mockResolvedValue({ user: "user-1", profile: {} });
+
+		await submitWorkPreferences(session, { workPref: "remote" }, post);
+
+		expect(post).toHaveBeenCalledWith("/profile/preferences", "access-1", {
+			userId: "user-1",
+			workPref: "remote",
+		});
+	});
+});
+
+describe("hasWorkPreferences", () => {
+	test("is false for an empty set and true once a field is set", () => {
+		expect(hasWorkPreferences({})).toBe(false);
+		expect(hasWorkPreferences({ noticePeriod: "2 weeks" })).toBe(true);
+		expect(hasWorkPreferences({ willingRemote: false })).toBe(true);
 	});
 });
