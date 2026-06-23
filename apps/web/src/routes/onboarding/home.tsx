@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { DashboardShell } from "#/components/dashboard-shell.tsx";
 import { HomeDashboard } from "#/components/home-dashboard.tsx";
 import {
 	useNegativeCriteria,
@@ -13,7 +14,11 @@ import { OnboardingGate } from "./route.tsx";
 export const Route = createFileRoute("/onboarding/home")({
 	component: HomeRoute,
 	// `home` returns `undefined` → the progress indicator hides post-onboarding.
-	staticData: { onboardingStep: progressSegmentForRoute("home") },
+	// `dashboard` swaps the onboarding chrome for the dashboard sidebar shell.
+	staticData: {
+		onboardingStep: progressSegmentForRoute("home"),
+		dashboard: true,
+	},
 });
 
 /**
@@ -34,12 +39,17 @@ function HomeRoute() {
 	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
 
 	return (
-		<HomeDashboard
-			nextRun={nextRun(new Date())}
-			titles={titles.data ?? []}
-			ruleOuts={criteria.data ?? []}
-			onStartOver={() => signOut.mutate()}
-			startingOver={signOut.isPending}
-		/>
+		<DashboardShell
+			onSignOut={() => signOut.mutate()}
+			signingOut={signOut.isPending}
+		>
+			<HomeDashboard
+				nextRun={nextRun(new Date())}
+				titles={titles.data ?? []}
+				ruleOuts={criteria.data ?? []}
+				onStartOver={() => signOut.mutate()}
+				startingOver={signOut.isPending}
+			/>
+		</DashboardShell>
 	);
 }

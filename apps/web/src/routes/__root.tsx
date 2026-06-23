@@ -58,13 +58,20 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 		},
 	});
 
+	// The post-onboarding dashboard brings its own chrome (the sidebar shell), so
+	// it opts out of the onboarding `AppShell` via `staticData.dashboard`.
+	const isDashboard = useRouterState({
+		select: (state) =>
+			state.matches.some((match) => match.staticData.dashboard === true),
+	});
+
 	return (
 		<html lang="en">
 			<head>
 				<HeadContent />
 			</head>
 			<body>
-				<AppShell step={step}>{children}</AppShell>
+				{isDashboard ? children : <AppShell step={step}>{children}</AppShell>}
 				<TanStackDevtools
 					config={{
 						position: "bottom-right",

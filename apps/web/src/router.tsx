@@ -38,5 +38,11 @@ declare module "@tanstack/react-router" {
 	interface StaticDataRouteOption {
 		/** The 1-based progress segment this route lights, or omitted to hide it. */
 		onboardingStep?: number;
+		/**
+		 * Set on the post-onboarding dashboard route so the root skips the
+		 * onboarding chrome — the dashboard supplies its own (the `DashboardShell`
+		 * built on the @efferd/app-shell-2 block).
+		 */
+		dashboard?: boolean;
 	}
 }
