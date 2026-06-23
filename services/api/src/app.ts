@@ -61,6 +61,7 @@ import {
 } from "@archer/db";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { Scalar } from "@scalar/hono-api-reference";
+import { cors } from "hono/cors";
 import {
   classifyRun,
   coverLetterSubmitRun,
@@ -2014,6 +2015,38 @@ const gHooks = mk()
 // all routes for the `hc` client — and merges their OpenAPI definitions into the
 // root registry, so `/openapi.json` documents the whole surface.
 const root = mk();
+
+// Browser CORS for the web client (`apps/web`). Server-to-server callers (the
+// mobile app's native fetch, the CLI) send no `Origin` header and so are never
+// gated by this. Allowed origins default to `http://localhost:3000` so a local
+// browser works the moment this deploys; additional origins (e.g. the deployed
+// web app) come from a comma-separated `ARCHER_WEB_ORIGINS` env var, set in
+// deploy config without a code change. We reflect the matching origin and never
+// blanket `*`. Registered before the `.route()` mounts so it covers every route
+// and answers the `OPTIONS` preflight.
+const allowedWebOrigins = () => [
+  "http://localhost:3000",
+  ...(process.env.ARCHER_WEB_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+];
+root.use(
+  "*",
+  cors({
+    origin: (origin) => (allowedWebOrigins().includes(origin) ? origin : null),
+    allowHeaders: [
+      "Authorization",
+      "Content-Type",
+      "apikey",
+      "x-archer-secret",
+      "x-archer-admin-secret",
+    ],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    maxAge: 86400,
+  }),
+);
+
 root.openAPIRegistry.registerComponent("securitySchemes", "serviceSecret", {
   type: "apiKey",
   in: "header",

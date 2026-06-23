@@ -596,6 +596,46 @@ describe("archer-api", () => {
   });
 });
 
+describe("CORS for the browser web client (ARC-120)", () => {
+  const preflight = (origin: string) =>
+    app.request("/onboarding/progress", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "Authorization",
+      },
+    });
+
+  it("reflects an allowed origin on the OPTIONS preflight", async () => {
+    const res = await preflight("http://localhost:3000");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:3000");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("GET");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+  });
+
+  it("does not allow a disallowed origin", async () => {
+    const res = await preflight("https://evil.example.com");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("honours additional origins from ARCHER_WEB_ORIGINS", async () => {
+    process.env.ARCHER_WEB_ORIGINS = "https://app.archer.careers, https://staging.archer.careers";
+    try {
+      const res = await preflight("https://app.archer.careers");
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://app.archer.careers");
+    } finally {
+      delete process.env.ARCHER_WEB_ORIGINS;
+    }
+  });
+
+  it("leaves server-to-server requests (no Origin) unaffected", async () => {
+    const res = await app.request("/health");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
+
 describe("assertSecureStartup (fail-closed in prod, ARC-55)", () => {
   it("throws in production when ARCHER_API_SECRET is unset", () => {
     expect(() => assertSecureStartup({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
