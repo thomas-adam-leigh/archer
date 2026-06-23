@@ -78,6 +78,83 @@ describe.skipIf(!TEST_DB_URL)("profile-version apply executor", () => {
     expect(profile[0].attributes.ideal_job).toBe("staff eng");
   });
 
+  it("approve materialises the version snapshot into the typed profile columns (ARC-130)", async () => {
+    const v = await createProfileVersion(sql, {
+      userId,
+      attributes: {
+        summary: "Pragmatic staff engineer.",
+        location: "Cape Town, ZA",
+        years_experience: 9,
+        links: { linkedin: "https://linkedin.com/in/cara", website: "https://cara.dev" },
+      },
+      details: { resumeText: "Cara — full résumé text." },
+    });
+    const { id: proposalId } = await submitVersionProposal(sql, {
+      userId,
+      versionId: v.id,
+      title: "Approve typed v1",
+    });
+
+    await applyVersionProposal(sql, proposalId, { action: "approve" });
+
+    const profile = await sql<
+      {
+        about: string | null;
+        location: string | null;
+        linkedin_url: string | null;
+        portfolio_url: string | null;
+        resume_text: string | null;
+        years_experience: number | null;
+      }[]
+    >`
+      select about, location, linkedin_url, portfolio_url, resume_text, years_experience
+      from profiles where user_id = ${userId}`;
+    expect(profile[0]).toEqual({
+      about: "Pragmatic staff engineer.",
+      location: "Cape Town, ZA",
+      linkedin_url: "https://linkedin.com/in/cara",
+      portfolio_url: "https://cara.dev",
+      resume_text: "Cara — full résumé text.",
+      years_experience: 9,
+    });
+  });
+
+  it("portfolio_url falls back to github when no website link is present", async () => {
+    const v = await createProfileVersion(sql, {
+      userId,
+      attributes: { links: { github: "https://github.com/cara" } },
+    });
+    const { id: proposalId } = await submitVersionProposal(sql, {
+      userId,
+      versionId: v.id,
+      title: "github fallback",
+    });
+    await applyVersionProposal(sql, proposalId, { action: "approve" });
+
+    const profile = await sql<{ portfolio_url: string | null }[]>`
+      select portfolio_url from profiles where user_id = ${userId}`;
+    expect(profile[0].portfolio_url).toBe("https://github.com/cara");
+  });
+
+  it("re-materialises typed columns when a new version supersedes the prior one", async () => {
+    const v1 = await createProfileVersion(sql, {
+      userId,
+      attributes: { summary: "first", location: "Joburg" },
+    });
+    const p1 = await submitVersionProposal(sql, { userId, versionId: v1.id, title: "v1" });
+    await applyVersionProposal(sql, p1.id, { action: "approve" });
+
+    const v2 = await createProfileVersion(sql, { userId, attributes: { summary: "second" } });
+    const p2 = await submitVersionProposal(sql, { userId, versionId: v2.id, title: "v2" });
+    await applyVersionProposal(sql, p2.id, { action: "approve" });
+
+    // The typed columns track the now-live version — overwritten cleanly, with
+    // fields absent from v2 nulled out rather than left stale from v1.
+    const profile = await sql<{ about: string | null; location: string | null }[]>`
+      select about, location from profiles where user_id = ${userId}`;
+    expect(profile[0]).toEqual({ about: "second", location: null });
+  });
+
   it("approving a new version supersedes the prior live one (cycle)", async () => {
     const v1 = await createProfileVersion(sql, { userId, attributes: { ideal_job: "first" } });
     const p1 = await submitVersionProposal(sql, { userId, versionId: v1.id, title: "v1" });
