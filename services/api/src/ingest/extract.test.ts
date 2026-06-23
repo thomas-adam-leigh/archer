@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractResumeText,
   MAX_RESUME_BYTES,
@@ -159,5 +159,54 @@ describe("default Storage downloader", () => {
 
   it("exposes the byte cap as a constant matching the bucket limit", () => {
     expect(MAX_RESUME_BYTES).toBe(10 * 1024 * 1024);
+  });
+});
+
+// The default downloader resolves its config from env when no opts are supplied.
+// `fetch` is mocked, so no live call — we assert the service-role key is resolved
+// from the env-var names the deployed `archer-api` container provides (ARC-121).
+describe("default Storage downloader — env-var key resolution (ARC-121)", () => {
+  const KEY_ENVS = ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"];
+
+  beforeEach(() => {
+    process.env.SUPABASE_URL = "https://proj.supabase.co";
+    for (const k of KEY_ENVS) delete process.env[k];
+  });
+  afterEach(() => {
+    delete process.env.SUPABASE_URL;
+    for (const k of KEY_ENVS) delete process.env[k];
+  });
+
+  const servePdf = () =>
+    vi.fn(
+      async () =>
+        new Response(PDF, { status: 200, headers: { "content-type": "application/pdf" } }),
+    ) as unknown as typeof fetch;
+
+  it("resolves the service-role key from SUPABASE_SECRET_KEY when SUPABASE_SERVICE_ROLE_KEY is unset", async () => {
+    process.env.SUPABASE_SECRET_KEY = "secret-key-value";
+    const fetchImpl = servePdf();
+    const { meta } = await extractResumeText("uid/cv.pdf", { fetchImpl, filename: "cv.pdf" });
+    expect(meta.format).toBe("pdf");
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({
+      authorization: "Bearer secret-key-value",
+      apikey: "secret-key-value",
+    });
+  });
+
+  it("prefers SUPABASE_SERVICE_ROLE_KEY when both env names are set", async () => {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-value";
+    process.env.SUPABASE_SECRET_KEY = "secret-key-value";
+    const fetchImpl = servePdf();
+    await extractResumeText("uid/cv.pdf", { fetchImpl, filename: "cv.pdf" });
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({ apikey: "service-role-value" });
+  });
+
+  it("fails closed when neither key env is set", async () => {
+    await expect(extractResumeText("uid/cv.pdf", { filename: "cv.pdf" })).rejects.toMatchObject({
+      code: "download_failed",
+    });
   });
 });
