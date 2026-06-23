@@ -9,6 +9,7 @@
     "dev": "vite dev --port 3000",
     "generate-routes": "tsr generate",
     "build": "vite build",
+    "build:e2e": "vite build --mode e2e",
     "preview": "vite preview",
     "serve": "node .output/server/index.mjs",
     "test": "vitest run",
@@ -17,7 +18,7 @@
     "check": "biome check",
     "cypress:open": "cypress open",
     "cypress:run": "cypress run --e2e",
-    "e2e": "start-server-and-test serve http://localhost:3000 cypress:run"
+    "e2e": "pnpm build:e2e && start-server-and-test serve http://localhost:3000 cypress:run"
   },
   "dependencies": {
     "@faker-js/faker": "^10.3.0",
