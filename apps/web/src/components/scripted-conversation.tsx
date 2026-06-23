@@ -1,5 +1,12 @@
-import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import {
+	ArrowLeft,
+	ArrowRight,
+	Loader2,
+	Mic,
+	Sparkles,
+	Square,
+} from "lucide-react";
+import { type FormEvent, useCallback, useState } from "react";
 import { ArcherOrb } from "#/components/archer-orb.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import {
@@ -14,6 +21,10 @@ import {
 	type ScriptState,
 	skipStep,
 } from "#/lib/onboarding-script.ts";
+import {
+	type UseVoiceCapture,
+	useVoiceCapture,
+} from "#/lib/use-voice-capture.ts";
 
 /**
  * The start-from-scratch screen (ARC-104): the FIXED, preset onboarding sequence
@@ -83,6 +94,14 @@ function QuestionPanel({
 	onBack,
 }: QuestionPanelProps) {
 	const [draft, setDraft] = useState("");
+	// Spoken answers land in the same box as typed ones, so the candidate can
+	// review/edit before submitting; repeated takes accrete onto the draft.
+	const appendTranscript = useCallback(
+		(text: string) =>
+			setDraft((d) => (d.trim() ? `${d.trim()} ${text}` : text)),
+		[],
+	);
+	const voice = useVoiceCapture(appendTranscript);
 	const step = currentStep(state);
 	if (!step) return null;
 
@@ -138,9 +157,17 @@ function QuestionPanel({
 					aria-label={step.prompt}
 					className="min-h-[120px] resize-none rounded-2xl border-[var(--line)] bg-[var(--card-2)] px-4 py-3.5 text-base"
 				/>
-				<p className="mt-2 text-xs text-[var(--txt3)]">
-					Type your answer for now — speaking your answers is coming soon.
-				</p>
+
+				<VoiceControl voice={voice} />
+				{voice.error ? (
+					<p
+						data-testid="voice-error"
+						role="alert"
+						className="mt-2 text-xs text-[#f0936c]"
+					>
+						{voice.error}
+					</p>
+				) : null}
 
 				<div className="mt-4 flex items-center gap-3">
 					{state.index > 0 ? (
@@ -177,6 +204,60 @@ function QuestionPanel({
 					</button>
 				</div>
 			</form>
+		</div>
+	);
+}
+
+/**
+ * The voice-first capture control: a record/stop pill with a status line.
+ * Voice is the primary input for this path; when the browser can't record we
+ * fall back to the text box (always present), so onboarding never dead-ends.
+ */
+function VoiceControl({ voice }: { voice: UseVoiceCapture }) {
+	if (!voice.supported) {
+		return (
+			<p className="mt-2 text-xs text-[var(--txt3)]">Type your answer below.</p>
+		);
+	}
+
+	const recording = voice.status === "recording";
+	const transcribing = voice.status === "transcribing";
+	const hint = recording
+		? "Listening… tap to stop."
+		: transcribing
+			? "Structuring what you said…"
+			: "Speak your answer, or type it below.";
+
+	return (
+		<div className="mt-3 flex items-center gap-3">
+			<button
+				type="button"
+				data-testid="voice-record"
+				onClick={recording ? voice.stop : voice.start}
+				disabled={transcribing}
+				aria-pressed={recording}
+				aria-label={recording ? "Stop recording" : "Record your answer"}
+				className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+					recording
+						? "border-[#f0936c]/60 bg-[#f0936c]/10 text-[#f0936c]"
+						: "border-[var(--line)] text-[var(--txt2)] hover:border-brand/45 hover:text-[var(--txt)]"
+				}`}
+			>
+				{transcribing ? (
+					<Loader2 className="size-4 animate-spin" />
+				) : recording ? (
+					<Square className="size-4 fill-current" />
+				) : (
+					<Mic className="size-4" />
+				)}
+				{transcribing ? "Transcribing…" : recording ? "Stop" : "Record"}
+			</button>
+			<p
+				data-testid="voice-status"
+				className={`text-xs ${recording ? "a-glowpulse text-[#f0936c]" : "text-[var(--txt3)]"}`}
+			>
+				{hint}
+			</p>
 		</div>
 	);
 }
