@@ -54,6 +54,137 @@ export interface ReviseDraftOptions {
   llm?: LlmProvider;
 }
 
+const norm = (v: string | null | undefined): string => (v ?? "").trim().toLowerCase();
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Does the candidate's feedback mention this item by one of its identifying names
+ *  (title, organisation, institution, or name)? Matched on whole words so a short
+ *  name like "Go" isn't found inside "good". If the feedback names an item, the
+ *  candidate's instruction acted on it (an edit or a removal), so we trust the model's
+ *  output for it; if it names it nowhere, a missing item can only be a silent model
+ *  drop — and {@link reconcileSpine} re-attaches it. */
+function feedbackMentions(feedback: string, names: (string | null | undefined)[]): boolean {
+  return names.some((n) => {
+    const t = (n ?? "").trim();
+    if (t.length < 2) return false;
+    return new RegExp(`\\b${escapeRegExp(t)}\\b`, "i").test(feedback);
+  });
+}
+
+/** Re-attach any item present in `prior` but missing from `revised` that the feedback
+ *  never named — those can only have been dropped silently by the model. `identity`
+ *  matches a prior item to a surviving revised one (so edits in place don't duplicate);
+ *  `names` yields the strings the feedback would use to refer to it. Dropped survivors
+ *  are appended after the revised items (explicit ordering is ARC-134's concern). */
+function reconcileList<T>(
+  prior: T[] | undefined,
+  revised: T[] | undefined,
+  feedback: string,
+  identity: (item: T) => string,
+  names: (item: T) => (string | null | undefined)[],
+): T[] | undefined {
+  if (!prior?.length) return revised;
+  const present = new Set((revised ?? []).map(identity));
+  const dropped = prior.filter(
+    (item) => !present.has(identity(item)) && !feedbackMentions(feedback, names(item)),
+  );
+  if (dropped.length === 0) return revised;
+  return [...(revised ?? []), ...dropped];
+}
+
+function setList<K extends keyof ProfileSpineDraft>(
+  out: ProfileSpineDraft,
+  key: K,
+  list: ProfileSpineDraft[K] | undefined,
+): void {
+  if (list && (list as unknown[]).length > 0) out[key] = list;
+  else delete out[key];
+}
+
+/**
+ * Reconcile a model-revised spine against the draft it was revising so a revision can
+ * **never silently drop** items the candidate didn't ask to change (ARC-135). The LLM
+ * is told to return the whole profile, but a shorter list (e.g. 2 of 4 certifications)
+ * would otherwise persist as data loss. For every spine list, any prior item missing
+ * from the revision that the feedback never named is re-attached; items the feedback
+ * named (edited or removed) are left to the model. Attributes are profile-wide and
+ * carried by the structurer's own "never blank" prompt, so only the spine is repaired.
+ */
+export function reconcileSpine(
+  prior: ProfileSpineDraft,
+  revised: ProfileSpineDraft,
+  feedback: string,
+): ProfileSpineDraft {
+  const out: ProfileSpineDraft = { ...revised };
+  setList(
+    out,
+    "workExperiences",
+    reconcileList(
+      prior.workExperiences,
+      revised.workExperiences,
+      feedback,
+      (w) => `${norm(w.title)}|${norm(w.organization)}`,
+      (w) => [w.title, w.organization],
+    ),
+  );
+  setList(
+    out,
+    "education",
+    reconcileList(
+      prior.education,
+      revised.education,
+      feedback,
+      (e) => `${norm(e.institution)}|${norm(e.degree)}`,
+      (e) => [e.institution, e.degree],
+    ),
+  );
+  setList(
+    out,
+    "skills",
+    reconcileList(
+      prior.skills,
+      revised.skills,
+      feedback,
+      (s) => norm(s.name),
+      (s) => [s.name],
+    ),
+  );
+  setList(
+    out,
+    "certifications",
+    reconcileList(
+      prior.certifications,
+      revised.certifications,
+      feedback,
+      (c) => norm(c.name),
+      (c) => [c.name],
+    ),
+  );
+  setList(
+    out,
+    "courses",
+    reconcileList(
+      prior.courses,
+      revised.courses,
+      feedback,
+      (c) => norm(c.name),
+      (c) => [c.name],
+    ),
+  );
+  setList(
+    out,
+    "projects",
+    reconcileList(
+      prior.projects,
+      revised.projects,
+      feedback,
+      (p) => norm(p.name),
+      (p) => [p.name],
+    ),
+  );
+  return out;
+}
+
 /** Frame the revise turn for the structurer: the current draft (as JSON), the source
  *  material it came from, and the feedback to apply — clearly labelled sections so the
  *  model amends rather than rebuilds. */
@@ -77,13 +208,17 @@ export function buildRevisionPrompt({ current, feedback, source }: ReviseDraftIn
  * applies the feedback as a diff, so the result amends the draft rather than blanking
  * it. Throws {@link import("../ingest/structure.js").ResumeStructureError} when the
  * model returns no parseable JSON.
+ *
+ * The model's spine is reconciled against the draft being revised so the revision can
+ * never silently lose items the feedback didn't touch ({@link reconcileSpine}, ARC-135).
  */
-export function reviseDraft(
+export async function reviseDraft(
   input: ReviseDraftInput,
   opts: ReviseDraftOptions = {},
 ): Promise<StructuredResume> {
-  return structureProfileText(buildRevisionPrompt(input), {
+  const result = await structureProfileText(buildRevisionPrompt(input), {
     llm: opts.llm,
     systemPrompt: SYSTEM_PROMPT,
   });
+  return { ...result, spine: reconcileSpine(input.current.spine, result.spine, input.feedback) };
 }
