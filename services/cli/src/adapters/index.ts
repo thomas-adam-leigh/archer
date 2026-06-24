@@ -1,5 +1,6 @@
 import { careerjet } from "./careerjet.js";
 import { careerjunction } from "./careerjunction.js";
+import { pnet } from "./pnet.js";
 import type { BoardAdapter } from "./types.js";
 
 // Board slug -> adapter. Boards without an entry have no collect adapter yet
@@ -7,6 +8,7 @@ import type { BoardAdapter } from "./types.js";
 const ADAPTERS: Record<string, BoardAdapter> = {
   [careerjunction.slug]: careerjunction,
   [careerjet.slug]: careerjet,
+  [pnet.slug]: pnet,
 };
 
 export function getAdapter(slug: string): BoardAdapter | undefined {
