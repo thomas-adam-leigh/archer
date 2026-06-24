@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { nextCollectStatus } from "./commands/collect.js";
+import { NotIntegratedError } from "./adapters/types.js";
+import { classifyCollectError, nextCollectStatus } from "./commands/collect.js";
 
 // ARC-10 — the pure decision behind the board collect-status lifecycle. A live
 // collect run drives boards.collect_status so it reflects the adapter's reality:
@@ -33,5 +34,22 @@ describe("ARC-10 — nextCollectStatus (collect-status lifecycle decision)", () 
 
   it("a failed run on an already-broken board needs no write", () => {
     expect(nextCollectStatus(true, "broken")).toBeNull();
+  });
+});
+
+// ARC-140 — the pure policy behind "not integrated" being a clean outcome rather
+// than a failure. A NotIntegratedError (a board whose adapter isn't wired up yet)
+// is classified `not_integrated` so the run records a succeeded Activity and leaves
+// the board status untouched; any other error is a genuine `failed` run that breaks
+// an integrated board. DB-free → runs in CI; the wiring is proven DB-backed in
+// collect-lifecycle.test.ts.
+describe("ARC-140 — classifyCollectError (not-integrated vs genuine failure)", () => {
+  it("a NotIntegratedError is the calm not-integrated outcome, not a failure", () => {
+    expect(classifyCollectError(new NotIntegratedError("no adapter yet"))).toBe("not_integrated");
+  });
+
+  it("any other error is a genuine failure", () => {
+    expect(classifyCollectError(new Error("scrape blew up"))).toBe("failed");
+    expect(classifyCollectError("login timed out")).toBe("failed");
   });
 });

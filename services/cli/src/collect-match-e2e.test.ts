@@ -9,7 +9,7 @@ import {
   setBoardStatus,
 } from "@archer/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NotIntegratedError, type ScrapedPosting } from "./adapters/types.js";
+import type { ScrapedPosting } from "./adapters/types.js";
 import { runCollect } from "./commands/collect.js";
 import { runMatch } from "./commands/match.js";
 
@@ -182,7 +182,8 @@ describe.skipIf(!TEST_DB_URL)("ARC-12 — collect→match→feed slice (end-to-e
     // A live (non-fixture) collect reconciles boards.collect_status to its outcome.
     await setBoardStatus(sql, "careerjet", { collect: "integrated" });
 
-    // A failed live run breaks an integrated board.
+    // A genuine failed live run (login/scrape/proxy error) breaks an integrated
+    // board. (A NotIntegratedError would NOT — that's a clean outcome now, ARC-140.)
     await expect(
       runCollect(sql, {
         board: "careerjet",
@@ -190,10 +191,10 @@ describe.skipIf(!TEST_DB_URL)("ARC-12 — collect→match→feed slice (end-to-e
         titles: [],
         fixture: false,
         gather: async () => {
-          throw new NotIntegratedError("careerjet collect is not integrated");
+          throw new Error("careerjet scrape blew up");
         },
       }),
-    ).rejects.toBeInstanceOf(NotIntegratedError);
+    ).rejects.toThrow("careerjet scrape blew up");
     expect((await getBoard(sql, "careerjet"))?.collect_status).toBe("broken");
 
     // A clean live run proves the adapter healthy again → restores integrated.

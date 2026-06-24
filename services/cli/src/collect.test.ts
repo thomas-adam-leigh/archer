@@ -7,8 +7,8 @@ import { runCollect } from "./commands/collect.js";
 // in a single `activities` row that ends succeeded/failed with a structured detail
 // summary; companies/postings upsert idempotently (board+url dedup); candidacies
 // fan out one-per-user-per-posting at `new`; and a thrown adapter (NotIntegratedError)
-// still leaves a failed Activity behind before it propagates. Exercised entirely over
-// the `--fixture` boundary (gather thunks) — no live browser.
+// is a clean `not_integrated` outcome — a succeeded Activity, not a failure (ARC-140).
+// Exercised entirely over the `--fixture` boundary (gather thunks) — no live browser.
 //
 // Like the other DB-backed tests it targets a migrated Postgres. Point
 // TEST_DATABASE_URL at it to run:
@@ -125,32 +125,33 @@ describe.skipIf(!TEST_DB_URL)(
       expect(await listCandidacies(sql, userB)).toHaveLength(2);
     });
 
-    it("records a failed Activity and rethrows when the adapter is not integrated", async () => {
-      const [{ n: before }] = await sql<{ n: number }[]>`
+    it("records a clean not_integrated Activity (not a failure) when the adapter is not integrated", async () => {
+      const [{ n: failedBefore }] = await sql<{ n: number }[]>`
       select count(*)::int as n from public.activities where user_id = ${userId} and status = 'failed'`;
 
-      await expect(
-        runCollect(sql, {
-          board: "careerjunction",
-          userId,
-          titles: [],
-          fixture: false,
-          gather: async () => {
-            throw new NotIntegratedError("careerjunction collect is not integrated");
-          },
-        }),
-      ).rejects.toBeInstanceOf(NotIntegratedError);
+      // No throw: a not-integrated board is a calm, expected outcome (ARC-140).
+      const summary = await runCollect(sql, {
+        board: "careerjunction",
+        userId,
+        titles: [],
+        fixture: false,
+        gather: async () => {
+          throw new NotIntegratedError("careerjunction collect is not integrated");
+        },
+      });
+      expect(summary.outcome).toBe("not_integrated");
 
-      const [failed] = await sql<{ status: string; error: string }[]>`
-      select status, error from public.activities
-      where user_id = ${userId} and status = 'failed'
+      const [activity] = await sql<{ status: string; detail: { outcome?: string } }[]>`
+      select status, detail from public.activities
+      where user_id = ${userId} and board_slug = 'careerjunction'
       order by started_at desc limit 1`;
-      expect(failed.status).toBe("failed");
-      expect(failed.error).toContain("not integrated");
+      expect(activity.status).toBe("succeeded"); // recorded clean, never failed
+      expect(activity.detail.outcome).toBe("not_integrated");
 
-      const [{ n: after }] = await sql<{ n: number }[]>`
+      // And it added no `failed` row — "not integrated" is not failure-noise.
+      const [{ n: failedAfter }] = await sql<{ n: number }[]>`
       select count(*)::int as n from public.activities where user_id = ${userId} and status = 'failed'`;
-      expect(after).toBe(before + 1);
+      expect(failedAfter).toBe(failedBefore);
     });
   },
 );

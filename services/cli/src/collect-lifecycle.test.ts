@@ -88,18 +88,19 @@ describe.skipIf(!TEST_DB_URL)("ARC-10 — board collect-status lifecycle (live r
     expect(await collectStatus()).toBe("integrated");
   });
 
-  it("a refusal from a not-integrated board records a failed Activity but leaves status not_integrated", async () => {
+  it("a not-integrated board is a clean succeeded outcome, not a failure (ARC-140)", async () => {
     expect(await collectStatus()).toBe("not_integrated");
-    await expect(
-      liveCollect(async () => {
-        throw new NotIntegratedError("board not integrated");
-      }),
-    ).rejects.toBeInstanceOf(NotIntegratedError);
-    expect(await collectStatus()).toBe("not_integrated"); // refusal ≠ breakage
-    const [failed] = await sql<{ status: string }[]>`
-      select status from public.activities where user_id = ${userId} and board_slug = ${BOARD}
+    // The run no longer throws: a NotIntegratedError is a calm, expected state.
+    const summary = await liveCollect(async () => {
+      throw new NotIntegratedError("board not integrated");
+    });
+    expect(summary.outcome).toBe("not_integrated");
+    expect(await collectStatus()).toBe("not_integrated"); // visible state ≠ breakage
+    const [activity] = await sql<{ status: string; detail: { outcome?: string } }[]>`
+      select status, detail from public.activities where user_id = ${userId} and board_slug = ${BOARD}
       order by started_at desc limit 1`;
-    expect(failed.status).toBe("failed");
+    expect(activity.status).toBe("succeeded"); // recorded clean, never failed
+    expect(activity.detail.outcome).toBe("not_integrated");
   });
 
   it("a fixture run never moves board status", async () => {
