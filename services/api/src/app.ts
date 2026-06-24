@@ -23,6 +23,7 @@ import {
   getAccount,
   getCandidacyContext,
   getCoverLetterVersion,
+  getDailyRun,
   getLiveProfileVersion,
   getOnboardingProgress,
   getOpenProfileVersionProposal,
@@ -214,6 +215,8 @@ const Board = z.string().regex(BOARD_RE);
 const candidacyStatus = z.enum(CANDIDACY_STATUSES as unknown as [string, ...string[]]);
 const activityType = z.enum(ACTIVITY_TYPES as unknown as [string, ...string[]]);
 const activityStatus = z.enum(ACTIVITY_STATUSES as unknown as [string, ...string[]]);
+// A `YYYY-MM-DD` calendar date (UTC) — the daily-run grouping key (ARC-143).
+const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 // Response bodies stay permissive (`z.any()`) so each handler's existing return
 // shape satisfies every declared status without churn — and the heavy event/spread
@@ -441,6 +444,35 @@ const gFeed = mk()
         status: q.status as never,
       });
       return c.json({ user, activities });
+    },
+  )
+  // Daily-run summary (ARC-143): the user's collect activities for one UTC day rolled
+  // up into a single coherent story the Web App dashboard renders — per-board outcomes
+  // plus the run totals, with an overall `status` that moves `in_progress` → `done`.
+  // Defaults to today; `?date=YYYY-MM-DD` fetches a past run. Scoped like /activities
+  // (own rows; the optional `?user=` is owner-resolved by scopedUser).
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/activities/daily",
+      security: SERVICE_SECURITY,
+      request: {
+        query: z.object({
+          user: Uuid.optional(),
+          date: IsoDate.optional(),
+        }),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const q = c.req.valid("query");
+      const resolved = scopedUser(principal, q.user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
+      const run = await getDailyRun(getDb(), user, { date: q.date });
+      return c.json({ user, run });
     },
   )
   // Operator/admin activity view (ARC-44): the same observability feed, but across

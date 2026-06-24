@@ -161,6 +161,154 @@ export async function listAllActivities(
     limit ${limit}`;
 }
 
+// ── daily collect run rollup (ARC-143) ────────────────────────────────────
+/** A collect run's terminal outcome, mirrored from the CLI's `detail.outcome`
+ *  (services/cli/src/commands/collect.ts → CollectOutcome). Duplicated here rather
+ *  than imported because @archer/db is the lower layer and must not depend on the
+ *  CLI; the two are kept in lockstep by the daily-run rollup test. */
+export type CollectRunOutcome = "found" | "nothing_today" | "not_integrated" | "failed";
+
+/** One board's contribution to a daily run, projected for the dashboard. While the
+ *  board's collect Activity is still running its outcome is `collecting`; once it
+ *  reaches a terminal Activity status it carries the real outcome from `detail`. */
+export interface DailyRunBoard {
+  activityId: string;
+  board: string | null;
+  status: Enum<"activity_status">;
+  outcome: CollectRunOutcome | "collecting";
+  scraped: number;
+  postingsNew: number;
+  candidaciesNew: number;
+  error: string | null;
+}
+
+/** A day's collect activities rolled up into the single coherent story the Web App
+ *  dashboard renders (ARC-143) — e.g. "Archer collected today — 6 new jobs across
+ *  PNET + CareerJet; CareerJunction not integrated yet." `jobsNew`/`postingsNew` are
+ *  the run totals, `counts` tallies boards by outcome (so the headline can say "across
+ *  N boards; M not integrated"), and `boards` carries each board's per-outcome detail.
+ *  `status` moves `in_progress` → `done` so the UI can show the run progressing, and
+ *  is `null` on a day with no collect run at all. */
+export interface DailyRunSummary {
+  date: string;
+  status: "in_progress" | "done" | null;
+  jobsNew: number;
+  postingsNew: number;
+  counts: Record<CollectRunOutcome | "collecting", number>;
+  boards: DailyRunBoard[];
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** The collect-activity columns the rollup needs (a subset of `activities`). */
+interface DailyRunActivityRow {
+  id: string;
+  board_slug: string | null;
+  status: Enum<"activity_status">;
+  detail: Json | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+const TERMINAL_ACTIVITY: ReadonlySet<Enum<"activity_status">> = new Set(["succeeded", "failed"]);
+
+/**
+ * Roll a day's collect activities up into one renderable run story (ARC-143). Pure
+ * over the rows so the grouping is testable without a database: each board becomes a
+ * {@link DailyRunBoard} (its outcome taken from `detail.outcome` once terminal, or
+ * `collecting` while it runs / `failed` on error), board outcomes are tallied into
+ * `counts`, and the new-job/posting totals are summed. The overall `status` is
+ * `in_progress` while any board is still running and `done` once every board has
+ * reached a terminal Activity status — the "collecting → done" the dashboard shows —
+ * or `null` when the day had no collect run.
+ */
+export function rollupDailyRun(date: string, rows: DailyRunActivityRow[]): DailyRunSummary {
+  const counts: Record<CollectRunOutcome | "collecting", number> = {
+    found: 0,
+    nothing_today: 0,
+    not_integrated: 0,
+    failed: 0,
+    collecting: 0,
+  };
+  const num = (v: unknown): number => (typeof v === "number" ? v : 0);
+  let jobsNew = 0;
+  let postingsNew = 0;
+  let startedAt: string | null = null;
+  let finishedAt: string | null = null;
+  let allTerminal = true;
+
+  const boards: DailyRunBoard[] = rows.map((r) => {
+    const d = (r.detail ?? {}) as Record<string, unknown>;
+    const terminal = TERMINAL_ACTIVITY.has(r.status);
+    if (!terminal) allTerminal = false;
+    // The outcome the dashboard shows: a genuine failure reads `failed`, a still-running
+    // board reads `collecting`, and a clean terminal run carries its recorded outcome.
+    const outcome: CollectRunOutcome | "collecting" =
+      r.status === "failed"
+        ? "failed"
+        : !terminal
+          ? "collecting"
+          : ((d.outcome as CollectRunOutcome | undefined) ?? "found");
+    counts[outcome]++;
+    jobsNew += num(d.candidaciesNew);
+    postingsNew += num(d.postingsNew);
+    if (r.started_at && (!startedAt || r.started_at < startedAt)) startedAt = r.started_at;
+    if (r.finished_at && (!finishedAt || r.finished_at > finishedAt)) finishedAt = r.finished_at;
+    return {
+      activityId: r.id,
+      board: r.board_slug ?? (d.board as string | undefined) ?? null,
+      status: r.status,
+      outcome,
+      scraped: num(d.scraped),
+      postingsNew: num(d.postingsNew),
+      candidaciesNew: num(d.candidaciesNew),
+      error: r.error,
+    };
+  });
+
+  return {
+    date,
+    status: rows.length === 0 ? null : allTerminal ? "done" : "in_progress",
+    jobsNew,
+    postingsNew,
+    counts,
+    boards,
+    startedAt,
+    // The run only has a finish time once every board is terminal; while it's still
+    // in progress we withhold it so the dashboard renders "collecting", not "done at …".
+    finishedAt: allTerminal ? finishedAt : null,
+  };
+}
+
+/** Resolve the calendar date (UTC, `YYYY-MM-DD`) a daily run is grouped under. */
+function utcToday(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Read a user's collect run for a single UTC calendar day and roll it up into the
+ * dashboard's coherent run story (ARC-143). Defaults to today; pass `date`
+ * (`YYYY-MM-DD`) to fetch a past run. Collect activities are bucketed by the UTC day
+ * of `created_at` and ordered by board slug (the order the cron enqueues them), then
+ * shaped by {@link rollupDailyRun}. RLS scopes to the user's own rows.
+ */
+export async function getDailyRun(
+  db: Db,
+  userId: string,
+  opts: { date?: string } = {},
+): Promise<DailyRunSummary> {
+  const date = opts.date ?? utcToday();
+  const rows = await db<DailyRunActivityRow[]>`
+    select id, board_slug, status, detail, error, started_at, finished_at
+    from activities
+    where user_id = ${userId}
+      and type = 'collect'
+      and (created_at at time zone 'utc')::date = ${date}::date
+    order by board_slug, created_at`;
+  return rollupDailyRun(date, rows);
+}
+
 // ── target titles (the collect search keys) ───────────────────────────────
 export async function listTargetTitles(
   db: Db,

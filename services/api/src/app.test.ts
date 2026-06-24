@@ -126,6 +126,24 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("GET /activities/daily rejects a missing or invalid user", async () => {
+    const missing = await app.request("/activities/daily");
+    expect(missing.status).toBe(400);
+    const bad = await app.request("/activities/daily?user=not-a-uuid");
+    expect(bad.status).toBe(400);
+  });
+
+  it("GET /activities/daily rejects a malformed date", async () => {
+    const res = await app.request(`/activities/daily?user=${VALID_UUID}&date=24-06-2026`);
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies GET /activities/daily with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(`/activities/daily?user=${VALID_UUID}`);
+    expect(res.status).toBe(401);
+  });
+
   it("GET /admin/activities rejects an invalid type filter", async () => {
     const res = await app.request("/admin/activities?type=nope");
     expect(res.status).toBe(400);
