@@ -23,6 +23,7 @@ import {
   getAccount,
   getCandidacyContext,
   getCandidacyDetail,
+  getCompanyDetail,
   getCoverLetterVersion,
   getDailyRun,
   getLiveProfileVersion,
@@ -40,6 +41,7 @@ import {
   listAllActivities,
   listBoards,
   listCandidacies,
+  listCompanies,
   listCoverLetterVersions,
   listNegativeCriteria,
   listProfileVersions,
@@ -104,6 +106,7 @@ import { stubSynthesizer } from "./tts.js";
 const CANDIDACY_STATUSES = Constants.public.Enums.candidacy_status as readonly string[];
 const ACTIVITY_TYPES = Constants.public.Enums.activity_type as readonly string[];
 const ACTIVITY_STATUSES = Constants.public.Enums.activity_status as readonly string[];
+const COMPANY_STATUSES = Constants.public.Enums.company_status as readonly string[];
 // Validate path/query values before they reach the CLI argv or the DB.
 const BOARD_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -217,6 +220,7 @@ const Board = z.string().regex(BOARD_RE);
 const candidacyStatus = z.enum(CANDIDACY_STATUSES as unknown as [string, ...string[]]);
 const activityType = z.enum(ACTIVITY_TYPES as unknown as [string, ...string[]]);
 const activityStatus = z.enum(ACTIVITY_STATUSES as unknown as [string, ...string[]]);
+const companyStatus = z.enum(COMPANY_STATUSES as unknown as [string, ...string[]]);
 // A `YYYY-MM-DD` calendar date (UTC) — the daily-run grouping key (ARC-143).
 const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -524,6 +528,48 @@ const gFeed = mk()
         apply_status: b.apply_status,
       }));
       return c.json({ boards });
+    },
+  )
+  // Companies list (read-endpoint sub-track): the companies Archer has seen, with
+  // the enrichment `status` the dashboard's company kanban groups by, optionally
+  // filtered by `?status=`. Companies are objective shared facts (RLS grants any
+  // authenticated read), so this carries no per-user data; the raw enrichment blob
+  // and recruitment email are left to the per-company detail read below.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/companies",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ status: companyStatus.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const q = c.req.valid("query");
+      const companies = await listCompanies(getDb(), { status: q.status as never });
+      return c.json({ companies });
+    },
+  )
+  // Company detail (read-endpoint sub-track): one company with its full identity,
+  // the enrichment payload the Researcher wrote, and its contacts — the data behind
+  // the M4 company-detail view. Shared objective data (any authenticated read); an
+  // unknown id 404s.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/companies/{id}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ id: Uuid }) },
+      responses: { 200: ok(), 401: ERR[401], 404: ERR[404] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const company = await getCompanyDetail(getDb(), id);
+      if (!company) return c.json({ error: "unknown company" }, 404);
+      return c.json({ company });
     },
   )
   // Operator/admin activity view (ARC-44): the same observability feed, but across
