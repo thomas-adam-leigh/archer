@@ -26,6 +26,12 @@ import {
 	listBoards,
 } from "#/lib/dashboard.ts";
 import {
+	fetchJobDetail,
+	type JobDetail,
+	type JobListItem,
+	listJobs,
+} from "#/lib/jobs.ts";
+import {
 	fetchOnboardingProgress,
 	type OnboardingProgress,
 } from "#/lib/onboarding.ts";
@@ -69,6 +75,9 @@ export const queryKeys = {
 	boards: () => ["dashboard", "boards"] as const,
 	dailyRun: (userId: string) => ["dashboard", "daily-run", userId] as const,
 	activities: (userId: string) => ["dashboard", "activities", userId] as const,
+	jobs: (userId: string) => ["jobs", "feed", userId] as const,
+	jobDetail: (userId: string, id: string) =>
+		["jobs", "detail", userId, id] as const,
 };
 
 /** Read the current session or throw — used inside authenticated mutations. */
@@ -278,6 +287,35 @@ export function useActivities() {
 		queryFn: () => listActivities(requireSession(session)),
 		enabled: Boolean(session),
 		refetchInterval: 30_000,
+	});
+}
+
+/**
+ * Read the curated jobs feed — the `shortlisted` + `alternative_outreach`
+ * candidacies worth the candidate's attention; signed-in only. Polls so new
+ * shortlists land on the jobs route without a manual refresh.
+ */
+export function useJobs() {
+	const session = useSession();
+	return useQuery<JobListItem[]>({
+		queryKey: session
+			? queryKeys.jobs(session.user.id)
+			: ["jobs", "feed", "anonymous"],
+		queryFn: () => listJobs(requireSession(session)),
+		enabled: Boolean(session),
+		refetchInterval: 30_000,
+	});
+}
+
+/** Read one candidacy's full job-detail; signed-in only, disabled without an id. */
+export function useJobDetail(id: string) {
+	const session = useSession();
+	return useQuery<JobDetail>({
+		queryKey: session
+			? queryKeys.jobDetail(session.user.id, id)
+			: ["jobs", "detail", "anonymous", id],
+		queryFn: () => fetchJobDetail(requireSession(session), id),
+		enabled: Boolean(session) && Boolean(id),
 	});
 }
 

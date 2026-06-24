@@ -11,14 +11,17 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
+import { Route as JobsRouteRouteImport } from './routes/jobs/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
+import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as OnboardingReviewRouteImport } from './routes/onboarding/review'
 import { Route as OnboardingResumeRouteImport } from './routes/onboarding/resume'
 import { Route as OnboardingIntroRouteImport } from './routes/onboarding/intro'
 import { Route as OnboardingHomeRouteImport } from './routes/onboarding/home'
 import { Route as OnboardingCriteriaRouteImport } from './routes/onboarding/criteria'
 import { Route as OnboardingConversationRouteImport } from './routes/onboarding/conversation'
+import { Route as JobsCandidacyIdRouteImport } from './routes/jobs/$candidacyId'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -30,6 +33,11 @@ const OnboardingRouteRoute = OnboardingRouteRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JobsRouteRoute = JobsRouteRouteImport.update({
+  id: '/jobs',
+  path: '/jobs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -39,6 +47,11 @@ const OnboardingIndexRoute = OnboardingIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => OnboardingRouteRoute,
+} as any)
+const JobsIndexRoute = JobsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => JobsRouteRoute,
 } as any)
 const OnboardingReviewRoute = OnboardingReviewRouteImport.update({
   id: '/review',
@@ -70,83 +83,105 @@ const OnboardingConversationRoute = OnboardingConversationRouteImport.update({
   path: '/conversation',
   getParentRoute: () => OnboardingRouteRoute,
 } as any)
+const JobsCandidacyIdRoute = JobsCandidacyIdRouteImport.update({
+  id: '/$candidacyId',
+  path: '/$candidacyId',
+  getParentRoute: () => JobsRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/jobs': typeof JobsRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/jobs/$candidacyId': typeof JobsCandidacyIdRoute
   '/onboarding/conversation': typeof OnboardingConversationRoute
   '/onboarding/criteria': typeof OnboardingCriteriaRoute
   '/onboarding/home': typeof OnboardingHomeRoute
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/jobs/': typeof JobsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/jobs/$candidacyId': typeof JobsCandidacyIdRoute
   '/onboarding/conversation': typeof OnboardingConversationRoute
   '/onboarding/criteria': typeof OnboardingCriteriaRoute
   '/onboarding/home': typeof OnboardingHomeRoute
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/jobs': typeof JobsIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/jobs': typeof JobsRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/jobs/$candidacyId': typeof JobsCandidacyIdRoute
   '/onboarding/conversation': typeof OnboardingConversationRoute
   '/onboarding/criteria': typeof OnboardingCriteriaRoute
   '/onboarding/home': typeof OnboardingHomeRoute
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/jobs/': typeof JobsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/jobs'
     | '/onboarding'
     | '/auth'
+    | '/jobs/$candidacyId'
     | '/onboarding/conversation'
     | '/onboarding/criteria'
     | '/onboarding/home'
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/jobs/'
     | '/onboarding/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
+    | '/jobs/$candidacyId'
     | '/onboarding/conversation'
     | '/onboarding/criteria'
     | '/onboarding/home'
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/jobs'
     | '/onboarding'
   id:
     | '__root__'
     | '/'
+    | '/jobs'
     | '/onboarding'
     | '/auth'
+    | '/jobs/$candidacyId'
     | '/onboarding/conversation'
     | '/onboarding/criteria'
     | '/onboarding/home'
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/jobs/'
     | '/onboarding/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  JobsRouteRoute: typeof JobsRouteRouteWithChildren
   OnboardingRouteRoute: typeof OnboardingRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
 }
@@ -167,6 +202,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/jobs': {
+      id: '/jobs'
+      path: '/jobs'
+      fullPath: '/jobs'
+      preLoaderRoute: typeof JobsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -180,6 +222,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/onboarding/'
       preLoaderRoute: typeof OnboardingIndexRouteImport
       parentRoute: typeof OnboardingRouteRoute
+    }
+    '/jobs/': {
+      id: '/jobs/'
+      path: '/'
+      fullPath: '/jobs/'
+      preLoaderRoute: typeof JobsIndexRouteImport
+      parentRoute: typeof JobsRouteRoute
     }
     '/onboarding/review': {
       id: '/onboarding/review'
@@ -223,8 +272,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingConversationRouteImport
       parentRoute: typeof OnboardingRouteRoute
     }
+    '/jobs/$candidacyId': {
+      id: '/jobs/$candidacyId'
+      path: '/$candidacyId'
+      fullPath: '/jobs/$candidacyId'
+      preLoaderRoute: typeof JobsCandidacyIdRouteImport
+      parentRoute: typeof JobsRouteRoute
+    }
   }
 }
+
+interface JobsRouteRouteChildren {
+  JobsCandidacyIdRoute: typeof JobsCandidacyIdRoute
+  JobsIndexRoute: typeof JobsIndexRoute
+}
+
+const JobsRouteRouteChildren: JobsRouteRouteChildren = {
+  JobsCandidacyIdRoute: JobsCandidacyIdRoute,
+  JobsIndexRoute: JobsIndexRoute,
+}
+
+const JobsRouteRouteWithChildren = JobsRouteRoute._addFileChildren(
+  JobsRouteRouteChildren,
+)
 
 interface OnboardingRouteRouteChildren {
   OnboardingConversationRoute: typeof OnboardingConversationRoute
@@ -252,6 +322,7 @@ const OnboardingRouteRouteWithChildren = OnboardingRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  JobsRouteRoute: JobsRouteRouteWithChildren,
   OnboardingRouteRoute: OnboardingRouteRouteWithChildren,
   AuthRoute: AuthRoute,
 }
