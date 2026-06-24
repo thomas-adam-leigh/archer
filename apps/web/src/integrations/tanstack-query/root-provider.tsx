@@ -31,6 +31,11 @@ export function getContext() {
 					if (error instanceof ApiError && error.status < 500) return false;
 					return failureCount < 2;
 				},
+				// NB: no global `staleTime` — the onboarding guards refetch
+				// `/onboarding/progress` on every route mount to detect step
+				// advancement, so they rely on the default "always stale". The
+				// daily-dashboard reads opt into caching individually (see
+				// `DASHBOARD_QUERY_CACHE` in lib/hooks.ts).
 			},
 		},
 	});
