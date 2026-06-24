@@ -1,4 +1,4 @@
-/goal Make continuous, mergeable progress toward making Archer **functional for daily use**, one self-contained Linear issue per run, until every in-scope milestone is Done, then **STOP and idle safely** (see "When you're out of planned work"). The in-scope work, in priority order, is: (1) finish any remaining **Web App Onboarding · M10** mop-up, (2) the **Daily Run Activation** milestone in **Job Collection & Matching**, and (3) the **Web App — Daily Dashboard** project. Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
+/goal Make continuous, mergeable progress **finishing the Web App — Daily Dashboard project** in Linear, one self-contained issue per run — **Urgent bugs first**, then the remaining milestones — until the project is Done, then **STOP and idle safely** (see "When you're out of planned work"). Earlier phases are complete: Web App Onboarding (incl. M10), Daily Run Activation, and Web App — Daily Dashboard M0–M5 are all Done. The live web-scraping CLI (**Board Integration**), the real-enrichment wiring, and The Mission Agent are **human-driven and OFF-LIMITS — never start them.** Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
 
 ---
 
@@ -24,21 +24,24 @@ already wired (`packages/db/.../20260620180000_event_engine.sql`). Most of this 
 by schema unique constraints — verify, don't reinvent.
 
 ### Your in-scope work, in strict priority order
-1. **Web App Onboarding · M10 — finalization mop-up.** Finish any remaining **unblocked** M10
-   issue (profile-persistence gaps). **Skip blocked issues** (e.g. ARC-133, blocked on a human
-   salary-shape decision — do not implement until its blocked notice is removed).
-2. **Daily Run Activation** (milestone in **Job Collection & Matching**). Reconcile the existing
-   pg_cron daily-collect flow with intent: correct local time, **one-title-at-a-time** fan-out,
-   **"not integrated" as a clean visible outcome** (not a failed-activity error), proper failure
-   reporting, dedup verification tests, and a visible daily-run activity trail. This is **backend/
-   DB/CLI** work, fully testable on **fixtures** and the not-integrated path — **no real scraping**.
-3. **Web App — Daily Dashboard** (project). Post-onboarding cockpit in `apps/web`: routes for
-   **jobs / companies / profile / cover letters**, where the jobs view shows **only `shortlisted`
-   + `alternative_outreach`** (never `new`, never `dismissed`). Reuse the **ARC-129** AG-UI
-   review→revise→approve loop for cover letters. Each milestone ships a **Cypress E2E** test.
-   Includes a small **backend read-endpoint** sub-track (`GET /companies`, cover-letter reads,
-   `GET /boards`, candidacy/posting detail) landed just-in-time per consuming milestone. Works on
-   **fixture-produced** candidacies — also no scraping dependency.
+**Earlier phases are DONE** — Web App Onboarding (incl. M10 / ARC-133), the **Daily Run Activation**
+milestone (Job Collection & Matching), and **Web App — Daily Dashboard M0–M5**. Your remaining job is
+to **finish the Web App — Daily Dashboard project** (`apps/web`, TanStack Start), in this order:
+
+1. **Urgent bugs first.** Any `Urgent`-priority issue in the project (e.g. bug reports) is fixed
+   before feature work.
+2. **Finish the remaining Web App — Daily Dashboard milestones** — currently **M6** (seed data is
+   done; **dashboard hardening** + **promote `web-e2e` to a required gate** remain) and **M7**
+   (the apply-safety gate is done; the **Applications view + `GET /applications`** remains). All
+   buildable on **fixtures** — no scraping dependency. Reuse the existing API + read-endpoint
+   sub-track; the jobs view shows only `shortlisted` + `alternative_outreach`; each milestone
+   ships a **Cypress E2E** test.
+
+**OFF-LIMITS / human-driven — never start these, and idle when the dashboard project is Done:** the
+live web-scraping CLI (**Board Integration** — CareerJunction/CareerJet/PNET collect + apply), the
+**real-enrichment** wiring (`claude -p` + LinkedIn MCP, ARC-160), and **The Mission Agent**
+(`vision_later`, ARC-16). These need credentials / a real browser / interactive Chrome-DevTools and
+are done by a human — if they are the only work left, **idle** (per "When you're out of planned work").
 
 ## 1. Orient (every run, in order)
 1. Open **Linear**, team **Archer** (`ARC`). Read the relevant project + all milestone
