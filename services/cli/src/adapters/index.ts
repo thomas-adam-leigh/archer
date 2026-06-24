@@ -1,3 +1,4 @@
+import { careerjet } from "./careerjet.js";
 import { careerjunction } from "./careerjunction.js";
 import type { BoardAdapter } from "./types.js";
 
@@ -5,6 +6,7 @@ import type { BoardAdapter } from "./types.js";
 // (collect_status stays not_integrated until a sprint maps their selectors).
 const ADAPTERS: Record<string, BoardAdapter> = {
   [careerjunction.slug]: careerjunction,
+  [careerjet.slug]: careerjet,
 };
 
 export function getAdapter(slug: string): BoardAdapter | undefined {
