@@ -629,6 +629,79 @@ export async function getCandidacyDetail(db: Db, id: string): Promise<CandidacyD
   };
 }
 
+// ── companies (read surface) ──────────────────────────────────────────────
+/** A company as the dashboard's company list/kanban renders it: identity plus
+ *  the enrichment `status` it groups by. The credential-ish `recruitment_email`
+ *  and the raw `enrichment` blob are deliberately left to the detail read. */
+export interface CompanySummary {
+  id: string;
+  name: string;
+  status: Enum<"company_status">;
+  domain: string | null;
+  website_url: string | null;
+  description: string | null;
+  created_at: string;
+}
+
+/** Companies are objective shared facts (no per-user scoping — RLS grants any
+ *  authenticated read), ordered by name for a stable list, optionally filtered
+ *  by enrichment status for the dashboard's company kanban columns. */
+export async function listCompanies(
+  db: Db,
+  opts: { status?: Enum<"company_status"> } = {},
+): Promise<CompanySummary[]> {
+  return await db<CompanySummary[]>`
+    select id, name, status, domain, website_url, description, created_at
+    from companies
+    where (${opts.status ?? null}::company_status is null
+           or status = ${opts.status ?? null}::company_status)
+    order by name`;
+}
+
+/** A person on a company's team (phone omitted by design; everything but the
+ *  name is nullable). */
+export interface Contact {
+  id: string;
+  full_name: string;
+  email: string | null;
+  linkedin_url: string | null;
+  role_title: string | null;
+  notes: string | null;
+}
+
+/** One company with everything the company-detail view renders: full identity,
+ *  the raw `enrichment` payload the Researcher wrote, and its contacts. */
+export interface CompanyDetail {
+  id: string;
+  name: string;
+  status: Enum<"company_status">;
+  domain: string | null;
+  website_url: string | null;
+  linkedin_url: string | null;
+  description: string | null;
+  recruitment_email: string | null;
+  enrichment: Json | null;
+  created_at: string;
+  updated_at: string;
+  contacts: Contact[];
+}
+
+/** Full detail for one company (company-detail view), or undefined if it does
+ *  not exist. Contacts are read in a second query (most companies have none yet)
+ *  and ordered by name for a stable render. */
+export async function getCompanyDetail(db: Db, id: string): Promise<CompanyDetail | undefined> {
+  const rows = await db<Omit<CompanyDetail, "contacts">[]>`
+    select id, name, status, domain, website_url, linkedin_url, description,
+           recruitment_email, enrichment, created_at, updated_at
+    from companies where id = ${id}`;
+  const company = rows[0];
+  if (!company) return undefined;
+  const contacts = await db<Contact[]>`
+    select id, full_name, email, linkedin_url, role_title, notes
+    from contacts where company_id = ${id} order by full_name`;
+  return { ...company, contacts };
+}
+
 /** One `new` candidacy with the posting context the Matchmaker judges it against
  *  (title/company/location/work mode/description). Returned oldest first so a run
  *  triages in arrival order. Only status `new` rows are returned, which is what
