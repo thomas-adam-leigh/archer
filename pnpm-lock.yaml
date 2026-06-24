@@ -290,6 +290,9 @@ importers:
       hono:
         specifier: ^4.12.26
         version: 4.12.26
+      patchright-core:
+        specifier: 1.61.1
+        version: 1.61.1
     devDependencies:
       '@types/node':
         specifier: ^25.9.3
@@ -5177,6 +5180,11 @@ packages:
 
   partial-json@0.1.7:
     resolution: {integrity: sha512-Njv/59hHaokb/hRUjce3Hdv12wd60MtM9Z5Olmn+nehe0QDAsRtRbJPvJ0Z91TusF0SuZRIvnM+S4l6EIP8leA==}
+
+  patchright-core@1.61.1:
+    resolution: {integrity: sha512-d6Ju67DE6OzqlEX3WPvUX2SLEs6iMY1WERit//mpsrT98VHcztaUo0CBw2Lpxq25VdufVEiWEdcc0HnLwdiq6A==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   path-data-parser@0.1.0:
     resolution: {integrity: sha512-NOnmBpt5Y2RWbuv0LMzsayp3lVylAHLPUTut412ZA3l+C4uw4ZVkQbjShYCQ8TCpUMdPapr4YjUqLYD6v68j+w==}
@@ -11410,6 +11418,8 @@ snapshots:
       entities: 8.0.0
 
   partial-json@0.1.7: {}
+
+  patchright-core@1.61.1: {}
 
   path-data-parser@0.1.0: {}
 

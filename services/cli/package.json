@@ -17,7 +17,8 @@
     "@archer/db": "workspace:*",
     "@archer/llm": "workspace:*",
     "commander": "^15.0.0",
-    "hono": "^4.12.26"
+    "hono": "^4.12.26",
+    "patchright-core": "1.61.1"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
