@@ -68,6 +68,10 @@ import {
 	reviseProposedDraft,
 } from "#/lib/profile.ts";
 import {
+	fetchProfileOverview,
+	type ProfileOverview,
+} from "#/lib/profile-overview.ts";
+import {
 	type IngestStarted,
 	type ResumeFlowDeps,
 	uploadResumeAndStartIngest,
@@ -94,6 +98,7 @@ export const queryKeys = {
 	companies: (userId: string) => ["companies", "overview", userId] as const,
 	companyDetail: (userId: string, id: string) =>
 		["companies", "detail", userId, id] as const,
+	profileOverview: (userId: string) => ["profile", "overview", userId] as const,
 	coverLetters: (userId: string) => ["cover-letters", "list", userId] as const,
 	coverLetterReview: (userId: string, id: string) =>
 		["cover-letters", "review", userId, id] as const,
@@ -365,6 +370,43 @@ export function useCompanyDetail(id: string) {
 			: ["companies", "detail", "anonymous", id],
 		queryFn: () => fetchCompanyDetail(requireSession(session), id),
 		enabled: Boolean(session) && Boolean(id),
+	});
+}
+
+/**
+ * Read the daily-use profile overview (ARC-152) — the live profile, its structured
+ * spine, and the version history, read together; signed-in only. No polling: the
+ * profile changes only on the candidate's own edits, which invalidate this query.
+ */
+export function useProfileOverview() {
+	const session = useSession();
+	return useQuery<ProfileOverview>({
+		queryKey: session
+			? queryKeys.profileOverview(session.user.id)
+			: ["profile", "overview", "anonymous"],
+		queryFn: () => fetchProfileOverview(requireSession(session)),
+		enabled: Boolean(session),
+	});
+}
+
+/**
+ * Persist edited work preferences directly (ARC-152) — the one write the profile
+ * route owns (structured edits stay proposal-gated). Invalidates the overview so
+ * the saved values are reflected immediately.
+ */
+export function useUpdatePreferences() {
+	const session = useSession();
+	const queryClient = useQueryClient();
+	return useMutation<void, Error, WorkPreferences>({
+		mutationFn: (prefs) =>
+			submitWorkPreferences(requireSession(session), prefs),
+		onSuccess: () => {
+			if (session) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.profileOverview(session.user.id),
+				});
+			}
+		},
 	});
 }
 
