@@ -24,26 +24,20 @@ name = "ARCHER_WEB_IMAGE"
 description = "GHCR image deployed for archer-web. Pin to a :sha-<commit> for rollback."
 value = "ghcr.io/thomas-adam-leigh/archer-web:latest"
 
-# --- The deployable API service (pulls the GHCR image; never built here) ---
-[[stack]]
-name = "archer-api"
-description = "Archer Hono API — built + signed by GitHub Actions, deployed by Komodo."
-tags = ["archer"]
-
-[stack.config]
-server = "computer"
-git_provider = "github.com"
-git_account = "thomas-adam-leigh"
-repo = "thomas-adam-leigh/archer"
-branch = "main"
-run_directory = "infra/komodo/compose"
-file_paths = ["archer-api.compose.yaml"]
-auto_pull = true            # pull the fresh image on deploy
-run_build = false           # Komodo does not build — Actions does
-webhook_enabled = true      # allow release.yml to trigger redeploys
-env_file_path = ".env"      # runtime secrets live in Komodo's managed stack env
-send_alerts = true
-poll_for_updates = true
+# --- archer-api is INTENTIONALLY NOT synced here (Komodo-native) ---
+# Its runtime secrets (ARCHER_API_SECRET, SUPABASE_*, DATABASE_URL, *_API_KEY) live
+# ONLY in Komodo's managed stack env — never in git. A ResourceSync reconciles a
+# stack's `environment` to whatever the TOML declares; since we cannot commit those
+# secrets, this file would declare an EMPTY env and the sync would WIPE them, crash-
+# looping the API ("ARCHER_API_SECRET must be set"). That happened 2026-06-24.
+#
+# So archer-api is managed natively in Komodo (like the sibling stacks finance/n8n):
+# the sync leaves it untouched. Its compose is still version-controlled at
+# infra/komodo/compose/archer-api.compose.yaml, and release.yml → redeploy.sh
+# deploys it via the `archer-deploy` procedure below (a partial env update that
+# preserves the secrets). To recreate it: make a Komodo stack `archer-api` on
+# server "computer" from that compose, then set its managed env (the secrets).
+# archer-web (below) carries NO secrets, so it is safe to sync.
 
 # --- The deployable web app (TanStack Start; pulls the GHCR image, never built here) ---
 [[stack]]
@@ -68,7 +62,7 @@ poll_for_updates = true
 # --- The deploy procedure release.yml invokes (deploy → smoke test) ---
 [[procedure]]
 name = "archer-deploy"
-description = "Pull + redeploy archer-api, then smoke-test it. Self-heals on failure via the alerter."
+description = "Pull + redeploy archer-api + archer-web, then smoke-test the API. Self-heals on failure via the alerter."
 tags = ["archer"]
 
 [[procedure.config.stage]]
