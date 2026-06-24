@@ -2603,6 +2603,28 @@ export async function applyCoverLetterVersionProposal(
   return await coverLetterOutcome(db, proposalId, candidacyId, versionId);
 }
 
+/** Self-serve sibling of {@link applyCoverLetterVersionProposal}: lets a CANDIDATE
+ *  decide their OWN submitted cover_letter_version proposal with the service secret
+ *  alone — no owner admin secret (the cover-letter analogue of
+ *  {@link applyVersionProposalAsUser}, ARC-67/ARC-161). The owner Acceptance path
+ *  (`applyCoverLetterVersionProposal` behind the admin secret) stays intact for
+ *  operator actions. Authorization keys on the proposal's own immutable
+ *  `plan.userId`: a proposal that isn't a cover_letter_version owned by `userId` (or
+ *  doesn't exist) returns `{ forbidden: true }` so the caller answers 403 without
+ *  acting on — or leaking — another user's proposal. */
+export async function applyCoverLetterVersionProposalAsUser(
+  db: Db,
+  proposalId: string,
+  userId: string,
+  decision: CoverLetterVersionDecision,
+): Promise<CoverLetterApplyResult | { forbidden: true }> {
+  const owner = await proposalOwner(db, proposalId);
+  if (!owner || owner.kind !== "cover_letter_version" || owner.userId !== userId) {
+    return { forbidden: true };
+  }
+  return await applyCoverLetterVersionProposal(db, proposalId, decision);
+}
+
 /** The current status of a cover-letter version, or null if it no longer exists. */
 async function coverLetterVersionStatus(
   db: Db,
