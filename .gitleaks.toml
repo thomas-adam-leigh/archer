@@ -12,3 +12,9 @@ paths = [
   # Supabase local config uses env(...) placeholders and empty stubs, not real secrets.
   '''packages/db/supabase/config\.toml$''',
 ]
+regexes = [
+  # Supabase PUBLISHABLE keys are public by design — they ship in the web client
+  # bundle and are pinned as a build-arg in release.yml. The SECRET key prefix
+  # (sb_secret_) is deliberately NOT allowlisted, so real secrets still trip.
+  '''sb_publishable_[A-Za-z0-9_-]+''',
+]

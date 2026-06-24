@@ -13,11 +13,16 @@
 # Komodo only DEPLOYS them. There is deliberately no [[build]] here.
 # ============================================================================
 
-# --- Pinned image tag (release.yml can update this to a :sha for traceability) ---
+# --- Pinned image tags (release.yml can update these to a :sha for traceability) ---
 [[variable]]
 name = "ARCHER_API_IMAGE"
 description = "GHCR image deployed for archer-api. Pin to a :sha-<commit> for rollback."
 value = "ghcr.io/thomas-adam-leigh/archer-api:latest"
+
+[[variable]]
+name = "ARCHER_WEB_IMAGE"
+description = "GHCR image deployed for archer-web. Pin to a :sha-<commit> for rollback."
+value = "ghcr.io/thomas-adam-leigh/archer-web:latest"
 
 # --- The deployable API service (pulls the GHCR image; never built here) ---
 [[stack]]
@@ -40,6 +45,26 @@ env_file_path = ".env"      # runtime secrets live in Komodo's managed stack env
 send_alerts = true
 poll_for_updates = true
 
+# --- The deployable web app (TanStack Start; pulls the GHCR image, never built here) ---
+[[stack]]
+name = "archer-web"
+description = "Archer web app — built + signed by GitHub Actions, deployed by Komodo. Public config baked at build; no runtime secrets."
+tags = ["archer"]
+
+[stack.config]
+server = "computer"
+git_provider = "github.com"
+git_account = "thomas-adam-leigh"
+repo = "thomas-adam-leigh/archer"
+branch = "main"
+run_directory = "infra/komodo/compose"
+file_paths = ["archer-web.compose.yaml"]
+auto_pull = true            # pull the fresh image on deploy
+run_build = false           # Komodo does not build — Actions does
+webhook_enabled = true      # allow release.yml to trigger redeploys
+send_alerts = true
+poll_for_updates = true
+
 # --- The deploy procedure release.yml invokes (deploy → smoke test) ---
 [[procedure]]
 name = "archer-deploy"
@@ -47,10 +72,11 @@ description = "Pull + redeploy archer-api, then smoke-test it. Self-heals on fai
 tags = ["archer"]
 
 [[procedure.config.stage]]
-name = "Deploy API"
+name = "Deploy"
 enabled = true
 executions = [
   { execution.type = "DeployStack", execution.params.stack = "archer-api", enabled = true },
+  { execution.type = "DeployStack", execution.params.stack = "archer-web", enabled = true },
 ]
 
 [[procedure.config.stage]]

@@ -9,13 +9,13 @@ version-controlled record of what was added.
 
 ```
 Cloudflare (proxied CNAME, zone archer.careers)
-   │   api.archer.careers · status.archer.careers
+   │   app.archer.careers · api.archer.careers · status.archer.careers
    ▼
 cloudflared tunnel "n8n-computer" (f35f87f2-…)  ── ingress ──▶ http://localhost:80
    ▼
 Caddy (host, :80, admin :2019)  ── reverse_proxy by Host ──▶ 127.0.0.1:<port>
    ▼
-container            archer-api → :9125        uptime-kuma → :9126
+container   archer-web → :9127   archer-api → :9125   uptime-kuma → :9126
 ```
 
 The same `n8n-computer` tunnel serves multiple zones (n8n.computer, customaiagents.co.za,
@@ -25,6 +25,7 @@ archer.careers) — a Cloudflare tunnel can front any hostname on the account.
 
 | Host | Cloudflare DNS | cloudflared ingress | Caddy upstream |
 |---|---|---|---|
+| `app.archer.careers` | CNAME → `f35f87f2-….cfargotunnel.com` (proxied) | `→ http://localhost:80` | `127.0.0.1:9127` |
 | `api.archer.careers` | CNAME → `f35f87f2-….cfargotunnel.com` (proxied) | `→ http://localhost:80` | `127.0.0.1:9125` |
 | `status.archer.careers` | CNAME → `f35f87f2-….cfargotunnel.com` (proxied) | `→ http://localhost:80` | `127.0.0.1:9126` |
 
@@ -43,6 +44,7 @@ configuration via the API; it applies **live, with no restart**:
 ```
 # GET then PUT  /accounts/{account_id}/cfd_tunnel/f35f87f2-…/configurations
 # insert before the trailing { service: "http_status:404" } rule:
+{ "hostname": "app.archer.careers",    "service": "http://localhost:80" }
 { "hostname": "api.archer.careers",    "service": "http://localhost:80" }
 { "hostname": "status.archer.careers", "service": "http://localhost:80" }
 ```
@@ -55,6 +57,10 @@ configuration via the API; it applies **live, with no restart**:
 ## Caddy routes (Caddyfile equivalent of the JSON applied via the admin API)
 
 ```caddyfile
+app.archer.careers {
+    reverse_proxy 127.0.0.1:9127   # archer-web (TanStack Start SSR server)
+}
+
 api.archer.careers {
     reverse_proxy 127.0.0.1:9125
 }

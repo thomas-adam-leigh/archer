@@ -1,6 +1,7 @@
 # Build context is the repo root (monorepo). Keep it lean and force a clean install.
 **/node_modules
 **/dist
+**/.output
 **/.next
 **/coverage
 **/.turbo
