@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Building2, ChevronRight, Radar } from "lucide-react";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import {
 	type JobListItem,
 	type JobStatusBadge,
@@ -20,6 +21,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 /** A muted single-line note used for loading / error states. */
@@ -120,7 +122,11 @@ export function JobsList({
 			{jobs.isPending ? (
 				<Note>Loading your jobs…</Note>
 			) : jobs.isError ? (
-				<Note>Couldn't load your jobs just now.</Note>
+				<InlineErrorState
+					testId="jobs-error"
+					message="Couldn't load your jobs just now."
+					onRetry={() => jobs.refetch?.()}
+				/>
 			) : rows.length === 0 ? (
 				<div
 					data-testid="jobs-empty"

@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Building2, ExternalLink, Mail, User } from "lucide-react";
 import type { ReactNode } from "react";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import {
 	type CompanyDetail,
 	type CompanyStatusBadge,
@@ -20,6 +21,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 const BADGE_TONE: Record<CompanyStatusBadge["tone"], string> = {
@@ -224,13 +226,11 @@ export function CompanyDetailView({
 			{detail.isPending ? (
 				<p className="text-[13px] text-[var(--txt3)]">Loading this company…</p>
 			) : detail.isError || !detail.data ? (
-				<p
-					data-testid="company-detail-error"
-					className="text-[13px] text-[var(--txt3)]"
-				>
-					Couldn't load this company — it may have moved on, or something went
-					wrong reaching Archer.
-				</p>
+				<InlineErrorState
+					testId="company-detail-error"
+					message="Couldn't load this company — it may have moved on, or something went wrong reaching Archer."
+					onRetry={() => detail.refetch?.()}
+				/>
 			) : (
 				<DetailBody company={detail.data} />
 			)}

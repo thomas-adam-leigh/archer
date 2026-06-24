@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import { WorkPreferences } from "#/components/work-preferences.tsx";
 import type { WorkPreferences as Prefs } from "#/lib/preferences.ts";
 import {
@@ -37,6 +38,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 /** The save surface the preferences card drives, narrowed from a mutation. */
@@ -402,7 +404,11 @@ export function ProfileView({
 			{overview.isPending ? (
 				<Note>Loading your profile…</Note>
 			) : overview.isError ? (
-				<Note>Couldn't load your profile just now.</Note>
+				<InlineErrorState
+					testId="profile-error"
+					message="Couldn't load your profile just now."
+					onRetry={() => overview.refetch?.()}
+				/>
 			) : overview.data ? (
 				<div className="flex flex-col gap-4">
 					{overview.data.proposedVersionId ? <ProposedBanner /> : null}
