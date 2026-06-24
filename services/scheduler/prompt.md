@@ -50,6 +50,13 @@ to **finish the Web App — Daily Dashboard project** (`apps/web`, TanStack Star
    don't hammer logins, keep attempts minimal, prefer the Decodo proxy, and **never bypass a
    captcha/2FA/anti-bot challenge**; if you hit one you can't pass cleanly, **record a precise blocker
    on the issue and move on** (don't thrash or risk getting the account flagged).
+   **Local ≠ prod — do not flip a board `integrated` on local success.** The dev Mac is a
+   **South-African residential IP**, so the SA boards work direct there; **production is `n8n@computer`,
+   a Hetzner server in Germany** whose datacenter IP **will** be detected on SA boards **without the
+   Decodo Pretoria proxy**. So `DECODO_PROXY` (pre-validated to exit Pretoria/ZA residential) is
+   **mandatory in prod**, and step 4 — the **proxied collect run on the server** — is the **real
+   integration gate**: flip `collect_status → integrated` only after that succeeds, never on a
+   local-only (direct-IP) run.
 
 **Still OFF-LIMITS — never start these:** Board **apply** (CareerJunction/CareerJet/PNET apply — deferred
 until there are shortlisted jobs with approved cover letters), the **real-enrichment** wiring
