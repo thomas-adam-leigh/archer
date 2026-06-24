@@ -89,7 +89,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, cli]
+        # `web` ships a different Dockerfile path + public VITE_ build-args; api/cli
+        # follow the services/<name>/Dockerfile convention with no build-args.
+        include:
+          - service: api
+            dockerfile: services/api/Dockerfile
+          - service: cli
+            dockerfile: services/cli/Dockerfile
+          - service: web
+            dockerfile: apps/web/Dockerfile
+            # PUBLIC client config (project URL, publishable key, API base URL) —
+            # Vite inlines these into the browser bundle, so they are not secrets.
+            build-args: |
+              VITE_SUPABASE_URL=https://djyuqyiblzcsrqcirqgp.supabase.co
+              VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_cihNfzHSXESWAf0-PWIJYQ_ES5YRaUG
+              VITE_ARCHER_API_URL=https://api.archer.careers
     outputs:
       sha: ${{ github.sha }}
     steps:
@@ -115,7 +129,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: services/${{ matrix.service }}/Dockerfile
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build-args }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -151,9 +166,10 @@ jobs:
           KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET }}
           KOMODO_PROCEDURE: ${{ vars.KOMODO_PROCEDURE }}
           SHA: ${{ github.sha }}
-          # Pin the stack to the exact image this release built + signed, so the
+          # Pin each stack to the exact image this release built + signed, so the
           # redeploy is deterministic instead of re-pulling a stale tag.
           ARCHER_API_IMAGE_REF: ghcr.io/${{ github.repository_owner }}/archer-api:sha-${{ github.sha }}
+          ARCHER_WEB_IMAGE_REF: ghcr.io/${{ github.repository_owner }}/archer-web:sha-${{ github.sha }}
         run: bash infra/komodo/scripts/redeploy.sh
       - name: Record deploy as an Activity (best-effort)
         if: always()
