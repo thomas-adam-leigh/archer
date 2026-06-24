@@ -36,7 +36,14 @@ vi.mock("@archer/db", () => ({
     posting_title: "Engineer",
     company_name: "Acme",
     board_slug: "careerjunction",
+    // Already apply-confirmed (ARC-165) so these robustness cases exercise the apply
+    // orchestration past the confirm gate.
+    apply_confirmed_at: "2026-06-24T00:00:00Z",
   })),
+  // Apply-confirm gate config (ARC-165) — present so a non-confirmed path would still
+  // resolve, though the confirmed candidacy above skips this branch.
+  applyConfirmMode: vi.fn(() => ({ kind: "always" })),
+  isApplyConfirmationRequired: vi.fn(async () => true),
   getActiveCoverLetterVersion: vi.fn(async () => ({ id: "v-1", content: "Dear team" })),
   getOpenExternalApplicationForm: vi.fn(async () => ({
     id: "form-1",

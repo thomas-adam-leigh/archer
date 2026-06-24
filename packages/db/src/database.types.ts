@@ -175,6 +175,7 @@ export type Database = {
       }
       candidacies: {
         Row: {
+          apply_confirmed_at: string | null
           created_at: string
           id: string
           match_score: number | null
@@ -187,6 +188,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          apply_confirmed_at?: string | null
           created_at?: string
           id?: string
           match_score?: number | null
@@ -201,6 +203,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          apply_confirmed_at?: string | null
           created_at?: string
           id?: string
           match_score?: number | null

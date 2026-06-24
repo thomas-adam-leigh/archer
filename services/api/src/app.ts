@@ -12,6 +12,7 @@ import {
   type CoverLetterVersionDecision,
   checkReadiness,
   completeOnboarding,
+  confirmApply,
   createCoverLetterVersion,
   createInterruptProposal,
   createProfileVersion,
@@ -446,6 +447,54 @@ const gFeed = mk()
         return c.json({ error: "forbidden" }, 403);
       }
       return c.json({ candidacy });
+    },
+  )
+  // Apply-confirm (ARC-165): the owner's explicit go-ahead on an approved candidacy —
+  // the gate the one irreversible action (apply) waits behind. Approving a cover
+  // letter does NOT auto-apply; the owner must confirm here, which stamps the
+  // confirmation and then fires the apply via the CLI (same "API runs the CLI" model
+  // as /commands/apply). JWT-scoped own rows: another user's candidacy 403s, a missing
+  // one 404s. Only an `approved` candidacy is awaiting confirmation — anything else
+  // (still drafting, already applying/applied, dismissed) is rejected 409, so you can
+  // neither confirm before the letter is approved nor re-confirm an in-flight apply.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/candidacies/{id}/apply-confirm",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ id: Uuid }) },
+      responses: {
+        200: ok(),
+        401: ERR[401],
+        403: ERR[403],
+        404: ERR[404],
+        409: ERR[409],
+        502: ERR[502],
+      },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const candidacy = await getCandidacy(getDb(), id);
+      if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+      if (!principalOwns(principal, candidacy.user_id)) {
+        return c.json({ error: "forbidden" }, 403);
+      }
+      const confirmed = await confirmApply(getDb(), id);
+      if (!confirmed) {
+        return c.json(
+          { error: `candidacy is not awaiting apply-confirm (status: ${candidacy.status})` },
+          409,
+        );
+      }
+      // Confirmation stamped — fire the apply. The CLI re-reads the now-confirmed
+      // candidacy, so its apply-confirm gate passes and the application proceeds.
+      const res = await runCli(["apply", id, "--json"]);
+      if (res.code !== 0) {
+        return c.json({ error: res.stderr.trim() || "apply failed", code: res.code }, 502);
+      }
+      return c.json(JSON.parse(res.stdout));
     },
   )
   // Activities feed (ARC-43): a user's own runs (collect/match/enrich/cover_letter/

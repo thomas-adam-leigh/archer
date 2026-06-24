@@ -1,4 +1,5 @@
 import {
+  confirmApply,
   createCoverLetterVersion,
   createDb,
   type Db,
@@ -75,6 +76,8 @@ describe.skipIf(!TEST_DB_URL)("ARC-42 — apply-phase status machine, end to end
       });
       await setActiveCoverLetterVersion(sql, candidacyId, v.id);
       await setCandidacyStatus(sql, candidacyId, "approved");
+      // Apply-confirm gate (ARC-165): confirm so the apply-phase machine runs end to end.
+      await confirmApply(sql, candidacyId);
     }
     return candidacyId;
   };
