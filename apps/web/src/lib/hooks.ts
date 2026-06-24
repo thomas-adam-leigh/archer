@@ -13,6 +13,12 @@ import { type AccountStatus, completeOnboarding } from "#/lib/accounts.ts";
 import type { Session } from "#/lib/auth.ts";
 import { signIn, signOut, signUp } from "#/lib/auth.ts";
 import {
+	type CompaniesOverview,
+	type CompanyDetail,
+	fetchCompaniesOverview,
+	fetchCompanyDetail,
+} from "#/lib/companies.ts";
+import {
 	buildProfileFromAnswers,
 	type GuidedOnboardingResult,
 	type ScratchFlowDeps,
@@ -85,6 +91,9 @@ export const queryKeys = {
 	jobs: (userId: string) => ["jobs", "feed", userId] as const,
 	jobDetail: (userId: string, id: string) =>
 		["jobs", "detail", userId, id] as const,
+	companies: (userId: string) => ["companies", "overview", userId] as const,
+	companyDetail: (userId: string, id: string) =>
+		["companies", "detail", userId, id] as const,
 	coverLetters: (userId: string) => ["cover-letters", "list", userId] as const,
 	coverLetterReview: (userId: string, id: string) =>
 		["cover-letters", "review", userId, id] as const,
@@ -325,6 +334,36 @@ export function useJobDetail(id: string) {
 			? queryKeys.jobDetail(session.user.id, id)
 			: ["jobs", "detail", "anonymous", id],
 		queryFn: () => fetchJobDetail(requireSession(session), id),
+		enabled: Boolean(session) && Boolean(id),
+	});
+}
+
+/**
+ * Read the companies overview — the enriched directory + the live "researching"
+ * in-action set; signed-in only. Polls so a company Archer starts researching
+ * (right after a shortlist) appears, and lands in the directory once enriched,
+ * without a manual refresh.
+ */
+export function useCompanies() {
+	const session = useSession();
+	return useQuery<CompaniesOverview>({
+		queryKey: session
+			? queryKeys.companies(session.user.id)
+			: ["companies", "overview", "anonymous"],
+		queryFn: () => fetchCompaniesOverview(requireSession(session)),
+		enabled: Boolean(session),
+		refetchInterval: 30_000,
+	});
+}
+
+/** Read one company's full detail; signed-in only, disabled without an id. */
+export function useCompanyDetail(id: string) {
+	const session = useSession();
+	return useQuery<CompanyDetail>({
+		queryKey: session
+			? queryKeys.companyDetail(session.user.id, id)
+			: ["companies", "detail", "anonymous", id],
+		queryFn: () => fetchCompanyDetail(requireSession(session), id),
 		enabled: Boolean(session) && Boolean(id),
 	});
 }
