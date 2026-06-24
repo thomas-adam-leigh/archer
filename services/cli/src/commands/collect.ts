@@ -24,11 +24,29 @@ import {
 } from "../context.js";
 import { pushHeartbeat } from "../heartbeat.js";
 
-/** A collect run's terminal outcome. `collected` ran the adapter and ingested
- *  whatever it returned; `not_integrated` is the calm, expected state of a board
- *  whose adapter isn't wired up yet — a visible, non-error result (ARC-140), not a
- *  failure. (Genuine failures aren't an outcome here: they throw.) */
-export type CollectOutcome = "collected" | "not_integrated";
+/** A collect run's distinct terminal outcome (ARC-141), recorded as `detail.outcome`
+ *  on the run's Activity so each is queryable and never conflated:
+ *  - `found`          — the board returned postings dated today; ingested (detail carries
+ *                       how many were new after dedup).
+ *  - `nothing_today`  — ran fine, the board had zero postings dated today (a clean run,
+ *                       never a failure).
+ *  - `not_integrated` — the adapter isn't wired up yet: the calm, expected state of a
+ *                       not-yet-built board (ARC-140), a succeeded Activity, not a failure.
+ *  - `failed`         — a genuine login/scrape/proxy error. Not returned as a summary (the
+ *                       run throws); recorded as a `failed` Activity with an actionable
+ *                       `error` and `detail.outcome='failed'`. */
+export type CollectOutcome = "found" | "nothing_today" | "not_integrated" | "failed";
+
+/**
+ * Classify a clean (non-throwing) collect run's terminal outcome from how many
+ * postings the board surfaced for today (ARC-141): zero is `nothing_today` (a clean
+ * run, never a failure), anything else is `found` (the detail summary then reports
+ * how many were new after dedup). A dedup re-run that re-sees only existing postings
+ * is still `found` — the board *did* have postings today, they were just already
+ * known. Pure so the outcome policy is testable without a DB. */
+export function classifyCollectOutcome(scrapedCount: number): "found" | "nothing_today" {
+  return scrapedCount === 0 ? "nothing_today" : "found";
+}
 
 /** Default spacing between per-title scrape attempts (ARC-139), in ms. A daily run
  *  searches one title at a time rather than all at once to spread load and reduce
@@ -183,7 +201,7 @@ export async function runCollect(db: Db, args: RunCollectArgs): Promise<CollectS
     }
     const summary: CollectSummary = {
       board: args.board,
-      outcome: "collected",
+      outcome: classifyCollectOutcome(scraped.length),
       scraped: scraped.length,
       postingsNew,
       candidaciesNew,
@@ -210,7 +228,11 @@ export async function runCollect(db: Db, args: RunCollectArgs): Promise<CollectS
       await succeedActivity(db, activity.id, { ...summary, message: msg });
       return summary;
     }
-    await failActivity(db, activity.id, msg);
+    // A genuine failure (ARC-141): record a `failed` Activity carrying both an
+    // actionable `error` message and a structured `detail.outcome='failed'`, so the
+    // failed terminal state is as queryable as the succeeded ones (found /
+    // nothing_today / not_integrated) and the dashboard can render its reason.
+    await failActivity(db, activity.id, msg, { board: args.board, outcome: "failed" });
     await reconcileBoardStatus(db, args, true);
     throw err;
   }
@@ -338,15 +360,17 @@ export function registerCollect(program: Command): void {
         // the --json summary on stdout or fail the run.
         const hb = await pushHeartbeat({ msg: `collect-ok:${board}` });
         if (hb.pushed && !hb.ok) console.error(`collect: heartbeat push failed: ${hb.error}`);
-        output(ctx, summary, (s) =>
-          s.outcome === "not_integrated"
-            ? console.log(
-                `${board}: not integrated yet — recorded as a clean outcome (nothing collected)`,
-              )
-            : console.log(
-                `${board}: scraped ${s.scraped}, ${s.postingsNew} new postings, ${s.candidaciesNew} new candidacies`,
-              ),
-        );
+        output(ctx, summary, (s) => {
+          if (s.outcome === "not_integrated")
+            return console.log(
+              `${board}: not integrated yet — recorded as a clean outcome (nothing collected)`,
+            );
+          if (s.outcome === "nothing_today")
+            return console.log(`${board}: nothing posted today — clean run, 0 postings`);
+          return console.log(
+            `${board}: found ${s.scraped} — ${s.postingsNew} new postings, ${s.candidaciesNew} new candidacies`,
+          );
+        });
       });
     });
 }

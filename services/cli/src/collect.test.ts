@@ -80,11 +80,13 @@ describe.skipIf(!TEST_DB_URL)(
       expect(r.scraped).toBe(2);
       expect(r.postingsNew).toBe(2);
       expect(r.candidaciesNew).toBe(2);
+      expect(r.outcome).toBe("found"); // the board surfaced postings today (ARC-141)
 
       // One activities row, succeeded, carrying the structured detail summary.
       const [act] = await sql<{ status: string; detail: Record<string, unknown> }[]>`
       select status, detail from public.activities where id = ${r.activityId}`;
       expect(act.status).toBe("succeeded");
+      expect(act.detail.outcome).toBe("found");
       expect(act.detail.postingsNew).toBe(2);
       expect(act.detail.candidaciesNew).toBe(2);
 
@@ -152,6 +154,51 @@ describe.skipIf(!TEST_DB_URL)(
       const [{ n: failedAfter }] = await sql<{ n: number }[]>`
       select count(*)::int as n from public.activities where user_id = ${userId} and status = 'failed'`;
       expect(failedAfter).toBe(failedBefore);
+    });
+
+    it("records a clean nothing_today Activity when the board has no postings today (ARC-141)", async () => {
+      // The board ran fine but returned zero postings dated today — a clean outcome,
+      // never a failure, and distinct from `found`.
+      const summary = await runCollect(sql, {
+        board: "careerjunction",
+        userId,
+        titles: ["Platform Engineer"],
+        fixture: true,
+        gather: async () => [],
+      });
+      expect(summary.outcome).toBe("nothing_today");
+      expect(summary.scraped).toBe(0);
+
+      const [activity] = await sql<{ status: string; detail: { outcome?: string } }[]>`
+      select status, detail from public.activities where id = ${summary.activityId}`;
+      expect(activity.status).toBe("succeeded"); // a clean run, never failed
+      expect(activity.detail.outcome).toBe("nothing_today");
+    });
+
+    it("records a failed Activity with an actionable error + detail.outcome (ARC-141)", async () => {
+      // A genuine error (login/scrape/proxy) throws, leaving a `failed` Activity that
+      // carries both the actionable reason and a queryable `detail.outcome='failed'`.
+      await expect(
+        runCollect(sql, {
+          board: "careerjunction",
+          userId,
+          titles: ["Platform Engineer"],
+          fixture: true,
+          gather: async () => {
+            throw new Error("login timed out");
+          },
+        }),
+      ).rejects.toThrow("login timed out");
+
+      const [activity] = await sql<
+        { status: string; error: string | null; detail: { outcome?: string } }[]
+      >`
+      select status, error, detail from public.activities
+      where user_id = ${userId} and board_slug = 'careerjunction'
+      order by started_at desc limit 1`;
+      expect(activity.status).toBe("failed");
+      expect(activity.error).toBe("login timed out"); // actionable reason
+      expect(activity.detail.outcome).toBe("failed"); // distinct, queryable terminal state
     });
   },
 );
