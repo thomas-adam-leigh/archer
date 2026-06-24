@@ -2300,6 +2300,29 @@ export async function listCoverLetterVersions(
     order by version_no asc`;
 }
 
+/** The version-history summary the dashboard renders (ARC-145): the per-candidacy
+ *  version list projected to the columns a history list needs, without the heavy
+ *  `content`/`details` payload (that is the single-version read below). */
+export interface CoverLetterVersionSummary {
+  id: string;
+  version_no: number;
+  status: Enum<"cover_letter_version_status">;
+  label: string | null;
+  created_at: string;
+}
+
+/** A candidacy's cover-letter versions as history summaries, oldest first. */
+export async function listCoverLetterVersionSummaries(
+  db: Db,
+  candidacyId: string,
+): Promise<CoverLetterVersionSummary[]> {
+  return await db<CoverLetterVersionSummary[]>`
+    select id, version_no, status, label, created_at
+    from cover_letter_versions
+    where candidacy_id = ${candidacyId}
+    order by version_no asc`;
+}
+
 /** A single cover-letter version by id, or undefined if it does not exist. */
 export async function getCoverLetterVersion(
   db: Db,
