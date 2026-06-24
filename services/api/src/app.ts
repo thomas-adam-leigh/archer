@@ -37,6 +37,7 @@ import {
   type Json,
   listActivities,
   listAllActivities,
+  listBoards,
   listCandidacies,
   listCoverLetterVersions,
   listNegativeCriteria,
@@ -473,6 +474,30 @@ const gFeed = mk()
       const user = resolved.user;
       const run = await getDailyRun(getDb(), user, { date: q.date });
       return c.json({ user, run });
+    },
+  )
+  // Boards integration status (ARC-147): the seeded job boards with their per-
+  // capability collect/apply integration status — the data behind the home "boards
+  // I'll sweep" panel (which boards are live for collect vs apply). No per-user data,
+  // so any authenticated principal may read it; the internal columns (credential env
+  // prefix, base URL) are deliberately projected away and never exposed.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/boards",
+      security: SERVICE_SECURITY,
+      responses: { 200: ok(), 401: ERR[401] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const boards = (await listBoards(getDb())).map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        collect_status: b.collect_status,
+        apply_status: b.apply_status,
+      }));
+      return c.json({ boards });
     },
   )
   // Operator/admin activity view (ARC-44): the same observability feed, but across
