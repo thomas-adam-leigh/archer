@@ -5,6 +5,7 @@ import {
   addTargetTitle,
   appendEvents,
   applyCoverLetterVersionProposal,
+  applyCoverLetterVersionProposalAsUser,
   applyVersionProposal,
   applyVersionProposalAsUser,
   Constants,
@@ -1567,6 +1568,56 @@ const gCover = mk()
           ? { action: "approve", edits: body.edits, note: body.note }
           : { action: "reject", note: body.note };
       const result = await applyCoverLetterVersionProposal(getDb(), proposalId, decision);
+      return c.json({ proposalId, ...result });
+    },
+  )
+  // Self-serve sibling of the owner decide route (ARC-161): the CANDIDATE approves
+  // or rejects their OWN cover-letter version proposal with the service secret — no
+  // owner admin secret — scoped to the caller-supplied `user` (which a trusted
+  // gateway maps from `auth.uid()`). The cover-letter analogue of the profile
+  // /onboarding/proposals/:id/decide/self route (ARC-67): authorization keys on the
+  // proposal's own plan.userId, so a caller can only decide their own proposal;
+  // anyone else's (or an unknown one) is a 403. The owner-gated
+  // /cover-letters/proposals/:id/decide stays for operator actions, separate + intact.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/cover-letters/proposals/{proposalId}/decide/self",
+      security: SERVICE_SECURITY,
+      request: {
+        params: z.object({ proposalId: Uuid }),
+        // `action` is validated in the handler so the service gate (401) runs first.
+        body: jsonBody(z.looseObject({ userId: Uuid.optional() }), "Self-decision"),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const { proposalId } = c.req.valid("param");
+      const body = c.req.valid("json") as {
+        userId?: string;
+        action?: string;
+        edits?: { content?: string; label?: string | null; details?: Json };
+        note?: string | null;
+      };
+      const resolved = scopedUser(principal, body.userId ?? c.req.query("user"));
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
+      if (body.action !== "approve" && body.action !== "reject") {
+        return c.json({ error: "'action' must be approve or reject" }, 400);
+      }
+      const decision: CoverLetterVersionDecision =
+        body.action === "approve"
+          ? { action: "approve", edits: body.edits, note: body.note }
+          : { action: "reject", note: body.note };
+      const result = await applyCoverLetterVersionProposalAsUser(
+        getDb(),
+        proposalId,
+        user,
+        decision,
+      );
+      if ("forbidden" in result) return c.json({ error: "forbidden" }, 403);
       return c.json({ proposalId, ...result });
     },
   )

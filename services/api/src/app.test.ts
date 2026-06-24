@@ -259,6 +259,46 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  // ── Candidate self-approval of a cover letter (ARC-161) ────────────────────
+  // The self-serve cover-letter decide route is reachable with the SERVICE secret
+  // (no owner admin secret), unlike the owner-gated /cover-letters/proposals/:id/decide.
+  it("rejects a cover-letter self-decision with an invalid user", async () => {
+    const res = await app.request(
+      `/cover-letters/proposals/${VALID_UUID}/decide/self`,
+      post({ userId: "not-a-uuid", action: "approve" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a cover-letter self-decision with an invalid action", async () => {
+    const res = await app.request(
+      `/cover-letters/proposals/${VALID_UUID}/decide/self`,
+      post({ userId: VALID_UUID, action: "nope" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("fails closed: denies a cover-letter self-decision with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request(
+      `/cover-letters/proposals/${VALID_UUID}/decide/self`,
+      post({ userId: VALID_UUID, action: "approve" }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("cover-letter self-decision clears the gate with the service secret alone (not owner-gated)", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    process.env.ARCHER_API_SECRET = "s3cret";
+    // Past the service gate an invalid action is a 400 — proving no admin secret
+    // is required (the owner decide route 401s the same service-only caller).
+    const res = await app.request(
+      `/cover-letters/proposals/${VALID_UUID}/decide/self`,
+      post({ userId: VALID_UUID, action: "nope" }, { "x-archer-secret": "s3cret" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("rejects a spoken-note request with a missing/invalid threadId or versionId", async () => {
     expect((await app.request("/cover-letters/spoken-note", post({}))).status).toBe(400);
     expect(
