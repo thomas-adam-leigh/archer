@@ -22,6 +22,7 @@ import {
   finishRun,
   getAccount,
   getCandidacyContext,
+  getCandidacyDetail,
   getCoverLetterVersion,
   getDailyRun,
   getLiveProfileVersion,
@@ -411,6 +412,31 @@ const gFeed = mk()
       const user = resolved.user;
       const jobs = await listCandidacies(getDb(), user, { status: q.status as never });
       return c.json({ user, jobs });
+    },
+  )
+  // Job detail (ARC-146): one candidacy with its full posting, the why-matched
+  // (triage decision/reason/match score), a company summary, and any external-form
+  // state — the data behind the M2 job-detail view. JWT-scoped own rows: a missing
+  // candidacy 404s, another user's candidacy 403s (ownership read off the row's
+  // user_id, never the request), so a caller can only read their own.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/candidacies/{id}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ id: Uuid }) },
+      responses: { 200: ok(), 401: ERR[401], 403: ERR[403], 404: ERR[404] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const candidacy = await getCandidacyDetail(getDb(), id);
+      if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+      if (!principalOwns(principal, candidacy.user_id)) {
+        return c.json({ error: "forbidden" }, 403);
+      }
+      return c.json({ candidacy });
     },
   )
   // Activities feed (ARC-43): a user's own runs (collect/match/enrich/cover_letter/
