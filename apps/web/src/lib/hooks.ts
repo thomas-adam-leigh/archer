@@ -15,6 +15,10 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { type AccountStatus, completeOnboarding } from "#/lib/accounts.ts";
+import {
+	type ApplicationListItem,
+	listApplications,
+} from "#/lib/applications.ts";
 import type { Session } from "#/lib/auth.ts";
 import { signIn, signOut, signUp } from "#/lib/auth.ts";
 import {
@@ -122,6 +126,7 @@ export const queryKeys = {
 	coverLetters: (userId: string) => ["cover-letters", "list", userId] as const,
 	coverLetterReview: (userId: string, id: string) =>
 		["cover-letters", "review", userId, id] as const,
+	applications: (userId: string) => ["applications", "list", userId] as const,
 };
 
 /** Read the current session or throw — used inside authenticated mutations. */
@@ -450,6 +455,24 @@ export function useCoverLetters() {
 			? queryKeys.coverLetters(session.user.id)
 			: ["cover-letters", "list", "anonymous"],
 		queryFn: () => listCoverLetterCandidacies(requireSession(session)),
+		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
+		refetchInterval: 30_000,
+	});
+}
+
+/**
+ * The applications list (ARC-166): the owner's candidacies in the apply lifecycle;
+ * signed-in only. Polls so a freshly confirmed apply (or one that just applied /
+ * failed) lands without a refresh.
+ */
+export function useApplications() {
+	const session = useSession();
+	return useQuery<ApplicationListItem[]>({
+		queryKey: session
+			? queryKeys.applications(session.user.id)
+			: ["applications", "list", "anonymous"],
+		queryFn: () => listApplications(requireSession(session)),
 		enabled: Boolean(session),
 		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: 30_000,

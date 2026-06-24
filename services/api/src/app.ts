@@ -43,6 +43,7 @@ import {
   type Json,
   listActivities,
   listAllActivities,
+  listApplications,
   listBoards,
   listCandidacies,
   listCompanies,
@@ -422,6 +423,31 @@ const gFeed = mk()
       const user = resolved.user;
       const jobs = await listCandidacies(getDb(), user, { status: q.status as never });
       return c.json({ user, jobs });
+    },
+  )
+  // Applications (ARC-166): the owner's candidacies in the apply lifecycle —
+  // `approved` (awaiting the owner's apply-confirm while `apply_confirmed_at` is
+  // null, ARC-165), `applying`, `applied`, `external_pending`, `application_failed`
+  // — each with the approved cover-letter version that was sent and the latest
+  // external-redirect form's state. The data behind the M7 Applications view, the
+  // apply-side companion to the curated jobs feed. RLS own-rows (scoped on user_id);
+  // the optional `?user=` is owner-resolved by scopedUser.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/applications",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
+      const applications = await listApplications(getDb(), user);
+      return c.json({ user, applications });
     },
   )
   // Job detail (ARC-146): one candidacy with its full posting, the why-matched

@@ -15,12 +15,14 @@ import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
 import { Route as JobsRouteRouteImport } from './routes/jobs/route'
 import { Route as CoverLettersRouteRouteImport } from './routes/cover-letters/route'
 import { Route as CompaniesRouteRouteImport } from './routes/companies/route'
+import { Route as ApplicationsRouteRouteImport } from './routes/applications/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProfileIndexRouteImport } from './routes/profile/index'
 import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as CoverLettersIndexRouteImport } from './routes/cover-letters/index'
 import { Route as CompaniesIndexRouteImport } from './routes/companies/index'
+import { Route as ApplicationsIndexRouteImport } from './routes/applications/index'
 import { Route as OnboardingReviewRouteImport } from './routes/onboarding/review'
 import { Route as OnboardingResumeRouteImport } from './routes/onboarding/resume'
 import { Route as OnboardingIntroRouteImport } from './routes/onboarding/intro'
@@ -61,6 +63,11 @@ const CompaniesRouteRoute = CompaniesRouteRouteImport.update({
   path: '/companies',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApplicationsRouteRoute = ApplicationsRouteRouteImport.update({
+  id: '/applications',
+  path: '/applications',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -90,6 +97,11 @@ const CompaniesIndexRoute = CompaniesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => CompaniesRouteRoute,
+} as any)
+const ApplicationsIndexRoute = ApplicationsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ApplicationsRouteRoute,
 } as any)
 const OnboardingReviewRoute = OnboardingReviewRouteImport.update({
   id: '/review',
@@ -139,6 +151,7 @@ const CompaniesCompanyIdRoute = CompaniesCompanyIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/applications': typeof ApplicationsRouteRouteWithChildren
   '/companies': typeof CompaniesRouteRouteWithChildren
   '/cover-letters': typeof CoverLettersRouteRouteWithChildren
   '/jobs': typeof JobsRouteRouteWithChildren
@@ -154,6 +167,7 @@ export interface FileRoutesByFullPath {
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/applications/': typeof ApplicationsIndexRoute
   '/companies/': typeof CompaniesIndexRoute
   '/cover-letters/': typeof CoverLettersIndexRoute
   '/jobs/': typeof JobsIndexRoute
@@ -172,6 +186,7 @@ export interface FileRoutesByTo {
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/applications': typeof ApplicationsIndexRoute
   '/companies': typeof CompaniesIndexRoute
   '/cover-letters': typeof CoverLettersIndexRoute
   '/jobs': typeof JobsIndexRoute
@@ -181,6 +196,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/applications': typeof ApplicationsRouteRouteWithChildren
   '/companies': typeof CompaniesRouteRouteWithChildren
   '/cover-letters': typeof CoverLettersRouteRouteWithChildren
   '/jobs': typeof JobsRouteRouteWithChildren
@@ -196,6 +212,7 @@ export interface FileRoutesById {
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/applications/': typeof ApplicationsIndexRoute
   '/companies/': typeof CompaniesIndexRoute
   '/cover-letters/': typeof CoverLettersIndexRoute
   '/jobs/': typeof JobsIndexRoute
@@ -206,6 +223,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/applications'
     | '/companies'
     | '/cover-letters'
     | '/jobs'
@@ -221,6 +239,7 @@ export interface FileRouteTypes {
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/applications/'
     | '/companies/'
     | '/cover-letters/'
     | '/jobs/'
@@ -239,6 +258,7 @@ export interface FileRouteTypes {
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/applications'
     | '/companies'
     | '/cover-letters'
     | '/jobs'
@@ -247,6 +267,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/applications'
     | '/companies'
     | '/cover-letters'
     | '/jobs'
@@ -262,6 +283,7 @@ export interface FileRouteTypes {
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/applications/'
     | '/companies/'
     | '/cover-letters/'
     | '/jobs/'
@@ -271,6 +293,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApplicationsRouteRoute: typeof ApplicationsRouteRouteWithChildren
   CompaniesRouteRoute: typeof CompaniesRouteRouteWithChildren
   CoverLettersRouteRoute: typeof CoverLettersRouteRouteWithChildren
   JobsRouteRoute: typeof JobsRouteRouteWithChildren
@@ -323,6 +346,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CompaniesRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/applications': {
+      id: '/applications'
+      path: '/applications'
+      fullPath: '/applications'
+      preLoaderRoute: typeof ApplicationsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -364,6 +394,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/companies/'
       preLoaderRoute: typeof CompaniesIndexRouteImport
       parentRoute: typeof CompaniesRouteRoute
+    }
+    '/applications/': {
+      id: '/applications/'
+      path: '/'
+      fullPath: '/applications/'
+      preLoaderRoute: typeof ApplicationsIndexRouteImport
+      parentRoute: typeof ApplicationsRouteRoute
     }
     '/onboarding/review': {
       id: '/onboarding/review'
@@ -430,6 +467,17 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ApplicationsRouteRouteChildren {
+  ApplicationsIndexRoute: typeof ApplicationsIndexRoute
+}
+
+const ApplicationsRouteRouteChildren: ApplicationsRouteRouteChildren = {
+  ApplicationsIndexRoute: ApplicationsIndexRoute,
+}
+
+const ApplicationsRouteRouteWithChildren =
+  ApplicationsRouteRoute._addFileChildren(ApplicationsRouteRouteChildren)
 
 interface CompaniesRouteRouteChildren {
   CompaniesCompanyIdRoute: typeof CompaniesCompanyIdRoute
@@ -510,6 +558,7 @@ const ProfileRouteRouteWithChildren = ProfileRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApplicationsRouteRoute: ApplicationsRouteRouteWithChildren,
   CompaniesRouteRoute: CompaniesRouteRouteWithChildren,
   CoverLettersRouteRoute: CoverLettersRouteRouteWithChildren,
   JobsRouteRoute: JobsRouteRouteWithChildren,

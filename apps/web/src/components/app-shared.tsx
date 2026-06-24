@@ -4,6 +4,7 @@ import {
 	Building2Icon,
 	FileTextIcon,
 	LayoutGridIcon,
+	SendHorizonalIcon,
 	UserRoundIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -44,6 +45,11 @@ export const navGroups: SidebarNavGroup[] = [
 				title: "Cover letters",
 				path: "/cover-letters",
 				icon: <FileTextIcon />,
+			},
+			{
+				title: "Applications",
+				path: "/applications",
+				icon: <SendHorizonalIcon />,
 			},
 			{
 				title: "Companies",
