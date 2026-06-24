@@ -2,6 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DashboardShell } from "#/components/dashboard-shell.tsx";
 import { HomeDashboard } from "#/components/home-dashboard.tsx";
 import {
+	useActivities,
+	useBoards,
+	useDailyRun,
 	useNegativeCriteria,
 	useSignOut,
 	useSuggestedTitles,
@@ -34,6 +37,9 @@ function HomeRoute() {
 	const resume = useOnboardingResume("home");
 	const titles = useSuggestedTitles();
 	const criteria = useNegativeCriteria();
+	const boards = useBoards();
+	const dailyRun = useDailyRun();
+	const activities = useActivities();
 	const signOut = useSignOut();
 
 	if (resume.status !== "ready") return <OnboardingGate resume={resume} />;
@@ -47,6 +53,9 @@ function HomeRoute() {
 				nextRun={nextRun(new Date())}
 				titles={titles.data ?? []}
 				ruleOuts={criteria.data ?? []}
+				boards={boards}
+				dailyRun={dailyRun}
+				activities={activities}
 				onStartOver={() => signOut.mutate()}
 				startingOver={signOut.isPending}
 			/>
