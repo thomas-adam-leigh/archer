@@ -437,6 +437,61 @@ export async function getCandidacy(db: Db, id: string): Promise<Candidacy | unde
   return rows[0];
 }
 
+/** A candidacy in the apply lifecycle, projected for the Applications view
+ *  (ARC-166): the apply-related states, plus the approved cover-letter version
+ *  that was sent, when the owner confirmed the apply (null while still awaiting
+ *  apply-confirm — ARC-165), and the latest external-redirect form's state when
+ *  the application went off-board. */
+export interface ApplicationListItem {
+  id: string;
+  status: Enum<"candidacy_status">;
+  posting_title: string;
+  board_slug: string;
+  company_name: string | null;
+  created_at: string;
+  status_changed_at: string;
+  apply_confirmed_at: string | null;
+  cover_letter_version_id: string | null;
+  cover_letter_version_no: number | null;
+  external_form_status: Enum<"external_form_status"> | null;
+  external_form_url: string | null;
+}
+
+/**
+ * The owner's candidacies in the apply lifecycle (ARC-166): `approved` (the cover
+ * letter is done — `apply_confirmed_at` is null while it awaits the owner's
+ * explicit go-ahead, ARC-165), `applying`, `applied`, `external_pending`, and
+ * `application_failed`. Earlier states (still choosing / drafting a letter) and
+ * the curated jobs feed states are deliberately kept off this list. Each row
+ * carries the approved cover-letter version that was sent and the latest
+ * external-redirect form's state — the data the Applications view renders. Most
+ * recently moved first. RLS own-rows-only (scoped on user_id).
+ */
+export async function listApplications(db: Db, userId: string): Promise<ApplicationListItem[]> {
+  return await db<ApplicationListItem[]>`
+    select c.id, c.status, c.created_at, c.status_changed_at, c.apply_confirmed_at,
+           p.title as posting_title, p.board_slug, co.name as company_name,
+           v.id as cover_letter_version_id, v.version_no as cover_letter_version_no,
+           f.status as external_form_status, f.url as external_form_url
+    from candidacies c
+    join postings p on p.id = c.posting_id
+    left join companies co on co.id = p.company_id
+    left join lateral (
+      select id, version_no from cover_letter_versions
+      where candidacy_id = c.id and status = 'approved'
+      limit 1
+    ) v on true
+    left join lateral (
+      select status, url from external_application_forms
+      where candidacy_id = c.id
+      order by created_at desc
+      limit 1
+    ) f on true
+    where c.user_id = ${userId}
+      and c.status in ('approved', 'applying', 'applied', 'external_pending', 'application_failed')
+    order by c.status_changed_at desc`;
+}
+
 export async function setCandidacyStatus(
   db: Db,
   id: string,
