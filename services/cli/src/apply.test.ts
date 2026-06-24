@@ -1,4 +1,5 @@
 import {
+  confirmApply,
   createCoverLetterVersion,
   createDb,
   type Db,
@@ -65,10 +66,16 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
 
   /** Seed a candidacy in `status` (default approved), with an active approved
    *  cover-letter version unless `withLetter` is false. Each `key` gets its own
-   *  posting/company so a status-mutating apply never collides with another test. */
+   *  posting/company so a status-mutating apply never collides with another test.
+   *  An `approved` candidacy is apply-confirmed by default (ARC-165) so it passes the
+   *  apply-confirm gate — pass `confirmed: false` to leave it awaiting confirmation. */
   const seed = async (
     key: string,
-    opts: { status?: Enums<"candidacy_status">; withLetter?: boolean } = {},
+    opts: {
+      status?: Enums<"candidacy_status">;
+      withLetter?: boolean;
+      confirmed?: boolean;
+    } = {},
   ): Promise<string> => {
     const companyId = await upsertCompany(sql, `${COMPANY_PREFIX} ${key}`);
     const { id: postingId } = await upsertPosting(sql, {
@@ -93,7 +100,13 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
       });
       await setActiveCoverLetterVersion(sql, candidacyId, v.id);
     }
-    await setCandidacyStatus(sql, candidacyId, opts.status ?? "approved");
+    const status = opts.status ?? "approved";
+    await setCandidacyStatus(sql, candidacyId, status);
+    // Apply-confirm gate (ARC-165): an approved candidacy is confirmed by default so
+    // the existing approve-to-apply cases pass the gate; opt out with confirmed:false.
+    if (status === "approved" && opts.confirmed !== false) {
+      await confirmApply(sql, candidacyId);
+    }
     return candidacyId;
   };
 
@@ -262,6 +275,46 @@ describe.skipIf(!TEST_DB_URL)("ARC-40 — approve-to-apply orchestration (stubbe
     const [{ n }] = await sql<{ n: number }[]>`
       select count(*)::int as n from public.activities where candidacy_id = ${id} and type = 'apply'`;
     expect(n).toBe(0);
+  });
+
+  // ARC-165 — apply-safety: the irreversible apply waits for an explicit owner
+  // confirmation. With the default `always` gate, an approved-but-unconfirmed
+  // candidacy must not apply; confirming is what fires it.
+  it("refuses an approved but unconfirmed candidacy and opens no Activity (apply-confirm gate)", async () => {
+    const id = await seed("unconfirmed", { confirmed: false });
+    await expect(runApply(sql, { candidacyId: id })).rejects.toThrow(/requires owner confirmation/);
+
+    // Fail-closed precondition: status untouched and no Activity opened — apply never
+    // fired on an unconfirmed candidacy.
+    expect((await getCandidacy(sql, id))?.status).toBe("approved");
+    const [{ n }] = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.activities where candidacy_id = ${id} and type = 'apply'`;
+    expect(n).toBe(0);
+  });
+
+  it("applies once the owner confirms — confirming fires the apply", async () => {
+    const id = await seed("confirm-fires", { confirmed: false });
+    // Unconfirmed: refused.
+    await expect(runApply(sql, { candidacyId: id })).rejects.toThrow(/requires owner confirmation/);
+    // The owner confirms, then apply proceeds to a real submission.
+    await confirmApply(sql, id);
+    const summary = await runApply(sql, { candidacyId: id });
+    expect(summary.outcome).toBe("submitted");
+    expect(summary.status).toBe("applied");
+    expect((await getCandidacy(sql, id))?.status).toBe("applied");
+  });
+
+  it("first-N mode lets an unconfirmed apply through once the user is past the window", async () => {
+    // A fresh user with N applications already fired is past their first-N window, so
+    // confirmation is no longer required — the gate honours the configured mode.
+    const id = await seed("first-n", { confirmed: false });
+    const summary = await runApply(sql, {
+      candidacyId: id,
+      // n=0 means "no applications need confirming" — the user is immediately past the
+      // window (count 0 ≥ 0), so this approved-unconfirmed candidacy applies.
+      confirmMode: { kind: "first-n", n: 0 },
+    });
+    expect(summary.status).toBe("applied");
   });
 
   it("throws for an unknown candidacy", async () => {

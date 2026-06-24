@@ -1,10 +1,13 @@
 import {
+  type ApplyConfirmMode,
+  applyConfirmMode,
   createNotification,
   type Db,
   type Enums,
   failActivity,
   getActiveCoverLetterVersion,
   getCandidacyContext,
+  isApplyConfirmationRequired,
   openExternalApplicationForm,
   startActivity,
   succeedActivity,
@@ -90,7 +93,14 @@ export interface ApplySummary {
  */
 export async function runApply(
   db: Db,
-  args: { candidacyId: string; userId?: string | null; apply?: Applier },
+  args: {
+    candidacyId: string;
+    userId?: string | null;
+    apply?: Applier;
+    /** Apply-confirm gate mode (ARC-165). Defaults to the ARCHER_APPLY_CONFIRM_MODE
+     *  env config; injectable so tests can exercise always vs first-N deterministically. */
+    confirmMode?: ApplyConfirmMode;
+  },
 ): Promise<ApplySummary> {
   const apply = args.apply ?? stubApplier;
   const candidacy = await getCandidacyContext(db, args.candidacyId);
@@ -114,6 +124,20 @@ export async function runApply(
     throw new CliError(
       `apply is gated to an approved cover letter: ${candidacy.posting_title} is ${candidacy.status}`,
     );
+  }
+
+  // Apply-confirm gate (ARC-165): the one irreversible action waits for an explicit
+  // owner confirmation. Refused fail-closed (before any status change or Activity)
+  // when confirmation is required (per ARCHER_APPLY_CONFIRM_MODE) and the owner has
+  // not yet confirmed this candidacy. Once `apply_confirmed_at` is stamped — or the
+  // user is past their first-N window — the apply proceeds.
+  if (!candidacy.apply_confirmed_at) {
+    const mode = args.confirmMode ?? applyConfirmMode();
+    if (await isApplyConfirmationRequired(db, candidacy.user_id, mode)) {
+      throw new CliError(
+        `apply requires owner confirmation: ${candidacy.posting_title} is approved but not yet confirmed`,
+      );
+    }
   }
 
   // The approved letter the adapter submits. Fail closed if there isn't one — an

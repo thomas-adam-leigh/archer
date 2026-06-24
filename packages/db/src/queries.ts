@@ -476,6 +476,24 @@ export async function transitionCandidacy(
   return await setCandidacyStatus(db, id, to, opts);
 }
 
+/**
+ * ARC-165 — record the owner's explicit apply-confirmation on an `approved`
+ * candidacy, the gate the irreversible apply step waits behind. Stamps
+ * `apply_confirmed_at` once (idempotent: re-confirming keeps the first decision).
+ * Only an `approved` candidacy can be confirmed — a row in any other status is left
+ * untouched and `undefined` is returned, so the caller can reject the request (you
+ * cannot confirm before the cover letter is approved, nor re-confirm one already
+ * applying/applied). Returns the updated candidacy, or undefined when nothing matched.
+ */
+export async function confirmApply(db: Db, id: string): Promise<Candidacy | undefined> {
+  const rows = await db<Candidacy[]>`
+    update candidacies
+      set apply_confirmed_at = coalesce(apply_confirmed_at, now())
+    where id = ${id} and status = 'approved'
+    returning *`;
+  return rows[0];
+}
+
 /** A candidacy joined with the role/company context the Scribe drafts a cover
  *  letter against, plus the owner + status the cover-letter routes gate on. */
 export interface CandidacyContext {
@@ -486,6 +504,10 @@ export interface CandidacyContext {
   company_name: string | null;
   /** The board the posting came from — the apply adapter dispatches per board. */
   board_slug: string;
+  /** ARC-165: when the owner confirmed this approved candidacy may apply, or null
+   *  when still awaiting apply-confirm. The apply orchestration's confirm gate reads
+   *  this; apply is refused while it is null (per ARCHER_APPLY_CONFIRM_MODE). */
+  apply_confirmed_at: string | null;
 }
 
 /** One candidacy with its posting title + company name + board — the context the
@@ -498,7 +520,7 @@ export async function getCandidacyContext(
 ): Promise<CandidacyContext | undefined> {
   const rows = await db<CandidacyContext[]>`
     select c.id, c.user_id, c.status, p.title as posting_title,
-           p.board_slug, co.name as company_name
+           p.board_slug, co.name as company_name, c.apply_confirmed_at
     from candidacies c
     join postings p on p.id = c.posting_id
     left join companies co on co.id = p.company_id
