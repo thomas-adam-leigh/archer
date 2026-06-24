@@ -8,7 +8,12 @@
  * hook — they never thread tokens around. Auth mutations keep the store in sync.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { type AccountStatus, completeOnboarding } from "#/lib/accounts.ts";
 import type { Session } from "#/lib/auth.ts";
 import { signIn, signOut, signUp } from "#/lib/auth.ts";
@@ -78,6 +83,21 @@ import {
 } from "#/lib/resume.ts";
 import { clearSession, setSession, useSession } from "#/lib/session.ts";
 import { type AudioClip, transcribe } from "#/lib/voice.ts";
+
+/**
+ * Cache policy for the daily-dashboard reads (ARC-167). Treat fetched data as
+ * fresh for 30s so flipping between cockpit routes reuses the cache instead of
+ * refetching behind a full-screen pending state on every visit, and keep the
+ * previous result on a query-key change (e.g. job/company detail `$id → $id`) so
+ * the view never blanks mid-navigation. Mutations still `invalidateQueries` (which
+ * ignores `staleTime`) to refetch when data actually changes, and the live views
+ * keep their own `refetchInterval` polling. Onboarding reads deliberately opt out —
+ * their guards refetch progress on every route mount to detect step advancement.
+ */
+const DASHBOARD_QUERY_CACHE = {
+	staleTime: 30_000,
+	placeholderData: keepPreviousData,
+} as const;
 
 /** Stable query keys for the onboarding reads (scoped by user id). */
 export const queryKeys = {
@@ -279,6 +299,7 @@ export function useBoards() {
 		queryKey: queryKeys.boards(),
 		queryFn: () => listBoards(requireSession(session)),
 		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
 	});
 }
 
@@ -294,6 +315,7 @@ export function useDailyRun() {
 			: ["dashboard", "daily-run", "anonymous"],
 		queryFn: () => fetchDailyRun(requireSession(session)),
 		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: 30_000,
 	});
 }
@@ -310,6 +332,7 @@ export function useActivities() {
 			: ["dashboard", "activities", "anonymous"],
 		queryFn: () => listActivities(requireSession(session)),
 		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: 30_000,
 	});
 }
@@ -327,6 +350,7 @@ export function useJobs() {
 			: ["jobs", "feed", "anonymous"],
 		queryFn: () => listJobs(requireSession(session)),
 		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: 30_000,
 	});
 }
@@ -340,6 +364,7 @@ export function useJobDetail(id: string) {
 			: ["jobs", "detail", "anonymous", id],
 		queryFn: () => fetchJobDetail(requireSession(session), id),
 		enabled: Boolean(session) && Boolean(id),
+		...DASHBOARD_QUERY_CACHE,
 	});
 }
 
@@ -357,6 +382,7 @@ export function useCompanies() {
 			: ["companies", "overview", "anonymous"],
 		queryFn: () => fetchCompaniesOverview(requireSession(session)),
 		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: 30_000,
 	});
 }
@@ -370,6 +396,7 @@ export function useCompanyDetail(id: string) {
 			: ["companies", "detail", "anonymous", id],
 		queryFn: () => fetchCompanyDetail(requireSession(session), id),
 		enabled: Boolean(session) && Boolean(id),
+		...DASHBOARD_QUERY_CACHE,
 	});
 }
 
@@ -386,6 +413,7 @@ export function useProfileOverview() {
 			: ["profile", "overview", "anonymous"],
 		queryFn: () => fetchProfileOverview(requireSession(session)),
 		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
 	});
 }
 
@@ -423,6 +451,7 @@ export function useCoverLetters() {
 			: ["cover-letters", "list", "anonymous"],
 		queryFn: () => listCoverLetterCandidacies(requireSession(session)),
 		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: 30_000,
 	});
 }
@@ -443,6 +472,7 @@ export function useCoverLetterReview(id: string, opts?: { poll?: boolean }) {
 		queryFn: () => fetchCoverLetterReview(requireSession(session), id),
 		enabled: Boolean(session) && Boolean(id),
 		retry: false,
+		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: opts?.poll ? 2000 : false,
 	});
 }
