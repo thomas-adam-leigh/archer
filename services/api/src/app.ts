@@ -66,6 +66,7 @@ import {
   succeedActivity,
   transitionCandidacy,
   upsertProfile,
+  userOwnsCompany,
   type VersionDecision,
   writeProfileSpine,
 } from "@archer/db";
@@ -532,38 +533,44 @@ const gFeed = mk()
       return c.json({ boards });
     },
   )
-  // Companies list (read-endpoint sub-track): the companies Archer has seen, with
-  // the enrichment `status` the dashboard's company kanban groups by, optionally
-  // filtered by `?status=`. Companies are objective shared facts (RLS grants any
-  // authenticated read), so this carries no per-user data; the raw enrichment blob
-  // and recruitment email are left to the per-company detail read below.
+  // Companies list (ARC-144): the user's relevant companies — those attached to one
+  // of their candidacies — with the enrichment `status` the dashboard's company
+  // kanban groups by, optionally filtered by `?status=`. RLS own-rows-only (scoped
+  // via the candidacy→posting→company join); the raw enrichment blob and recruitment
+  // email are left to the per-company detail read below.
   .openapi(
     createRoute({
       method: "get",
       path: "/companies",
       security: SERVICE_SECURITY,
-      request: { query: z.object({ status: companyStatus.optional() }) },
-      responses: { 200: ok(), 400: ERR[400], 401: ERR[401] },
+      request: {
+        query: z.object({ user: Uuid.optional(), status: companyStatus.optional() }),
+      },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
     }),
     async (c) => {
       const principal = await authenticate(c);
       if (!principal) return c.json({ error: "unauthorized" }, 401);
       const q = c.req.valid("query");
-      const companies = await listCompanies(getDb(), { status: q.status as never });
-      return c.json({ companies });
+      const resolved = scopedUser(principal, q.user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const user = resolved.user;
+      const companies = await listCompanies(getDb(), user, { status: q.status as never });
+      return c.json({ user, companies });
     },
   )
-  // Company detail (read-endpoint sub-track): one company with its full identity,
-  // the enrichment payload the Researcher wrote, and its contacts — the data behind
-  // the M4 company-detail view. Shared objective data (any authenticated read); an
-  // unknown id 404s.
+  // Company detail (ARC-144): one company with its full identity, the enrichment
+  // payload the Researcher wrote, and its contacts — the data behind the M4
+  // company-detail view. JWT-scoped own rows: a company is the user's only if they
+  // hold a candidacy there, so an unknown id 404s and a company they have no
+  // candidacy with 403s (the service caller may read any).
   .openapi(
     createRoute({
       method: "get",
       path: "/companies/{id}",
       security: SERVICE_SECURITY,
       request: { params: z.object({ id: Uuid }) },
-      responses: { 200: ok(), 401: ERR[401], 404: ERR[404] },
+      responses: { 200: ok(), 401: ERR[401], 403: ERR[403], 404: ERR[404] },
     }),
     async (c) => {
       const principal = await authenticate(c);
@@ -571,6 +578,9 @@ const gFeed = mk()
       const { id } = c.req.valid("param");
       const company = await getCompanyDetail(getDb(), id);
       if (!company) return c.json({ error: "unknown company" }, 404);
+      if (principal.kind === "user" && !(await userOwnsCompany(getDb(), principal.userId, id))) {
+        return c.json({ error: "forbidden" }, 403);
+      }
       return c.json({ company });
     },
   )

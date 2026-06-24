@@ -643,19 +643,39 @@ export interface CompanySummary {
   created_at: string;
 }
 
-/** Companies are objective shared facts (no per-user scoping — RLS grants any
- *  authenticated read), ordered by name for a stable list, optionally filtered
- *  by enrichment status for the dashboard's company kanban columns. */
+/** The user's relevant companies — those attached to one of their candidacies
+ *  (a company is "theirs" if a candidacy of theirs points at a posting there).
+ *  Ordered by name for a stable list, optionally filtered by enrichment status
+ *  for the dashboard's company kanban columns. Own-rows-only: never surfaces a
+ *  company the user has no candidacy with. */
 export async function listCompanies(
   db: Db,
+  userId: string,
   opts: { status?: Enum<"company_status"> } = {},
 ): Promise<CompanySummary[]> {
   return await db<CompanySummary[]>`
-    select id, name, status, domain, website_url, description, created_at
-    from companies
-    where (${opts.status ?? null}::company_status is null
-           or status = ${opts.status ?? null}::company_status)
-    order by name`;
+    select distinct co.id, co.name, co.status, co.domain, co.website_url,
+                    co.description, co.created_at
+    from companies co
+    join postings p on p.company_id = co.id
+    join candidacies c on c.posting_id = p.id
+    where c.user_id = ${userId}
+      and (${opts.status ?? null}::company_status is null
+           or co.status = ${opts.status ?? null}::company_status)
+    order by co.name`;
+}
+
+/** Whether `userId` has any candidacy at `companyId` — the ownership test behind
+ *  the per-user company detail read (a company is "theirs" if attached to one of
+ *  their candidacies). */
+export async function userOwnsCompany(db: Db, userId: string, companyId: string): Promise<boolean> {
+  const rows = await db<{ one: number }[]>`
+    select 1 as one
+    from candidacies c
+    join postings p on p.id = c.posting_id
+    where c.user_id = ${userId} and p.company_id = ${companyId}
+    limit 1`;
+  return rows.length > 0;
 }
 
 /** A person on a company's team (phone omitted by design; everything but the
