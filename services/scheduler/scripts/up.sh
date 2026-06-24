@@ -29,6 +29,10 @@ fi
 
 cd "$WORKTREE"
 
+# 1b. Make the agent's secrets available in the worktree (untracked / gitignored) so the
+#     Board-Integration collect CLI can read board creds + DECODO_PROXY. Refreshed each start.
+cp "$ROOT/.env" "$WORKTREE/.env" 2>/dev/null && echo "→ copied .env into worktree" || true
+
 # 2. Build (installs deps + compiles better-sqlite3 + tsc) — fast on later runs.
 pnpm install --frozen-lockfile >/dev/null
 pnpm --filter @archer/scheduler build >/dev/null
