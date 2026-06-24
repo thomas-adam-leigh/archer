@@ -24,9 +24,16 @@ import {
 } from "../context.js";
 import { pushHeartbeat } from "../heartbeat.js";
 
+/** A collect run's terminal outcome. `collected` ran the adapter and ingested
+ *  whatever it returned; `not_integrated` is the calm, expected state of a board
+ *  whose adapter isn't wired up yet — a visible, non-error result (ARC-140), not a
+ *  failure. (Genuine failures aren't an outcome here: they throw.) */
+export type CollectOutcome = "collected" | "not_integrated";
+
 /** The structured detail a collect run records on its Activity and prints. */
 export interface CollectSummary {
   board: string;
+  outcome: CollectOutcome;
   scraped: number;
   postingsNew: number;
   candidaciesNew: number;
@@ -63,12 +70,26 @@ export function nextCollectStatus(
 }
 
 /**
+ * Classify what a collect run's error MEANS (ARC-140). A `NotIntegratedError` is
+ * not a failure — it's a board whose adapter simply isn't wired up yet, an
+ * expected, calm state we record as a clean `not_integrated` outcome (a succeeded
+ * Activity, board status untouched). Any other error is a genuine `failed` run
+ * (login/scrape/proxy), which records a failed Activity and can break an
+ * integrated board. Pure so the outcome policy is testable without a DB.
+ */
+export function classifyCollectError(err: unknown): "not_integrated" | "failed" {
+  return err instanceof NotIntegratedError ? "not_integrated" : "failed";
+}
+
+/**
  * Run one collect as the universal Activity primitive: open an `activities` row,
  * gather postings (the only place the live-browser/fixture boundary lives), upsert
  * companies + postings idempotently, fan a candidacy out per user-per-posting, and
- * record the run as succeeded/failed. A thrown `gather` (e.g. `NotIntegratedError`)
- * still leaves a `failed` Activity behind — the signal the self-heal Mechanic reacts
- * to — before the error propagates. Exercised end-to-end via `--fixture`, no browser.
+ * record the run's outcome. A genuine `gather` failure leaves a `failed` Activity
+ * behind — the signal the self-heal Mechanic reacts to — before the error
+ * propagates. A `NotIntegratedError` is NOT a failure (ARC-140): it records a
+ * succeeded Activity tagged `not_integrated` and returns instead of throwing, so a
+ * not-wired-up board is a clean, visible outcome. Exercised via `--fixture`, no browser.
  *
  * A LIVE run (not `--fixture`) also reconciles the board's `collect_status` to its
  * outcome (see `nextCollectStatus`), so the board lifecycle reflects reality without
@@ -105,18 +126,35 @@ export async function runCollect(db: Db, args: RunCollectArgs): Promise<CollectS
       const candidacy = await insertCandidacy(db, args.userId, posting.id);
       if (candidacy) candidaciesNew++;
     }
-    const summary = {
+    const summary: CollectSummary = {
       board: args.board,
+      outcome: "collected",
       scraped: scraped.length,
       postingsNew,
       candidaciesNew,
       activityId: activity.id,
     };
-    await succeedActivity(db, activity.id, summary);
+    await succeedActivity(db, activity.id, { ...summary });
     await reconcileBoardStatus(db, args, false);
     return summary;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // A not-integrated board is a calm, expected state — never a failure (ARC-140).
+    // Record a SUCCEEDED Activity tagged `not_integrated` so the run is visible as a
+    // clean outcome (not a `failed` row that breaks the board or wakes the Mechanic),
+    // leave collect_status untouched, and return a summary rather than throwing.
+    if (classifyCollectError(err) === "not_integrated") {
+      const summary: CollectSummary = {
+        board: args.board,
+        outcome: "not_integrated",
+        scraped: 0,
+        postingsNew: 0,
+        candidaciesNew: 0,
+        activityId: activity.id,
+      };
+      await succeedActivity(db, activity.id, { ...summary, message: msg });
+      return summary;
+    }
     await failActivity(db, activity.id, msg);
     await reconcileBoardStatus(db, args, true);
     throw err;
@@ -174,7 +212,10 @@ export function registerCollect(program: Command): void {
           }
           const adapter = getAdapter(board);
           if (!adapter) {
-            throw new CliError(
+            // No adapter yet is the same calm "not integrated" state as a stub
+            // adapter that throws NotIntegratedError — surface one unified signal
+            // so runCollect records it as a clean outcome, not a failure (ARC-140).
+            throw new NotIntegratedError(
               `board '${board}' has no collect adapter yet (collect_status=${boardRow.collect_status})`,
             );
           }
@@ -207,34 +248,35 @@ export function registerCollect(program: Command): void {
           return;
         }
 
-        // Write path: wrap collection in an Activity so failures are recorded
-        // (a failed collect is what the self-heal Mechanic reacts to).
-        try {
-          const summary = await runCollect(ctx.db, {
-            board,
-            userId,
-            titles,
-            fixture: Boolean(opts.fixture),
-            gather,
-          });
-          // Dead-man's-switch (ARC-12): a successful collect pings the Uptime Kuma
-          // Push monitor so its ABSENCE — not its failure — is what alerts. The
-          // helper is best-effort (no-op unless UPTIME_KUMA_PUSH_URL is set, never
-          // throws); a configured-but-failed push is a stderr warning only, so it
-          // can't pollute the --json summary on stdout or fail the run.
-          const hb = await pushHeartbeat({ msg: `collect-ok:${board}` });
-          if (hb.pushed && !hb.ok) console.error(`collect: heartbeat push failed: ${hb.error}`);
-          output(ctx, summary, (s) =>
-            console.log(
-              `${board}: scraped ${s.scraped}, ${s.postingsNew} new postings, ${s.candidaciesNew} new candidacies`,
-            ),
-          );
-        } catch (err) {
-          // runCollect already recorded the failed Activity; surface NotIntegratedError
-          // as a user-facing CliError (exit 2), anything else as an unexpected crash.
-          if (err instanceof NotIntegratedError) throw new CliError(err.message);
-          throw err;
-        }
+        // Write path: wrap collection in an Activity so the run is recorded. A
+        // genuine failure throws (after runCollect records the failed Activity the
+        // Mechanic reacts to); a not-integrated board returns a clean summary
+        // instead of throwing (ARC-140), so it is reported, not surfaced as an error.
+        const summary = await runCollect(ctx.db, {
+          board,
+          userId,
+          titles,
+          fixture: Boolean(opts.fixture),
+          gather,
+        });
+        // Dead-man's-switch (ARC-12): a completed collect pings the Uptime Kuma
+        // Push monitor so its ABSENCE — not its failure — is what alerts. A
+        // not-integrated run still completed cleanly, so it pings too (otherwise the
+        // monitor would false-alarm while every board is still stubbed). The helper
+        // is best-effort (no-op unless UPTIME_KUMA_PUSH_URL is set, never throws); a
+        // configured-but-failed push is a stderr warning only, so it can't pollute
+        // the --json summary on stdout or fail the run.
+        const hb = await pushHeartbeat({ msg: `collect-ok:${board}` });
+        if (hb.pushed && !hb.ok) console.error(`collect: heartbeat push failed: ${hb.error}`);
+        output(ctx, summary, (s) =>
+          s.outcome === "not_integrated"
+            ? console.log(
+                `${board}: not integrated yet — recorded as a clean outcome (nothing collected)`,
+              )
+            : console.log(
+                `${board}: scraped ${s.scraped}, ${s.postingsNew} new postings, ${s.candidaciesNew} new candidacies`,
+              ),
+        );
       });
     });
 }
