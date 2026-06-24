@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Building2, ChevronRight, Radar } from "lucide-react";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import {
 	type CompanyListItem,
 	type CompanyStatusBadge,
@@ -21,6 +22,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 /** The overview shape the list renders. */
@@ -135,7 +137,11 @@ export function CompaniesList({
 			{companies.isPending ? (
 				<Note>Loading companies…</Note>
 			) : companies.isError ? (
-				<Note>Couldn't load your companies just now.</Note>
+				<InlineErrorState
+					testId="companies-error"
+					message="Couldn't load your companies just now."
+					onRetry={() => companies.refetch?.()}
+				/>
 			) : (
 				<>
 					{researching.length > 0 ? (

@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import type {
 	CoverLetterReview,
@@ -24,6 +25,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 /** How a version's status reads as a small label on the history rail. */
@@ -335,13 +337,11 @@ export function CoverLetterReviewView({
 			{review.isPending ? (
 				<p className="text-[13px] text-[var(--txt3)]">Loading this letter…</p>
 			) : review.isError || !review.data ? (
-				<p
-					data-testid="cover-letter-error-state"
-					className="text-[13px] text-[var(--txt3)]"
-				>
-					Couldn't load this cover letter — it may have moved on, or something
-					went wrong reaching Archer.
-				</p>
+				<InlineErrorState
+					testId="cover-letter-error-state"
+					message="Couldn't load this cover letter — it may have moved on, or something went wrong reaching Archer."
+					onRetry={() => review.refetch?.()}
+				/>
 			) : (
 				<ReviewBody
 					review={review.data}

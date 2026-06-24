@@ -7,6 +7,7 @@ import {
 	Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import {
 	type JobDetail,
 	type JobStatusBadge,
@@ -27,6 +28,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 /** Resolve a board's display name from its slug, falling back to the slug. */
@@ -238,13 +240,11 @@ export function JobDetailView({
 			{detail.isPending ? (
 				<p className="text-[13px] text-[var(--txt3)]">Loading this job…</p>
 			) : detail.isError || !detail.data ? (
-				<p
-					data-testid="job-detail-error"
-					className="text-[13px] text-[var(--txt3)]"
-				>
-					Couldn't load this job — it may have moved on, or something went wrong
-					reaching Archer.
-				</p>
+				<InlineErrorState
+					testId="job-detail-error"
+					message="Couldn't load this job — it may have moved on, or something went wrong reaching Archer."
+					onRetry={() => detail.refetch?.()}
+				/>
 			) : (
 				<DetailBody job={detail.data} boardName={boardName} />
 			)}

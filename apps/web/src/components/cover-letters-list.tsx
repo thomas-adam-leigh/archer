@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Building2, ChevronRight, FileText } from "lucide-react";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import {
 	type CoverLetterBadge,
 	coverLetterBadge,
@@ -20,6 +21,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 /** Resolve a board's display name from its slug, falling back to the slug. */
@@ -115,7 +117,11 @@ export function CoverLettersList({
 			{items.isPending ? (
 				<Note>Loading your cover letters…</Note>
 			) : items.isError ? (
-				<Note>Couldn't load your cover letters just now.</Note>
+				<InlineErrorState
+					testId="cover-letters-error"
+					message="Couldn't load your cover letters just now."
+					onRetry={() => items.refetch?.()}
+				/>
 			) : rows.length === 0 ? (
 				<div
 					data-testid="cover-letters-empty"

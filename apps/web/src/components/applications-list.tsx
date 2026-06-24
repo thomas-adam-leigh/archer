@@ -1,4 +1,5 @@
 import { Building2, ExternalLink, SendHorizonal } from "lucide-react";
+import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import {
 	type ApplicationBadge,
 	type ApplicationListItem,
@@ -21,6 +22,7 @@ interface QueryView<T> {
 	data?: T;
 	isPending: boolean;
 	isError: boolean;
+	refetch?: () => void;
 }
 
 /** Resolve a board's display name from its slug, falling back to the slug. */
@@ -128,7 +130,11 @@ export function ApplicationsList({
 			{items.isPending ? (
 				<Note>Loading your applications…</Note>
 			) : items.isError ? (
-				<Note>Couldn't load your applications just now.</Note>
+				<InlineErrorState
+					testId="applications-error"
+					message="Couldn't load your applications just now."
+					onRetry={() => items.refetch?.()}
+				/>
 			) : rows.length === 0 ? (
 				<div
 					data-testid="applications-empty"
