@@ -1,5 +1,6 @@
 "use client";
 
+import { Link } from "@tanstack/react-router";
 import { navGroups } from "#/components/app-shared.tsx";
 import { LogoMark } from "#/components/logo.tsx";
 import { NavGroup } from "#/components/nav-group.tsx";
@@ -24,12 +25,12 @@ export function AppSidebar() {
 		>
 			<SidebarHeader className="h-14 justify-center border-b px-2">
 				<SidebarMenuButton asChild>
-					<a href="/onboarding/home">
+					<Link to="/onboarding/home">
 						<LogoMark />
 						<span className="font-heading font-bold text-foreground!">
 							Archer
 						</span>
-					</a>
+					</Link>
 				</SidebarMenuButton>
 			</SidebarHeader>
 			<SidebarContent>

@@ -12,7 +12,11 @@ export function getRouter() {
 		context,
 		scrollRestoration: true,
 		defaultPreload: "intent",
-		defaultPreloadStaleTime: 0,
+		// Preload-on-intent (hovering a sidebar `<Link>`) is only useful if the
+		// warmed data is treated as fresh on the subsequent click — `0` made it
+		// stale immediately, forcing a refetch. Match the query `staleTime` (see
+		// the QueryClient defaults) so a hover actually primes the next view.
+		defaultPreloadStaleTime: 30_000,
 		// A last-resort boundary so an unexpected render/load error shows a
 		// friendly, retryable surface instead of a blank screen.
 		defaultErrorComponent: ({ reset }) => (

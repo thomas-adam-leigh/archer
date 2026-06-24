@@ -1,4 +1,9 @@
-import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	MutationCache,
+	QueryCache,
+	QueryClient,
+} from "@tanstack/react-query";
 import { ApiError } from "#/lib/api.ts";
 import { clearSession } from "#/lib/session.ts";
 
@@ -31,6 +36,16 @@ export function getContext() {
 					if (error instanceof ApiError && error.status < 500) return false;
 					return failureCount < 2;
 				},
+				// Treat fetched data as fresh for 30s so flipping between dashboard
+				// routes reuses the cache instead of refetching (and flashing a
+				// full-screen pending state) on every visit. Mutations still
+				// `invalidateQueries` to force an immediate refetch when data changes,
+				// and the live views keep their own `refetchInterval` polling.
+				staleTime: 30_000,
+				// On a route whose query key changes (e.g. job/company detail
+				// $id → $id), keep showing the previous result while the next loads, so
+				// the screen never drops to a blank pending state mid-navigation.
+				placeholderData: keepPreviousData,
 			},
 		},
 	});

@@ -1,4 +1,4 @@
-import { useLocation } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import type { SidebarNavGroup } from "#/components/app-shared.tsx";
 import {
@@ -61,10 +61,10 @@ export function NavGroup({ label, items }: SidebarNavGroup) {
 															asChild
 															isActive={isPathActive(pathname, subItem.path)}
 														>
-															<a href={subItem.path}>
+															<Link to={subItem.path}>
 																{subItem.icon}
 																<span>{subItem.title}</span>
-															</a>
+															</Link>
 														</SidebarMenuSubButton>
 													</SidebarMenuSubItem>
 												))}
@@ -73,10 +73,10 @@ export function NavGroup({ label, items }: SidebarNavGroup) {
 									</>
 								) : (
 									<SidebarMenuButton asChild isActive={active}>
-										<a href={item.path}>
+										<Link to={item.path}>
 											{item.icon}
 											<span>{item.title}</span>
-										</a>
+										</Link>
 									</SidebarMenuButton>
 								)}
 							</SidebarMenuItem>
