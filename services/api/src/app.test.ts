@@ -103,6 +103,12 @@ describe("archer-api", () => {
     expect(res.status).toBe(401);
   });
 
+  it("fails closed: denies GET /boards with no secret and no dev opt-in", async () => {
+    delete process.env.ARCHER_API_DEV_OPEN;
+    const res = await app.request("/boards");
+    expect(res.status).toBe(401);
+  });
+
   it("GET /activities rejects a missing or invalid user", async () => {
     const missing = await app.request("/activities");
     expect(missing.status).toBe(400);
