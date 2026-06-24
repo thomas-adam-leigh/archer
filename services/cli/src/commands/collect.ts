@@ -30,6 +30,61 @@ import { pushHeartbeat } from "../heartbeat.js";
  *  failure. (Genuine failures aren't an outcome here: they throw.) */
 export type CollectOutcome = "collected" | "not_integrated";
 
+/** Default spacing between per-title scrape attempts (ARC-139), in ms. A daily run
+ *  searches one title at a time rather than all at once to spread load and reduce
+ *  detection; a few seconds apart is enough to avoid a burst without dragging the
+ *  run out. Overridable with `collect --title-delay`. */
+export const DEFAULT_TITLE_DELAY_MS = 4000;
+
+/** Split a user's active titles into the scrape attempts a collect run makes:
+ *  one attempt per title (ARC-139) — "one title at a time" — instead of a single
+ *  call carrying every title. With no active titles, a single empty attempt still
+ *  probes the board, so a not-integrated stub surfaces its state (and an integrated
+ *  board reports "nothing") rather than being skipped. Pure, so it's trivially testable. */
+export function titleAttempts(titles: string[]): string[][] {
+  return titles.length === 0 ? [[]] : titles.map((t) => [t]);
+}
+
+const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+export interface CollectAcrossTitlesArgs {
+  /** The user's active target titles; fanned out one per scrape attempt. */
+  titles: string[];
+  /** Run one scrape attempt for the given (single-title) attempt — the live
+   *  browser/fixture boundary. */
+  collect: (titles: string[]) => Promise<ScrapedPosting[]>;
+  /** Spacing between attempts in ms (default {@link DEFAULT_TITLE_DELAY_MS}); 0 disables it. */
+  spacingMs?: number;
+  /** Injectable for tests so the fan-out is proven without real timers. */
+  sleep?: (ms: number) => Promise<void>;
+  log?: (msg: string) => void;
+}
+
+/**
+ * Fan a collect run out over the user's active titles (ARC-139): issue one scrape
+ * attempt per title in sequence — "one title at a time" — pausing `spacingMs`
+ * between attempts (never before the first or after the last) to spread load and
+ * reduce detection, then concatenate every attempt's postings in order. The same
+ * job surfaced by two titles still collapses to one posting/candidacy downstream
+ * (board+url and per-user dedup in `runCollect`). Pure over an injected `collect`
+ * + `sleep`, so the fan-out is testable without a live browser or a database.
+ */
+export async function collectAcrossTitles(
+  args: CollectAcrossTitlesArgs,
+): Promise<ScrapedPosting[]> {
+  const spacing = args.spacingMs ?? DEFAULT_TITLE_DELAY_MS;
+  const sleep = args.sleep ?? sleepMs;
+  const attempts = titleAttempts(args.titles);
+  const all: ScrapedPosting[] = [];
+  for (let i = 0; i < attempts.length; i++) {
+    if (i > 0 && spacing > 0) await sleep(spacing);
+    const postings = await args.collect(attempts[i]);
+    args.log?.(`collect: '${attempts[i].join(", ") || "(no active titles)"}' → ${postings.length}`);
+    all.push(...postings);
+  }
+  return all;
+}
+
 /** The structured detail a collect run records on its Activity and prints. */
 export interface CollectSummary {
   board: string;
@@ -178,6 +233,7 @@ interface CollectOpts {
   dryRun?: boolean;
   fixture?: string;
   headless?: boolean;
+  titleDelay?: string;
 }
 
 export function registerCollect(program: Command): void {
@@ -193,6 +249,10 @@ export function registerCollect(program: Command): void {
       "read ScrapedPosting[] from a JSON file instead of scraping (dev/testing)",
     )
     .option("--headless", "run the browser headless (default: headful, for VNC)")
+    .option(
+      "--title-delay <ms>",
+      `ms to pause between per-title scrape attempts (default ${DEFAULT_TITLE_DELAY_MS}; 0 to disable)`,
+    )
     .action(async (board: string, opts: CollectOpts, cmd) => {
       await run(cmd.optsWithGlobals() as GlobalOpts, async (ctx) => {
         const boardRow = await getBoard(ctx.db, board);
@@ -220,16 +280,26 @@ export function registerCollect(program: Command): void {
             );
           }
           const prefix = boardRow.cred_env_prefix;
-          return adapter.collect({
+          // ARC-139: one scrape attempt per active title, spaced apart, rather than
+          // a single call carrying every title — spreads load and reduces detection.
+          // today-only rides through unchanged on `--since` (default 'today').
+          const spacingMs = opts.titleDelay !== undefined ? Number(opts.titleDelay) : undefined;
+          return collectAcrossTitles({
             titles,
-            since: opts.since,
-            creds: {
-              email: process.env[`${prefix}_EMAIL`],
-              password: process.env[`${prefix}_PASSWORD`],
-            },
-            proxy: process.env.DECODO_PROXY,
-            headful: !opts.headless,
+            spacingMs,
             log: (m) => console.error(m),
+            collect: (attemptTitles) =>
+              adapter.collect({
+                titles: attemptTitles,
+                since: opts.since,
+                creds: {
+                  email: process.env[`${prefix}_EMAIL`],
+                  password: process.env[`${prefix}_PASSWORD`],
+                },
+                proxy: process.env.DECODO_PROXY,
+                headful: !opts.headless,
+                log: (m) => console.error(m),
+              }),
           });
         };
 
