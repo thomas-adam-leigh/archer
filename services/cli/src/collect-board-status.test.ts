@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { NotIntegratedError } from "./adapters/types.js";
-import { classifyCollectError, nextCollectStatus } from "./commands/collect.js";
+import {
+  classifyCollectError,
+  classifyCollectOutcome,
+  nextCollectStatus,
+} from "./commands/collect.js";
 
 // ARC-10 — the pure decision behind the board collect-status lifecycle. A live
 // collect run drives boards.collect_status so it reflects the adapter's reality:
@@ -51,5 +55,22 @@ describe("ARC-140 — classifyCollectError (not-integrated vs genuine failure)",
   it("any other error is a genuine failure", () => {
     expect(classifyCollectError(new Error("scrape blew up"))).toBe("failed");
     expect(classifyCollectError("login timed out")).toBe("failed");
+  });
+});
+
+// ARC-141 — the pure policy distinguishing a clean run's two non-error outcomes:
+// a board that surfaced postings today (`found`) vs one that had none (`nothing_today`,
+// a clean run, never a failure). Discriminated on the count the board returned, so a
+// dedup re-run that re-sees only known postings is still `found`. DB-free → runs in CI;
+// the activity wiring (and the not_integrated / failed terminal states) is proven
+// DB-backed in collect.test.ts.
+describe("ARC-141 — classifyCollectOutcome (found vs nothing_today)", () => {
+  it("zero postings today is a clean nothing_today, not a failure", () => {
+    expect(classifyCollectOutcome(0)).toBe("nothing_today");
+  });
+
+  it("any postings today is found (even a single one)", () => {
+    expect(classifyCollectOutcome(1)).toBe("found");
+    expect(classifyCollectOutcome(12)).toBe("found");
   });
 });
