@@ -10,11 +10,13 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as ProfileRouteRouteImport } from './routes/profile/route'
 import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
 import { Route as JobsRouteRouteImport } from './routes/jobs/route'
 import { Route as CoverLettersRouteRouteImport } from './routes/cover-letters/route'
 import { Route as CompaniesRouteRouteImport } from './routes/companies/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ProfileIndexRouteImport } from './routes/profile/index'
 import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as CoverLettersIndexRouteImport } from './routes/cover-letters/index'
@@ -32,6 +34,11 @@ import { Route as CompaniesCompanyIdRouteImport } from './routes/companies/$comp
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileRouteRoute = ProfileRouteRouteImport.update({
+  id: '/profile',
+  path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingRouteRoute = OnboardingRouteRouteImport.update({
@@ -58,6 +65,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileIndexRoute = ProfileIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProfileRouteRoute,
 } as any)
 const OnboardingIndexRoute = OnboardingIndexRouteImport.update({
   id: '/',
@@ -131,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/cover-letters': typeof CoverLettersRouteRouteWithChildren
   '/jobs': typeof JobsRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
+  '/profile': typeof ProfileRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/companies/$companyId': typeof CompaniesCompanyIdRoute
   '/cover-letters/$candidacyId': typeof CoverLettersCandidacyIdRoute
@@ -145,6 +158,7 @@ export interface FileRoutesByFullPath {
   '/cover-letters/': typeof CoverLettersIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
+  '/profile/': typeof ProfileIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -162,6 +176,7 @@ export interface FileRoutesByTo {
   '/cover-letters': typeof CoverLettersIndexRoute
   '/jobs': typeof JobsIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
+  '/profile': typeof ProfileIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -170,6 +185,7 @@ export interface FileRoutesById {
   '/cover-letters': typeof CoverLettersRouteRouteWithChildren
   '/jobs': typeof JobsRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
+  '/profile': typeof ProfileRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/companies/$companyId': typeof CompaniesCompanyIdRoute
   '/cover-letters/$candidacyId': typeof CoverLettersCandidacyIdRoute
@@ -184,6 +200,7 @@ export interface FileRoutesById {
   '/cover-letters/': typeof CoverLettersIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
+  '/profile/': typeof ProfileIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -193,6 +210,7 @@ export interface FileRouteTypes {
     | '/cover-letters'
     | '/jobs'
     | '/onboarding'
+    | '/profile'
     | '/auth'
     | '/companies/$companyId'
     | '/cover-letters/$candidacyId'
@@ -207,6 +225,7 @@ export interface FileRouteTypes {
     | '/cover-letters/'
     | '/jobs/'
     | '/onboarding/'
+    | '/profile/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -224,6 +243,7 @@ export interface FileRouteTypes {
     | '/cover-letters'
     | '/jobs'
     | '/onboarding'
+    | '/profile'
   id:
     | '__root__'
     | '/'
@@ -231,6 +251,7 @@ export interface FileRouteTypes {
     | '/cover-letters'
     | '/jobs'
     | '/onboarding'
+    | '/profile'
     | '/auth'
     | '/companies/$companyId'
     | '/cover-letters/$candidacyId'
@@ -245,6 +266,7 @@ export interface FileRouteTypes {
     | '/cover-letters/'
     | '/jobs/'
     | '/onboarding/'
+    | '/profile/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -253,6 +275,7 @@ export interface RootRouteChildren {
   CoverLettersRouteRoute: typeof CoverLettersRouteRouteWithChildren
   JobsRouteRoute: typeof JobsRouteRouteWithChildren
   OnboardingRouteRoute: typeof OnboardingRouteRouteWithChildren
+  ProfileRouteRoute: typeof ProfileRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
 }
 
@@ -263,6 +286,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding': {
@@ -299,6 +329,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/profile/': {
+      id: '/profile/'
+      path: '/'
+      fullPath: '/profile/'
+      preLoaderRoute: typeof ProfileIndexRouteImport
+      parentRoute: typeof ProfileRouteRoute
     }
     '/onboarding/': {
       id: '/onboarding/'
@@ -459,12 +496,25 @@ const OnboardingRouteRouteWithChildren = OnboardingRouteRoute._addFileChildren(
   OnboardingRouteRouteChildren,
 )
 
+interface ProfileRouteRouteChildren {
+  ProfileIndexRoute: typeof ProfileIndexRoute
+}
+
+const ProfileRouteRouteChildren: ProfileRouteRouteChildren = {
+  ProfileIndexRoute: ProfileIndexRoute,
+}
+
+const ProfileRouteRouteWithChildren = ProfileRouteRoute._addFileChildren(
+  ProfileRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CompaniesRouteRoute: CompaniesRouteRouteWithChildren,
   CoverLettersRouteRoute: CoverLettersRouteRouteWithChildren,
   JobsRouteRoute: JobsRouteRouteWithChildren,
   OnboardingRouteRoute: OnboardingRouteRouteWithChildren,
+  ProfileRouteRoute: ProfileRouteRouteWithChildren,
   AuthRoute: AuthRoute,
 }
 export const routeTree = rootRouteImport
