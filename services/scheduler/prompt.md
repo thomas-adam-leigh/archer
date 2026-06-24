@@ -1,4 +1,4 @@
-/goal Make continuous, mergeable progress **finishing the Web App — Daily Dashboard project** in Linear, one self-contained issue per run — **Urgent bugs first**, then the remaining milestones — until the project is Done, then **STOP and idle safely** (see "When you're out of planned work"). Earlier phases are complete: Web App Onboarding (incl. M10), Daily Run Activation, and Web App — Daily Dashboard M0–M5 are all Done. The live web-scraping CLI (**Board Integration**), the real-enrichment wiring, and The Mission Agent are **human-driven and OFF-LIMITS — never start them.** Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
+/goal Make continuous, mergeable progress **finishing the Web App — Daily Dashboard project** in Linear, one self-contained issue per run — **Urgent bugs first**, then the remaining milestones — until the project is Done, then **STOP and idle safely** (see "When you're out of planned work"). Earlier phases are complete: Web App Onboarding (incl. M10), Daily Run Activation, and Web App — Daily Dashboard M0–M5 are all Done. **After the dashboard, your next priority is the Board Integration COLLECTION sprint** — you implement the CareerJunction/CareerJet/PNET collect CLI **yourself, using the Chrome DevTools MCP** to log in, explore and map each site (see §0). Board *apply*, the real-enrichment wiring, and The Mission Agent remain **OFF-LIMITS — never start them.** Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
 
 ---
 
@@ -36,12 +36,26 @@ to **finish the Web App — Daily Dashboard project** (`apps/web`, TanStack Star
    buildable on **fixtures** — no scraping dependency. Reuse the existing API + read-endpoint
    sub-track; the jobs view shows only `shortlisted` + `alternative_outreach`; each milestone
    ships a **Cypress E2E** test.
+3. **Board Integration — COLLECTION (you do this yourself, via the Chrome DevTools MCP).** Once the
+   dashboard project is Done, take on the **Board Integration** project, **collection only** for
+   **CareerJunction → CareerJet → PNET** (apply is deferred — see OFF-LIMITS). You have the tools:
+   the **chrome-devtools** MCP (drive a real browser), the **Supabase** MCP (verify rows), the board
+   credentials in **`.env`** (`CAREERJUNCTION_`/`CAREERJET_`/`PNET_` `EMAIL`+`PASSWORD`, `DECODO_PROXY`),
+   and the test user **`5cd494a2-32f1-4dea-9397-bd430123b015`** (drive searches with their
+   `target_titles`). Per board, follow the issue's 4-step recipe: (1) **use the chrome-devtools MCP** to
+   log in + explore + map the search route + result-card selectors; (2) implement the CLI collect
+   command (replace the `NotIntegratedError` stub) using Patchright + `DECODO_PROXY`; (3) run it and
+   **verify new postings + candidacies in the DB via the Supabase MCP**; (4) verify in production on
+   **`n8n@computer`** (SSH + redeploy + run there). **Be gentle and careful with the real accounts** —
+   don't hammer logins, keep attempts minimal, prefer the Decodo proxy, and **never bypass a
+   captcha/2FA/anti-bot challenge**; if you hit one you can't pass cleanly, **record a precise blocker
+   on the issue and move on** (don't thrash or risk getting the account flagged).
 
-**OFF-LIMITS / human-driven — never start these, and idle when the dashboard project is Done:** the
-live web-scraping CLI (**Board Integration** — CareerJunction/CareerJet/PNET collect + apply), the
-**real-enrichment** wiring (`claude -p` + LinkedIn MCP, ARC-160), and **The Mission Agent**
-(`vision_later`, ARC-16). These need credentials / a real browser / interactive Chrome-DevTools and
-are done by a human — if they are the only work left, **idle** (per "When you're out of planned work").
+**Still OFF-LIMITS — never start these:** Board **apply** (CareerJunction/CareerJet/PNET apply — deferred
+until there are shortlisted jobs with approved cover letters), the **real-enrichment** wiring
+(`claude -p` + LinkedIn MCP, ARC-160), and **The Mission Agent** (`vision_later`, ARC-16). When all
+in-scope work (dashboard + Board collection) is Done or only blocked, **idle** (per "When you're out of
+planned work").
 
 ## 1. Orient (every run, in order)
 1. Open **Linear**, team **Archer** (`ARC`). Read the relevant project + all milestone
@@ -97,12 +111,15 @@ are done by a human — if they are the only work left, **idle** (per "When you'
   and the daemon/runner). **Note the two different "schedulers":** the **pg_cron** engine in
   `packages/db/supabase/migrations/**` IS in-scope for Daily Run Activation and you may change it;
   the **`services/scheduler` loop daemon** (your harness) is **never** to be touched.
-- **Board Integration is OFF-LIMITS to you.** The live web-scraping project (CareerJunction /
-  CareerJet / PNET collect + apply: Patchright/Decodo proxy, non-headless real browser, board
-  credentials, interactive Chrome-DevTools selector mapping) **cannot** be done by an autonomous
-  headless agent and requires human-driven sessions. **Never start, implement, or open PRs for any
-  Board Integration issue.** Treat board adapters as stubbed (`--fixture` / `NotIntegratedError`).
-  If Board Integration is the only work left, **idle** (per below).
+- **Board Integration: COLLECT is yours, APPLY is not.** You DO implement the **collect** CLI for
+  CareerJunction/CareerJet/PNET yourself — use the **chrome-devtools** MCP to log in / explore / map,
+  and Patchright + `DECODO_PROXY` for the real scrape (creds in `.env`; verify rows with the **Supabase**
+  MCP; drive searches with test user `5cd494a2-32f1-4dea-9397-bd430123b015`'s `target_titles`). **Be
+  gentle with the real accounts** — minimal login attempts, prefer the Decodo proxy, and **never try to
+  defeat a captcha / 2FA / anti-bot wall**; if blocked, **record a precise blocker on the issue and
+  stop** (do not thrash or risk a ban). **Board *apply* is still OFF-LIMITS** — deferred until there are
+  shortlisted jobs with approved cover letters; never start an apply issue (treat apply adapters as
+  stubbed).
 - **Never** touch CI/CD secrets, branch protection, infra/Komodo deploy config, or
   `.github/workflows` except exactly as a specced issue requires; never delete others' work.
 - **Never** commit to `main` directly, force-push, merge a red PR, or bypass the `ci-ok` /
