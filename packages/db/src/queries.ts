@@ -2489,6 +2489,25 @@ export async function submitCoverLetterVersionProposal(
   });
 }
 
+/** The open cover-letter version proposal a candidacy's review screen decides with
+ *  (ARC-150): its proposal id + the version it targets, or null when none is
+ *  awaiting the candidate's decision. The cover-letter analogue of
+ *  {@link getOpenProfileVersionProposal} — the review loop self-decides with this id. */
+export async function getOpenCoverLetterVersionProposal(
+  db: Db,
+  candidacyId: string,
+): Promise<{ proposalId: string; versionId: string } | null> {
+  const rows = await db<{ proposalId: string; versionId: string }[]>`
+    select id as "proposalId", plan->>'versionId' as "versionId"
+    from proposals
+    where kind = 'cover_letter_version'
+      and status = 'submitted'
+      and candidacy_id = ${candidacyId}
+    order by created_at desc
+    limit 1`;
+  return rows[0] ?? null;
+}
+
 /** A human's decision on a submitted cover-letter version proposal. `approve`
  *  (optionally with `edits` = approve-with-edits, a full replacement of the
  *  letter's fields) makes the version the candidacy's active letter; `reject`

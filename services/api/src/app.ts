@@ -30,6 +30,7 @@ import {
   getDailyRun,
   getLiveProfileVersion,
   getOnboardingProgress,
+  getOpenCoverLetterVersionProposal,
   getOpenProfileVersionProposal,
   getProfile,
   getProfileVersion,
@@ -587,8 +588,12 @@ const gFeed = mk()
   )
   // Cover-letter version history (ARC-145): a candidacy's cover-letter versions as
   // history summaries (version_no/status/label/created_at), the list the M3 Cover
-  // letters route renders. JWT-scoped own rows: ownership is read off the candidacy
-  // (an unknown candidacy 404s, another user's 403s) before any version is listed.
+  // letters route renders. Carries the open (submitted) cover_letter_version
+  // proposal's id + target version (ARC-150) — null when none is awaiting a
+  // decision — so the review loop self-decides it (the cover-letter analogue of
+  // `/onboarding/progress`'s openProposalId). JWT-scoped own rows: ownership is read
+  // off the candidacy (an unknown candidacy 404s, another user's 403s) before any
+  // version is listed.
   .openapi(
     createRoute({
       method: "get",
@@ -607,7 +612,12 @@ const gFeed = mk()
         return c.json({ error: "forbidden" }, 403);
       }
       const versions = await listCoverLetterVersionSummaries(getDb(), id);
-      return c.json({ versions });
+      const open = await getOpenCoverLetterVersionProposal(getDb(), id);
+      return c.json({
+        versions,
+        openProposalId: open?.proposalId ?? null,
+        proposedVersionId: open?.versionId ?? null,
+      });
     },
   )
   // Cover-letter version detail (ARC-145): one version's full content + status +
