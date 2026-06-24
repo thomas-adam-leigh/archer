@@ -18,6 +18,13 @@ import {
 	type ScratchFlowDeps,
 } from "#/lib/conversation.ts";
 import {
+	approveCoverLetter,
+	type CoverLetterReview,
+	fetchCoverLetterReview,
+	listCoverLetterCandidacies,
+	reviseCoverLetter,
+} from "#/lib/cover-letters.ts";
+import {
 	type ActivityItem,
 	type BoardStatus,
 	type DailyRun,
@@ -78,6 +85,9 @@ export const queryKeys = {
 	jobs: (userId: string) => ["jobs", "feed", userId] as const,
 	jobDetail: (userId: string, id: string) =>
 		["jobs", "detail", userId, id] as const,
+	coverLetters: (userId: string) => ["cover-letters", "list", userId] as const,
+	coverLetterReview: (userId: string, id: string) =>
+		["cover-letters", "review", userId, id] as const,
 };
 
 /** Read the current session or throw — used inside authenticated mutations. */
@@ -316,6 +326,60 @@ export function useJobDetail(id: string) {
 			: ["jobs", "detail", "anonymous", id],
 		queryFn: () => fetchJobDetail(requireSession(session), id),
 		enabled: Boolean(session) && Boolean(id),
+	});
+}
+
+/**
+ * Read the cover-letters cockpit list — the in-review / drafting / approved
+ * candidacies whose letter is the candidate's to act on; signed-in only. Polls so a
+ * freshly drafted letter (or one Archer just reworked) lands without a refresh.
+ */
+export function useCoverLetters() {
+	const session = useSession();
+	return useQuery<JobListItem[]>({
+		queryKey: session
+			? queryKeys.coverLetters(session.user.id)
+			: ["cover-letters", "list", "anonymous"],
+		queryFn: () => listCoverLetterCandidacies(requireSession(session)),
+		enabled: Boolean(session),
+		refetchInterval: 30_000,
+	});
+}
+
+/**
+ * Read one candidacy's cover-letter review (the letter on screen, its history, and
+ * the open proposal); signed-in only, disabled without an id. While `poll` is set —
+ * after the candidate sends feedback — it refetches every 2s so the reworked draft's
+ * fresh proposal is detected the moment it lands (the same fallback the profile
+ * review screen uses; completion keys on a real new proposal, not a timer).
+ */
+export function useCoverLetterReview(id: string, opts?: { poll?: boolean }) {
+	const session = useSession();
+	return useQuery<CoverLetterReview>({
+		queryKey: session
+			? queryKeys.coverLetterReview(session.user.id, id)
+			: ["cover-letters", "review", "anonymous", id],
+		queryFn: () => fetchCoverLetterReview(requireSession(session), id),
+		enabled: Boolean(session) && Boolean(id),
+		retry: false,
+		refetchInterval: opts?.poll ? 2000 : false,
+	});
+}
+
+/** Approve the open cover-letter proposal, advancing the candidacy toward apply. */
+export function useApproveCoverLetter() {
+	const session = useSession();
+	return useMutation<void, Error, { proposalId: string }>({
+		mutationFn: (vars) =>
+			approveCoverLetter(requireSession(session), vars.proposalId),
+	});
+}
+
+/** Send feedback on the open cover-letter proposal so Archer reworks the letter. */
+export function useReviseCoverLetter() {
+	const session = useSession();
+	return useMutation<void, Error, { proposalId: string; feedback: string }>({
+		mutationFn: (vars) => reviseCoverLetter(requireSession(session), vars),
 	});
 }
 

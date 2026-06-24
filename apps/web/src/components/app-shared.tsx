@@ -1,4 +1,4 @@
-import { BriefcaseIcon, LayoutGridIcon } from "lucide-react";
+import { BriefcaseIcon, FileTextIcon, LayoutGridIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type SidebarNavItem = {
@@ -30,6 +30,11 @@ export const navGroups: SidebarNavGroup[] = [
 				title: "Jobs",
 				path: "/jobs",
 				icon: <BriefcaseIcon />,
+			},
+			{
+				title: "Cover letters",
+				path: "/cover-letters",
+				icon: <FileTextIcon />,
 			},
 		],
 	},
