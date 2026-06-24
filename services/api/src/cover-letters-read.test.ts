@@ -13,6 +13,7 @@ vi.mock("@archer/db", async (importOriginal) => {
     ...actual,
     getCandidacy: vi.fn(),
     listCoverLetterVersionSummaries: vi.fn(),
+    getOpenCoverLetterVersionProposal: vi.fn(),
     getCoverLetterVersion: vi.fn(),
   };
 });
@@ -23,13 +24,16 @@ import {
   type CoverLetterVersionSummary,
   getCandidacy,
   getCoverLetterVersion,
+  getOpenCoverLetterVersionProposal,
   listCoverLetterVersionSummaries,
 } from "@archer/db";
 
 const app = (await import("./app")).default;
 const mockGetCandidacy = vi.mocked(getCandidacy);
 const mockListSummaries = vi.mocked(listCoverLetterVersionSummaries);
+const mockGetOpenProposal = vi.mocked(getOpenCoverLetterVersionProposal);
 const mockGetVersion = vi.mocked(getCoverLetterVersion);
+const PROPOSAL = "77777777-7777-7777-7777-777777777777";
 
 const SECRET = "test-jwt-secret-value";
 const USER_A = "11111111-1111-1111-1111-111111111111";
@@ -89,6 +93,8 @@ describe("GET /candidacies/{id}/cover-letters (ARC-145)", () => {
     process.env.SUPABASE_JWT_SECRET = SECRET;
     mockGetCandidacy.mockReset();
     mockListSummaries.mockReset();
+    mockGetOpenProposal.mockReset();
+    mockGetOpenProposal.mockResolvedValue(null);
   });
   afterEach(() => {
     delete process.env.SUPABASE_JWT_SECRET;
@@ -105,6 +111,37 @@ describe("GET /candidacies/{id}/cover-letters (ARC-145)", () => {
     const body = (await res.json()) as { versions: CoverLetterVersionSummary[] };
     expect(body.versions).toEqual(summaries);
     expect(mockListSummaries).toHaveBeenCalledWith(expect.anything(), CANDIDACY);
+  });
+
+  it("carries the open proposal id + target version when one is awaiting a decision (ARC-150)", async () => {
+    mockGetCandidacy.mockResolvedValue(candidacy(USER_A));
+    mockListSummaries.mockResolvedValue(summaries);
+    mockGetOpenProposal.mockResolvedValue({ proposalId: PROPOSAL, versionId: VERSION });
+    const res = await app.request(
+      `/candidacies/${CANDIDACY}/cover-letters`,
+      bearer(signJwt(USER_A)),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      openProposalId: string | null;
+      proposedVersionId: string | null;
+    };
+    expect(body.openProposalId).toBe(PROPOSAL);
+    expect(body.proposedVersionId).toBe(VERSION);
+    expect(mockGetOpenProposal).toHaveBeenCalledWith(expect.anything(), CANDIDACY);
+  });
+
+  it("reports a null open proposal when none is awaiting a decision", async () => {
+    mockGetCandidacy.mockResolvedValue(candidacy(USER_A));
+    mockListSummaries.mockResolvedValue(summaries);
+    mockGetOpenProposal.mockResolvedValue(null);
+    const res = await app.request(
+      `/candidacies/${CANDIDACY}/cover-letters`,
+      bearer(signJwt(USER_A)),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { openProposalId: string | null };
+    expect(body.openProposalId).toBeNull();
   });
 
   it("404s an unknown candidacy (and does not list)", async () => {

@@ -12,9 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
 import { Route as JobsRouteRouteImport } from './routes/jobs/route'
+import { Route as CoverLettersRouteRouteImport } from './routes/cover-letters/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
+import { Route as CoverLettersIndexRouteImport } from './routes/cover-letters/index'
 import { Route as OnboardingReviewRouteImport } from './routes/onboarding/review'
 import { Route as OnboardingResumeRouteImport } from './routes/onboarding/resume'
 import { Route as OnboardingIntroRouteImport } from './routes/onboarding/intro'
@@ -22,6 +24,7 @@ import { Route as OnboardingHomeRouteImport } from './routes/onboarding/home'
 import { Route as OnboardingCriteriaRouteImport } from './routes/onboarding/criteria'
 import { Route as OnboardingConversationRouteImport } from './routes/onboarding/conversation'
 import { Route as JobsCandidacyIdRouteImport } from './routes/jobs/$candidacyId'
+import { Route as CoverLettersCandidacyIdRouteImport } from './routes/cover-letters/$candidacyId'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -38,6 +41,11 @@ const JobsRouteRoute = JobsRouteRouteImport.update({
   path: '/jobs',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CoverLettersRouteRoute = CoverLettersRouteRouteImport.update({
+  id: '/cover-letters',
+  path: '/cover-letters',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -52,6 +60,11 @@ const JobsIndexRoute = JobsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => JobsRouteRoute,
+} as any)
+const CoverLettersIndexRoute = CoverLettersIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CoverLettersRouteRoute,
 } as any)
 const OnboardingReviewRoute = OnboardingReviewRouteImport.update({
   id: '/review',
@@ -88,12 +101,19 @@ const JobsCandidacyIdRoute = JobsCandidacyIdRouteImport.update({
   path: '/$candidacyId',
   getParentRoute: () => JobsRouteRoute,
 } as any)
+const CoverLettersCandidacyIdRoute = CoverLettersCandidacyIdRouteImport.update({
+  id: '/$candidacyId',
+  path: '/$candidacyId',
+  getParentRoute: () => CoverLettersRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/cover-letters': typeof CoverLettersRouteRouteWithChildren
   '/jobs': typeof JobsRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/cover-letters/$candidacyId': typeof CoverLettersCandidacyIdRoute
   '/jobs/$candidacyId': typeof JobsCandidacyIdRoute
   '/onboarding/conversation': typeof OnboardingConversationRoute
   '/onboarding/criteria': typeof OnboardingCriteriaRoute
@@ -101,12 +121,14 @@ export interface FileRoutesByFullPath {
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/cover-letters/': typeof CoverLettersIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/cover-letters/$candidacyId': typeof CoverLettersCandidacyIdRoute
   '/jobs/$candidacyId': typeof JobsCandidacyIdRoute
   '/onboarding/conversation': typeof OnboardingConversationRoute
   '/onboarding/criteria': typeof OnboardingCriteriaRoute
@@ -114,15 +136,18 @@ export interface FileRoutesByTo {
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/cover-letters': typeof CoverLettersIndexRoute
   '/jobs': typeof JobsIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/cover-letters': typeof CoverLettersRouteRouteWithChildren
   '/jobs': typeof JobsRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/cover-letters/$candidacyId': typeof CoverLettersCandidacyIdRoute
   '/jobs/$candidacyId': typeof JobsCandidacyIdRoute
   '/onboarding/conversation': typeof OnboardingConversationRoute
   '/onboarding/criteria': typeof OnboardingCriteriaRoute
@@ -130,6 +155,7 @@ export interface FileRoutesById {
   '/onboarding/intro': typeof OnboardingIntroRoute
   '/onboarding/resume': typeof OnboardingResumeRoute
   '/onboarding/review': typeof OnboardingReviewRoute
+  '/cover-letters/': typeof CoverLettersIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
 }
@@ -137,9 +163,11 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/cover-letters'
     | '/jobs'
     | '/onboarding'
     | '/auth'
+    | '/cover-letters/$candidacyId'
     | '/jobs/$candidacyId'
     | '/onboarding/conversation'
     | '/onboarding/criteria'
@@ -147,12 +175,14 @@ export interface FileRouteTypes {
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/cover-letters/'
     | '/jobs/'
     | '/onboarding/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
+    | '/cover-letters/$candidacyId'
     | '/jobs/$candidacyId'
     | '/onboarding/conversation'
     | '/onboarding/criteria'
@@ -160,14 +190,17 @@ export interface FileRouteTypes {
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/cover-letters'
     | '/jobs'
     | '/onboarding'
   id:
     | '__root__'
     | '/'
+    | '/cover-letters'
     | '/jobs'
     | '/onboarding'
     | '/auth'
+    | '/cover-letters/$candidacyId'
     | '/jobs/$candidacyId'
     | '/onboarding/conversation'
     | '/onboarding/criteria'
@@ -175,12 +208,14 @@ export interface FileRouteTypes {
     | '/onboarding/intro'
     | '/onboarding/resume'
     | '/onboarding/review'
+    | '/cover-letters/'
     | '/jobs/'
     | '/onboarding/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CoverLettersRouteRoute: typeof CoverLettersRouteRouteWithChildren
   JobsRouteRoute: typeof JobsRouteRouteWithChildren
   OnboardingRouteRoute: typeof OnboardingRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
@@ -209,6 +244,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JobsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cover-letters': {
+      id: '/cover-letters'
+      path: '/cover-letters'
+      fullPath: '/cover-letters'
+      preLoaderRoute: typeof CoverLettersRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -229,6 +271,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/jobs/'
       preLoaderRoute: typeof JobsIndexRouteImport
       parentRoute: typeof JobsRouteRoute
+    }
+    '/cover-letters/': {
+      id: '/cover-letters/'
+      path: '/'
+      fullPath: '/cover-letters/'
+      preLoaderRoute: typeof CoverLettersIndexRouteImport
+      parentRoute: typeof CoverLettersRouteRoute
     }
     '/onboarding/review': {
       id: '/onboarding/review'
@@ -279,8 +328,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JobsCandidacyIdRouteImport
       parentRoute: typeof JobsRouteRoute
     }
+    '/cover-letters/$candidacyId': {
+      id: '/cover-letters/$candidacyId'
+      path: '/$candidacyId'
+      fullPath: '/cover-letters/$candidacyId'
+      preLoaderRoute: typeof CoverLettersCandidacyIdRouteImport
+      parentRoute: typeof CoverLettersRouteRoute
+    }
   }
 }
+
+interface CoverLettersRouteRouteChildren {
+  CoverLettersCandidacyIdRoute: typeof CoverLettersCandidacyIdRoute
+  CoverLettersIndexRoute: typeof CoverLettersIndexRoute
+}
+
+const CoverLettersRouteRouteChildren: CoverLettersRouteRouteChildren = {
+  CoverLettersCandidacyIdRoute: CoverLettersCandidacyIdRoute,
+  CoverLettersIndexRoute: CoverLettersIndexRoute,
+}
+
+const CoverLettersRouteRouteWithChildren =
+  CoverLettersRouteRoute._addFileChildren(CoverLettersRouteRouteChildren)
 
 interface JobsRouteRouteChildren {
   JobsCandidacyIdRoute: typeof JobsCandidacyIdRoute
@@ -322,6 +391,7 @@ const OnboardingRouteRouteWithChildren = OnboardingRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CoverLettersRouteRoute: CoverLettersRouteRouteWithChildren,
   JobsRouteRoute: JobsRouteRouteWithChildren,
   OnboardingRouteRoute: OnboardingRouteRouteWithChildren,
   AuthRoute: AuthRoute,
