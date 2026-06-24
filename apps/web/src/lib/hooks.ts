@@ -18,6 +18,14 @@ import {
 	type ScratchFlowDeps,
 } from "#/lib/conversation.ts";
 import {
+	type ActivityItem,
+	type BoardStatus,
+	type DailyRun,
+	fetchDailyRun,
+	listActivities,
+	listBoards,
+} from "#/lib/dashboard.ts";
+import {
 	fetchOnboardingProgress,
 	type OnboardingProgress,
 } from "#/lib/onboarding.ts";
@@ -58,6 +66,9 @@ export const queryKeys = {
 		["preferences", "negative-criteria", userId] as const,
 	suggestedTitles: (userId: string) =>
 		["preferences", "suggested-titles", userId] as const,
+	boards: () => ["dashboard", "boards"] as const,
+	dailyRun: (userId: string) => ["dashboard", "daily-run", userId] as const,
+	activities: (userId: string) => ["dashboard", "activities", userId] as const,
 };
 
 /** Read the current session or throw — used inside authenticated mutations. */
@@ -225,6 +236,48 @@ export function useApproveTitles() {
 	const session = useSession();
 	return useMutation<void, Error, { titles: string[] }>({
 		mutationFn: (vars) => approveTitles(requireSession(session), vars.titles),
+	});
+}
+
+/** Read the boards Archer sweeps + their integration status; signed-in only. */
+export function useBoards() {
+	const session = useSession();
+	return useQuery<BoardStatus[]>({
+		queryKey: queryKeys.boards(),
+		queryFn: () => listBoards(requireSession(session)),
+		enabled: Boolean(session),
+	});
+}
+
+/**
+ * Read today's collect run rolled up for the home dashboard; signed-in only.
+ * Polls so a run in progress visibly moves "collecting → done" on the home screen.
+ */
+export function useDailyRun() {
+	const session = useSession();
+	return useQuery<DailyRun>({
+		queryKey: session
+			? queryKeys.dailyRun(session.user.id)
+			: ["dashboard", "daily-run", "anonymous"],
+		queryFn: () => fetchDailyRun(requireSession(session)),
+		enabled: Boolean(session),
+		refetchInterval: 30_000,
+	});
+}
+
+/**
+ * Read the recent-activity feed for the home dashboard; signed-in only. Polls so
+ * the "Archer is researching …" indicator appears live right after a shortlist.
+ */
+export function useActivities() {
+	const session = useSession();
+	return useQuery<ActivityItem[]>({
+		queryKey: session
+			? queryKeys.activities(session.user.id)
+			: ["dashboard", "activities", "anonymous"],
+		queryFn: () => listActivities(requireSession(session)),
+		enabled: Boolean(session),
+		refetchInterval: 30_000,
 	});
 }
 
