@@ -1,4 +1,4 @@
-import { LayoutGridIcon } from "lucide-react";
+import { BriefcaseIcon, LayoutGridIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type SidebarNavItem = {
@@ -15,9 +15,8 @@ export type SidebarNavGroup = {
 };
 
 /**
- * Archer's post-onboarding home is a single resting dashboard surface today, so
- * the shell's sidebar carries one honest entry rather than the block's demo
- * navigation. More items land here as the authenticated home grows.
+ * The post-onboarding shell's sidebar. The active item is derived from the
+ * current route (see {@link NavGroup}), so entries carry no static `isActive`.
  */
 export const navGroups: SidebarNavGroup[] = [
 	{
@@ -26,7 +25,11 @@ export const navGroups: SidebarNavGroup[] = [
 				title: "Dashboard",
 				path: "/onboarding/home",
 				icon: <LayoutGridIcon />,
-				isActive: true,
+			},
+			{
+				title: "Jobs",
+				path: "/jobs",
+				icon: <BriefcaseIcon />,
 			},
 		],
 	},
