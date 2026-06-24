@@ -11,6 +11,8 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - PORT=3000
+      # Allow the deployed web app's browser origin through CORS (public value).
+      - ARCHER_WEB_ORIGINS=https://app.archer.careers
     env_file:
       - path: .env
         required: false # Komodo writes this at runtime; absent during local validation
