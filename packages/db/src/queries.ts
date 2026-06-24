@@ -506,6 +506,129 @@ export async function getCandidacyContext(
   return rows[0];
 }
 
+/** One candidacy with everything the job-detail view renders: the full posting,
+ *  the why-matched (triage decision/reason/score), a company summary, and the
+ *  external-form state if an application has been filed. Carries `user_id` so the
+ *  read route can gate it to the owner. */
+export interface CandidacyDetail {
+  id: string;
+  user_id: string;
+  status: Enum<"candidacy_status">;
+  triage_decision: Enum<"triage_decision"> | null;
+  triage_reason: string | null;
+  match_score: number | null;
+  created_at: string;
+  status_changed_at: string;
+  posting: {
+    title: string;
+    board_slug: string;
+    url: string;
+    location: string | null;
+    work_mode: Enum<"work_mode">;
+    salary_raw: string | null;
+    posted_on: string | null;
+    description: string | null;
+  };
+  company: {
+    id: string;
+    name: string;
+    status: Enum<"company_status">;
+    description: string | null;
+    website_url: string | null;
+    recruitment_email: string | null;
+  } | null;
+  external_form: {
+    status: Enum<"external_form_status">;
+    url: string;
+  } | null;
+}
+
+/** Full detail for one candidacy (job-detail view), or undefined if it does not
+ *  exist. Left-joins the company (a posting may have none) and the most recent
+ *  external application form (most candidacies have none yet). Ownership is the
+ *  caller's concern — they gate on the returned `user_id`. */
+export async function getCandidacyDetail(db: Db, id: string): Promise<CandidacyDetail | undefined> {
+  const rows = await db<
+    {
+      id: string;
+      user_id: string;
+      status: Enum<"candidacy_status">;
+      triage_decision: Enum<"triage_decision"> | null;
+      triage_reason: string | null;
+      match_score: number | null;
+      created_at: string;
+      status_changed_at: string;
+      posting_title: string;
+      board_slug: string;
+      posting_url: string;
+      location: string | null;
+      work_mode: Enum<"work_mode">;
+      salary_raw: string | null;
+      posted_on: string | null;
+      posting_description: string | null;
+      company_id: string | null;
+      company_name: string | null;
+      company_status: Enum<"company_status"> | null;
+      company_description: string | null;
+      website_url: string | null;
+      recruitment_email: string | null;
+      form_status: Enum<"external_form_status"> | null;
+      form_url: string | null;
+    }[]
+  >`
+    select c.id, c.user_id, c.status, c.triage_decision, c.triage_reason,
+           c.match_score, c.created_at, c.status_changed_at,
+           p.title as posting_title, p.board_slug, p.url as posting_url,
+           p.location, p.work_mode, p.salary_raw, p.posted_on,
+           p.description as posting_description,
+           co.id as company_id, co.name as company_name, co.status as company_status,
+           co.description as company_description, co.website_url, co.recruitment_email,
+           f.status as form_status, f.url as form_url
+    from candidacies c
+    join postings p on p.id = c.posting_id
+    left join companies co on co.id = p.company_id
+    left join lateral (
+      select status, url from external_application_forms
+      where candidacy_id = c.id
+      order by created_at desc
+      limit 1
+    ) f on true
+    where c.id = ${id}`;
+  const r = rows[0];
+  if (!r) return undefined;
+  return {
+    id: r.id,
+    user_id: r.user_id,
+    status: r.status,
+    triage_decision: r.triage_decision,
+    triage_reason: r.triage_reason,
+    match_score: r.match_score,
+    created_at: r.created_at,
+    status_changed_at: r.status_changed_at,
+    posting: {
+      title: r.posting_title,
+      board_slug: r.board_slug,
+      url: r.posting_url,
+      location: r.location,
+      work_mode: r.work_mode,
+      salary_raw: r.salary_raw,
+      posted_on: r.posted_on,
+      description: r.posting_description,
+    },
+    company: r.company_id
+      ? {
+          id: r.company_id,
+          name: r.company_name as string,
+          status: r.company_status as Enum<"company_status">,
+          description: r.company_description,
+          website_url: r.website_url,
+          recruitment_email: r.recruitment_email,
+        }
+      : null,
+    external_form: r.form_status ? { status: r.form_status, url: r.form_url as string } : null,
+  };
+}
+
 /** One `new` candidacy with the posting context the Matchmaker judges it against
  *  (title/company/location/work mode/description). Returned oldest first so a run
  *  triages in arrival order. Only status `new` rows are returned, which is what
