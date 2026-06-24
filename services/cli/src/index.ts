@@ -10,6 +10,7 @@ import { registerExternalFill } from "./commands/external-fill.js";
 import { registerJobs } from "./commands/jobs.js";
 import { registerMatch } from "./commands/match.js";
 import { registerProfile } from "./commands/profile.js";
+import { registerProxy } from "./commands/proxy.js";
 import { registerSeed } from "./commands/seed.js";
 import { registerTitles } from "./commands/titles.js";
 import { CliError } from "./context.js";
@@ -34,6 +35,7 @@ registerEnrich(program);
 registerApply(program);
 registerExternalFill(program);
 registerSeed(program);
+registerProxy(program);
 
 program
   .command("health")
