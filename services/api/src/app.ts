@@ -21,6 +21,7 @@ import {
   failActivity,
   finishRun,
   getAccount,
+  getCandidacy,
   getCandidacyContext,
   getCandidacyDetail,
   getCompanyDetail,
@@ -42,6 +43,7 @@ import {
   listBoards,
   listCandidacies,
   listCompanies,
+  listCoverLetterVersionSummaries,
   listCoverLetterVersions,
   listNegativeCriteria,
   listProfileVersions,
@@ -570,6 +572,55 @@ const gFeed = mk()
       const company = await getCompanyDetail(getDb(), id);
       if (!company) return c.json({ error: "unknown company" }, 404);
       return c.json({ company });
+    },
+  )
+  // Cover-letter version history (ARC-145): a candidacy's cover-letter versions as
+  // history summaries (version_no/status/label/created_at), the list the M3 Cover
+  // letters route renders. JWT-scoped own rows: ownership is read off the candidacy
+  // (an unknown candidacy 404s, another user's 403s) before any version is listed.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/candidacies/{id}/cover-letters",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ id: Uuid }) },
+      responses: { 200: ok(), 401: ERR[401], 403: ERR[403], 404: ERR[404] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const { id } = c.req.valid("param");
+      const candidacy = await getCandidacy(getDb(), id);
+      if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+      if (!principalOwns(principal, candidacy.user_id)) {
+        return c.json({ error: "forbidden" }, 403);
+      }
+      const versions = await listCoverLetterVersionSummaries(getDb(), id);
+      return c.json({ versions });
+    },
+  )
+  // Cover-letter version detail (ARC-145): one version's full content + status +
+  // the `details` long tail (incl. the spoken-note artifact audioUrl/provider) —
+  // the data behind a single letter in the review loop. JWT-scoped own rows: the
+  // version carries user_id directly, so an unknown id 404s and another user's 403s.
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/cover-letters/{versionId}",
+      security: SERVICE_SECURITY,
+      request: { params: z.object({ versionId: Uuid }) },
+      responses: { 200: ok(), 401: ERR[401], 403: ERR[403], 404: ERR[404] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const { versionId } = c.req.valid("param");
+      const version = await getCoverLetterVersion(getDb(), versionId);
+      if (!version) return c.json({ error: "unknown cover-letter version" }, 404);
+      if (!principalOwns(principal, version.user_id)) {
+        return c.json({ error: "forbidden" }, 403);
+      }
+      return c.json({ version });
     },
   )
   // Operator/admin activity view (ARC-44): the same observability feed, but across
