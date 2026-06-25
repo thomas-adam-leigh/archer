@@ -55,6 +55,24 @@ function buildBody(
 }
 
 /**
+ * Strip a reasoning model's chain-of-thought from a completion. MiniMax-M3 (and
+ * other reasoning models) emit their thinking wrapped in `<think>…</think>` ahead of
+ * the actual answer, inside `message.content`. No Archer caller wants that — the
+ * Scribe wants the letter, the Matchmaker wants the decision — so we drop the think
+ * block and keep only the answer after it. A non-reasoning model has no such block,
+ * so this is a no-op. Applied on the one-shot `complete()` path that every Archer
+ * caller uses; streaming would need delta-buffering, which no consumer needs today.
+ */
+export function stripReasoning(text: string): string {
+  // The common case — a complete <think>…</think> block, then the answer after it.
+  const withoutClosed = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  // Degenerate case — an unclosed think block (the model ran out of tokens mid-
+  // reasoning): there's no answer to keep, so drop the dangling reasoning rather
+  // than return a wall of raw thought.
+  return withoutClosed.replace(/<think>[\s\S]*$/i, "").trim();
+}
+
+/**
  * A provider over any OpenAI-compatible `/chat/completions` endpoint. MiniMax
  * (direct) and OpenRouter both speak this dialect, so they share one backend.
  */
@@ -98,7 +116,7 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleConfig): 
       const json = (await res.json()) as ChatCompletionResponse;
       const choice = json.choices?.[0];
       return {
-        text: choice?.message?.content ?? "",
+        text: stripReasoning(choice?.message?.content ?? ""),
         model: json.model ?? opts?.model ?? config.defaultModel,
         provider: config.name,
         finishReason: choice?.finish_reason ?? undefined,
