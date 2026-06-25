@@ -8,6 +8,7 @@ import {
   applyCoverLetterVersionProposalAsUser,
   applyVersionProposal,
   applyVersionProposalAsUser,
+  COLLECTION_CRON,
   Constants,
   type CoverLetterVersionDecision,
   checkReadiness,
@@ -31,6 +32,7 @@ import {
   getCoverLetterContext,
   getCoverLetterVersion,
   getDailyRun,
+  getLastCollectRunAt,
   getLiveProfileVersion,
   getOnboardingProgress,
   getOpenCoverLetterVersionProposal,
@@ -56,6 +58,7 @@ import {
   listTargetTitles,
   loadThreadEvents,
   loadThreadInterrupts,
+  nextCollectionRunAt,
   type ProfilePatch,
   readProfileSpine,
   recordCoverLetterSpokenNote,
@@ -586,6 +589,34 @@ const gFeed = mk()
       const user = resolved.user;
       const run = await getDailyRun(getDb(), user, { date: q.date });
       return c.json({ user, run });
+    },
+  )
+  // Collection schedule (ARC-171): the ONE declared collection schedule, so the
+  // dashboard can render the real next/last run instead of a hardcoded guess (the
+  // bug ARC-172 fixes). `schedule` is the `archer-collect-daily` pg_cron expression
+  // (COLLECTION_CRON — the same string that migration schedules); `nextRunAt` is the
+  // next fire computed from it (UTC ISO); `lastRunAt` is the user's most recent actual
+  // collect run. Scoped like /activities/daily (own rows; `?user=` owner-resolved).
+  .openapi(
+    createRoute({
+      method: "get",
+      path: "/collection/schedule",
+      security: SERVICE_SECURITY,
+      request: { query: z.object({ user: Uuid.optional() }) },
+      responses: { 200: ok(), 400: ERR[400], 401: ERR[401], 403: ERR[403] },
+    }),
+    async (c) => {
+      const principal = await authenticate(c);
+      if (!principal) return c.json({ error: "unauthorized" }, 401);
+      const resolved = scopedUser(principal, c.req.valid("query").user);
+      if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const lastRunAt = await getLastCollectRunAt(getDb(), resolved.user);
+      return c.json({
+        user: resolved.user,
+        schedule: COLLECTION_CRON,
+        nextRunAt: nextCollectionRunAt(new Date()).toISOString(),
+        lastRunAt,
+      });
     },
   )
   // Boards integration status (ARC-147): the seeded job boards with their per-

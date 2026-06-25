@@ -27,5 +27,6 @@ export * from "./apply-confirm.js";
 export * from "./candidacy-status.js";
 // Runtime: the service-level Postgres client + typed data-access layer.
 export { createDb, type Db, type DbEnv } from "./client.js";
+export * from "./collection-schedule.js";
 export * from "./queries.js";
 export * from "./seed-demo.js";
