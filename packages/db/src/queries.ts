@@ -31,6 +31,19 @@ export async function getThreadOwner(db: Db, threadId: string): Promise<string |
   return rows[0]?.user_id;
 }
 
+/** Open a fresh thread for a user — the conversation spine a server-initiated run
+ *  needs when there is no caller thread to host it on. The signup trigger seeds a
+ *  user's first thread, but autonomous flows (e.g. the cover-letter auto-trigger)
+ *  have no thread of their own, so they mint one per generation. `title` is optional
+ *  (purely a human label). */
+export async function createThread(db: Db, userId: string, title?: string | null): Promise<Thread> {
+  const rows = await db<Thread[]>`
+    insert into threads (user_id, title)
+    values (${userId}, ${title ?? null})
+    returning *`;
+  return rows[0];
+}
+
 // ── boards ────────────────────────────────────────────────────────────────
 export async function listBoards(db: Db): Promise<Board[]> {
   return await db<Board[]>`select * from boards order by slug`;
