@@ -22,6 +22,11 @@ host pulls work; nothing in the container has to call the host.
   candidacy, then for each one — sets `researching`, researches via the LinkedIn MCP,
   writes `companies.enrichment` + `contacts`, and sets `enriched` (or `enrichment_failed`
   with a reason). It never touches candidacies, and never fabricates emails/URLs.
+- **Token-saving pre-flight** — before the agent, the wrapper runs a cheap `psycopg`
+  query (via `uv`, against `DATABASE_URL` in `~/.archer-enrich.env`) for the *same*
+  "is there a `new` company behind a shortlisted/alt candidacy?" condition. If not, it
+  exits in ~1s with **zero LLM cost** — so the every-30-min cron doesn't burn tokens on
+  empty runs. It fails toward skipping (any query error → no agent run).
 - **Cron:** `17,47 * * * *` (every 30 min) in the `n8n` user crontab. Gentle on LinkedIn;
   the `flock` skips overlapping runs; logs to `~/.cache/archer-enrich.log`.
 - **DB trigger** — `packages/db/supabase/migrations/20260625100000_enriched_candidacy_gate.sql`.
@@ -33,7 +38,11 @@ host pulls work; nothing in the container has to call the host.
 
 `~/.linkedin-mcp/run-server.sh` calls `uv`, which isn't on the PATH when `claude`
 spawns the MCP. The wrapper now prepends `~/.local/bin` to PATH; without that the
-LinkedIn MCP shows `✘ Failed to connect` (`uv: not found`).
+LinkedIn MCP shows `✘ Failed to connect` (`uv: not found`). The enrich runner has the
+same `export PATH` for its own `uv` pre-flight (cron runs in a non-login shell).
+
+**Host secret:** `~/.archer-enrich.env` (perms 600) holds `DATABASE_URL` for the
+pre-flight. It's the only host dependency beyond `claude` + the MCPs.
 
 ## Not yet autonomous end-to-end
 
