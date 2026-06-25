@@ -583,6 +583,98 @@ export async function getCandidacyContext(
   return rows[0];
 }
 
+/** The free-text context that turns a generic cover letter into a specific one,
+ *  resolved from a single candidacy: the role's posting body, the company's About,
+ *  and the candidate's own résumé. Each piece is optional — a posting may have no
+ *  description, a company may never have been enriched, a candidate may have no
+ *  résumé on file — so every field is nullable and the Scribe degrades gracefully. */
+export interface CoverLetterContext {
+  roleTitle: string;
+  companyName: string | null;
+  /** The role's posting body (postings.description). */
+  jobDescription: string | null;
+  /** The company's description (companies.description) plus, when the enrichment
+   *  blob carries a readable one-liner, a short summary appended to it. Null when we
+   *  know nothing about the company. */
+  companyAbout: string | null;
+  /** The candidate's extracted résumé text (profiles.resume_text) for the
+   *  candidacy's owner — the ground truth the Scribe draws specifics from. */
+  resumeText: string | null;
+}
+
+/** The keys the (schema-free) enrichment jsonb might stash a human-readable company
+ *  summary under. The Researcher writes its tool output verbatim, so we look, in
+ *  order, for the first string-valued one rather than assuming a fixed shape. */
+const ENRICHMENT_SUMMARY_KEYS = ["summary", "about", "overview", "description", "tagline"] as const;
+
+/** Distil a short readable company summary out of the raw enrichment blob, or null
+ *  if it carries none. Pure and defensive: the blob is arbitrary JSON, so we only
+ *  accept a non-empty top-level string under a known key and never throw on shape. */
+function enrichmentSummary(enrichment: Json | null): string | null {
+  if (enrichment == null || typeof enrichment !== "object" || Array.isArray(enrichment))
+    return null;
+  const blob = enrichment as Record<string, unknown>;
+  for (const key of ENRICHMENT_SUMMARY_KEYS) {
+    const value = blob[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+/** The company's About, composed from the promoted `description` column and the
+ *  enrichment summary: each on its own when only one is present, joined when both,
+ *  null when neither. The summary is appended only if it adds something the
+ *  description doesn't already contain, so we don't echo the same sentence twice. */
+function composeCompanyAbout(description: string | null, summary: string | null): string | null {
+  const desc = description?.trim() || null;
+  if (!summary) return desc;
+  if (!desc) return summary;
+  return desc.includes(summary) ? desc : `${desc}\n\n${summary}`;
+}
+
+/** Load the enriched drafting context for one candidacy's cover letter — the role
+ *  title + company name (for the salutation), the posting body, the company's About,
+ *  and the owner's résumé — in a single join (candidacy → posting → company, plus the
+ *  owner's profile for résumé text). Undefined if the candidacy does not exist; every
+ *  field is otherwise independently nullable. The caller folds whatever is present
+ *  into the Scribe's context; the gate/ownership checks stay on getCandidacyContext. */
+export async function getCoverLetterContext(
+  db: Db,
+  candidacyId: string,
+): Promise<CoverLetterContext | undefined> {
+  const rows = await db<
+    {
+      posting_title: string;
+      company_name: string | null;
+      job_description: string | null;
+      company_description: string | null;
+      company_enrichment: Json | null;
+      resume_text: string | null;
+    }[]
+  >`
+    select p.title as posting_title, co.name as company_name,
+           p.description as job_description,
+           co.description as company_description, co.enrichment as company_enrichment,
+           pr.resume_text as resume_text
+    from candidacies c
+    join postings p on p.id = c.posting_id
+    left join companies co on co.id = p.company_id
+    left join profiles pr on pr.user_id = c.user_id
+    where c.id = ${candidacyId}`;
+  const r = rows[0];
+  if (!r) return undefined;
+  return {
+    roleTitle: r.posting_title,
+    companyName: r.company_name,
+    jobDescription: r.job_description,
+    companyAbout: composeCompanyAbout(
+      r.company_description,
+      enrichmentSummary(r.company_enrichment),
+    ),
+    resumeText: r.resume_text,
+  };
+}
+
 /** One candidacy with everything the job-detail view renders: the full posting,
  *  the why-matched (triage decision/reason/score), a company summary, and the
  *  external-form state if an application has been filed. Carries `user_id` so the

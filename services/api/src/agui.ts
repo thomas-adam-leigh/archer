@@ -663,13 +663,33 @@ const SCRIBE_GREETING = "Drafting your cover letter — one moment.";
 const SCRIBE_CLOSING = "Here's your draft cover letter — review and approve it.";
 
 /** The context the Scribe assembles a letter against: the role and company it is
- *  applying to, plus a few candidate highlights folded into the body. */
+ *  applying to, plus a few candidate highlights folded into the body.
+ *
+ *  The three free-text fields below are the difference between a generic letter and
+ *  a specific one. A bare role title + company name forces the Scribe to invent
+ *  plausible-but-empty filler; given the candidate's own résumé, the company's
+ *  About, and the actual job description it can name real overlaps in the
+ *  candidate's voice. They are all OPTIONAL — any one (or all) may be absent (no
+ *  résumé on file, a posting with no body, a company we never enriched) and the
+ *  letter must still come out complete. The real LLM Scribe (./scribe.ts) folds
+ *  whichever are present into labelled prompt sections; the deterministic assembler
+ *  below stays pure and only lightly references them, so a keyless run is unchanged. */
 export interface ScribeContext {
   roleTitle: string;
   companyName?: string | null;
   /** Short candidate highlights (e.g. from the live profile version) woven into
    *  the letter body; an empty list still yields a complete, generic letter. */
   highlights?: string[];
+  /** The candidate's extracted résumé text (profiles.resume_text) — the ground
+   *  truth the Scribe draws specifics from rather than inventing them. */
+  resumeText?: string | null;
+  /** The company's About: its description plus a short readable summary distilled
+   *  from the enrichment the Researcher wrote (companies.description/enrichment),
+   *  so the opening can speak to who the employer actually is. */
+  companyAbout?: string | null;
+  /** The role's own posting body (postings.description) — what the team actually
+   *  asked for, so the letter answers the real requirements, not a guess at them. */
+  jobDescription?: string | null;
 }
 
 /**
@@ -685,10 +705,19 @@ export function assembleCoverLetter(ctx: ScribeContext): string {
     highlights.length > 0
       ? `In particular: ${highlights.join("; ")}.`
       : "I bring the focus and ownership the role calls for.";
+  // The richer fields (résumé / job description / company About) feed the real LLM
+  // Scribe (./scribe.ts); this deterministic fallback stays pure and network-free,
+  // so it only *lightly* leans on them — a single nod to the company's About when we
+  // have one, kept short and entirely derived from the input so the same context
+  // still yields the same letter. The body/structure are otherwise unchanged.
+  const about = ctx.companyAbout?.trim();
+  const interest = about
+    ? `I'm excited to apply for the ${ctx.roleTitle} role, and drawn to what ${company} is building.`
+    : `I'm excited to apply for the ${ctx.roleTitle} role.`;
   return [
     `Dear ${company} Hiring Team,`,
     ``,
-    `I'm excited to apply for the ${ctx.roleTitle} role. ${body}`,
+    `${interest} ${body}`,
     ``,
     `I'd welcome the chance to discuss how I can contribute.`,
     ``,
