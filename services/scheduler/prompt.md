@@ -35,20 +35,11 @@ and the dashboard's "next run" is hardcoded fiction (`apps/web/src/lib/next-run.
 
 1. **Urgent bugs first.** Any `Urgent`-priority issue in the milestone/project (e.g. bug reports) is
    fixed before feature work.
-2. **ARC-170 — host recurring collection runner.** Commit a runner under **`infra/collection/`**
-   (mirroring **`infra/enrichment/`**) that runs the **CareerJunction + PNET** `collect` CLI for the
-   test user **`5cd494a2-32f1-4dea-9397-bd430123b015`**'s `target_titles` via the **Decodo proxy**
-   (`DECODO_PROXY`), and **deploy it to `n8n@computer`** on a weekday crontab (**08:00 SAST =
-   `0 6 * * 1-5` UTC**). This issue **MAY do box ops** — SSH to `n8n@computer`, deploy the script to
-   `~/scripts`, install the crontab, and run/verify on the box — **in addition to** the committed
-   `infra/collection/` PR, exactly the way Board collection was agent-owned. **Exclude CareerJet**
-   (anti-bot-walled — see OFF-LIMITS). **Verify fresh postings in prod via the Supabase MCP.**
-   **Local ≠ prod — the real gate is a proxied collect run ON THE SERVER.** The dev Mac is a
-   **South-African residential IP**, so the SA boards work direct there; **production is `n8n@computer`,
-   a Hetzner server in Germany** whose datacenter IP **will** be detected on SA boards **without the
-   Decodo Pretoria proxy**. So `DECODO_PROXY` (pre-validated to exit Pretoria/ZA residential) is
-   **mandatory in prod**, and the proven success criterion is the **proxied collect run on the server**
-   landing fresh postings — never a local-only (direct-IP) run.
+2. **ARC-170 — HUMAN-DRIVEN / OFF-LIMITS — do NOT take it.** The host collection runner is box-ops +
+   live browser scraping (deploy a runner to `n8n@computer`, run the real CareerJunction/PNET scrapers
+   via the Decodo proxy). The loop cannot reliably do this class of work — it false-Dones it (flipped
+   this Todo→Done in 3.5 min having built nothing) — so it is being **built by hand**, like the
+   enrichment runner (`infra/enrichment/`). Leave it alone; see OFF-LIMITS.
 3. **ARC-171 — truthful schedule from the API (backend + Vitest).** Move the `archer-collect-daily`
    pg_cron to **`0 6 * * 1-5` UTC**, and serve the **real** schedule + next-run + last-run from the API
    (reuse **`getDailyRun`**). Ship Vitest coverage.
@@ -57,11 +48,12 @@ and the dashboard's "next run" is hardcoded fiction (`apps/web/src/lib/next-run.
    weekday at 08:00 and 13:00" copy (**`home-dashboard.tsx:312`**); render the real next/last run from
    the API instead. Ship a **Cypress E2E** test.
 
-**Still OFF-LIMITS — never start these:** Board **apply** (CareerJunction/CareerJet/PNET apply —
-deferred until there are shortlisted jobs with approved cover letters), **CareerJet** collection
-(anti-bot-walled at the Decodo exit — record a blocker, never thrash), and **The Mission Agent**
-(`vision_later`, ARC-16). When all in-scope work (ARC-170 → ARC-172) is Done or only blocked, **idle**
-(per "When you're out of planned work").
+**Still OFF-LIMITS — never start these:** **ARC-170** (the host collection runner — human-driven
+box-ops + live scraping, being built by hand; do NOT take it), Board **apply** (CareerJunction/CareerJet/
+PNET apply — deferred until there are shortlisted jobs with approved cover letters), **CareerJet**
+collection (anti-bot-walled at the Decodo exit — record a blocker, never thrash), and **The Mission
+Agent** (`vision_later`, ARC-16). ARC-171 + ARC-172 are **Done** and ARC-170 is off-limits, so there is
+no unblocked in-scope work — **idle** (per "When you're out of planned work").
 
 ## 1. Orient (every run, in order)
 1. Open **Linear**, team **Archer** (`ARC`). Read the relevant project + all milestone
