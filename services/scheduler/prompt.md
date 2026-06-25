@@ -1,4 +1,4 @@
-/goal Make continuous, mergeable progress **finishing the Web App — Daily Dashboard project** in Linear, one self-contained issue per run — **Urgent bugs first**, then the remaining milestones — until the project is Done, then **STOP and idle safely** (see "When you're out of planned work"). Earlier phases are complete: Web App Onboarding (incl. M10), Daily Run Activation, and Web App — Daily Dashboard M0–M5 are all Done. **After the dashboard, your next priority is the Board Integration COLLECTION sprint** — you implement the CareerJunction/CareerJet/PNET collect CLI **yourself, using the Chrome DevTools MCP** to log in, explore and map each site (see §0). Board *apply*, the real-enrichment wiring, and The Mission Agent remain **OFF-LIMITS — never start them.** Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
+/goal Make continuous, mergeable progress on the **"Recurring collection + a truthful schedule on the dashboard"** milestone (issues **ARC-170 → ARC-172**) in the **Job Collection & Matching** project in Linear, one self-contained issue per run — **Urgent bugs first**, then those issues in dependency order — until the milestone is Done, then **STOP and idle safely** (see "When you're out of planned work"). Earlier phases are complete and live: Web App Onboarding (incl. M10), Daily Run Activation, the entire **Web App — Daily Dashboard** project, **Board Integration COLLECTION**, and **Company Enrichment** (real `claude -p` + LinkedIn-MCP enrichment) are all Done. **The Mission Agent**, board *apply*, and **CareerJet** collection remain **OFF-LIMITS — never start them.** Each run ends with either an opened/updated pull request into `main` or a merge of a green PR, and a working tree that builds, typechecks, tests, and lints clean.
 
 ---
 
@@ -24,45 +24,44 @@ already wired (`packages/db/.../20260620180000_event_engine.sql`). Most of this 
 by schema unique constraints — verify, don't reinvent.
 
 ### Your in-scope work, in strict priority order
-**Earlier phases are DONE** — Web App Onboarding (incl. M10 / ARC-133), the **Daily Run Activation**
-milestone (Job Collection & Matching), and **Web App — Daily Dashboard M0–M5**. Your remaining job is
-to **finish the Web App — Daily Dashboard project** (`apps/web`, TanStack Start), in this order:
+**Earlier phases are DONE and live** — Web App Onboarding (incl. M10 / ARC-133), the **Daily Run
+Activation** milestone, the entire **Web App — Daily Dashboard** project, **Board Integration
+COLLECTION**, and **Company Enrichment** (real `claude -p` + LinkedIn-MCP enrichment, ARC-160). Your
+remaining job is the **"Recurring collection + a truthful schedule on the dashboard"** milestone in
+**Job Collection & Matching** (**ARC-170 → ARC-172**). **Why this matters:** collection isn't actually
+running in production (the `archer-collect-daily` pg_cron POSTs into the broken API→CLI path — ARC-168)
+and the dashboard's "next run" is hardcoded fiction (`apps/web/src/lib/next-run.ts`). Work in this order
+(**ARC-171 before ARC-172; ARC-170 runs in parallel**):
 
-1. **Urgent bugs first.** Any `Urgent`-priority issue in the project (e.g. bug reports) is fixed
-   before feature work.
-2. **Finish the remaining Web App — Daily Dashboard milestones** — currently **M6** (seed data is
-   done; **dashboard hardening** + **promote `web-e2e` to a required gate** remain) and **M7**
-   (the apply-safety gate is done; the **Applications view + `GET /applications`** remains). All
-   buildable on **fixtures** — no scraping dependency. Reuse the existing API + read-endpoint
-   sub-track; the jobs view shows only `shortlisted` + `alternative_outreach`; each milestone
-   ships a **Cypress E2E** test.
-3. **Board Integration — COLLECTION (you do this yourself, via the Chrome DevTools MCP).** Once the
-   dashboard project is Done, take on the **Board Integration** project, **collection only** for
-   **CareerJunction → CareerJet → PNET** (apply is deferred — see OFF-LIMITS). You have the tools:
-   the **chrome-devtools** MCP (drive a real browser), the **Supabase** MCP (verify rows), the board
-   credentials in **`.env`** (`CAREERJUNCTION_`/`CAREERJET_`/`PNET_` `EMAIL`+`PASSWORD`, `DECODO_PROXY`),
-   and the test user **`5cd494a2-32f1-4dea-9397-bd430123b015`** (drive searches with their
-   `target_titles`). Per board, follow the issue's 4-step recipe: (1) **use the chrome-devtools MCP** to
-   log in + explore + map the search route + result-card selectors; (2) implement the CLI collect
-   command (replace the `NotIntegratedError` stub) using Patchright + `DECODO_PROXY`; (3) run it and
-   **verify new postings + candidacies in the DB via the Supabase MCP**; (4) verify in production on
-   **`n8n@computer`** (SSH + redeploy + run there). **Be gentle and careful with the real accounts** —
-   don't hammer logins, keep attempts minimal, prefer the Decodo proxy, and **never bypass a
-   captcha/2FA/anti-bot challenge**; if you hit one you can't pass cleanly, **record a precise blocker
-   on the issue and move on** (don't thrash or risk getting the account flagged).
-   **Local ≠ prod — do not flip a board `integrated` on local success.** The dev Mac is a
+1. **Urgent bugs first.** Any `Urgent`-priority issue in the milestone/project (e.g. bug reports) is
+   fixed before feature work.
+2. **ARC-170 — host recurring collection runner.** Commit a runner under **`infra/collection/`**
+   (mirroring **`infra/enrichment/`**) that runs the **CareerJunction + PNET** `collect` CLI for the
+   test user **`5cd494a2-32f1-4dea-9397-bd430123b015`**'s `target_titles` via the **Decodo proxy**
+   (`DECODO_PROXY`), and **deploy it to `n8n@computer`** on a weekday crontab (**08:00 SAST =
+   `0 6 * * 1-5` UTC**). This issue **MAY do box ops** — SSH to `n8n@computer`, deploy the script to
+   `~/scripts`, install the crontab, and run/verify on the box — **in addition to** the committed
+   `infra/collection/` PR, exactly the way Board collection was agent-owned. **Exclude CareerJet**
+   (anti-bot-walled — see OFF-LIMITS). **Verify fresh postings in prod via the Supabase MCP.**
+   **Local ≠ prod — the real gate is a proxied collect run ON THE SERVER.** The dev Mac is a
    **South-African residential IP**, so the SA boards work direct there; **production is `n8n@computer`,
    a Hetzner server in Germany** whose datacenter IP **will** be detected on SA boards **without the
    Decodo Pretoria proxy**. So `DECODO_PROXY` (pre-validated to exit Pretoria/ZA residential) is
-   **mandatory in prod**, and step 4 — the **proxied collect run on the server** — is the **real
-   integration gate**: flip `collect_status → integrated` only after that succeeds, never on a
-   local-only (direct-IP) run.
+   **mandatory in prod**, and the proven success criterion is the **proxied collect run on the server**
+   landing fresh postings — never a local-only (direct-IP) run.
+3. **ARC-171 — truthful schedule from the API (backend + Vitest).** Move the `archer-collect-daily`
+   pg_cron to **`0 6 * * 1-5` UTC**, and serve the **real** schedule + next-run + last-run from the API
+   (reuse **`getDailyRun`**). Ship Vitest coverage.
+4. **ARC-172 — render the real next/last run on the dashboard (blocked by ARC-171; Cypress E2E).**
+   Delete the hardcoded `[8, 13]` in **`apps/web/src/lib/next-run.ts`** and the "Archer runs every
+   weekday at 08:00 and 13:00" copy (**`home-dashboard.tsx:312`**); render the real next/last run from
+   the API instead. Ship a **Cypress E2E** test.
 
-**Still OFF-LIMITS — never start these:** Board **apply** (CareerJunction/CareerJet/PNET apply — deferred
-until there are shortlisted jobs with approved cover letters), the **real-enrichment** wiring
-(`claude -p` + LinkedIn MCP, ARC-160), and **The Mission Agent** (`vision_later`, ARC-16). When all
-in-scope work (dashboard + Board collection) is Done or only blocked, **idle** (per "When you're out of
-planned work").
+**Still OFF-LIMITS — never start these:** Board **apply** (CareerJunction/CareerJet/PNET apply —
+deferred until there are shortlisted jobs with approved cover letters), **CareerJet** collection
+(anti-bot-walled at the Decodo exit — record a blocker, never thrash), and **The Mission Agent**
+(`vision_later`, ARC-16). When all in-scope work (ARC-170 → ARC-172) is Done or only blocked, **idle**
+(per "When you're out of planned work").
 
 ## 1. Orient (every run, in order)
 1. Open **Linear**, team **Archer** (`ARC`). Read the relevant project + all milestone
@@ -83,7 +82,7 @@ planned work").
   PR, in dependency order (backend read endpoints before the UI that consumes them; foundation
   before features), and do **exactly one** this run — depth over breadth.
 - **Never idle while unblocked in-scope work exists.** Only idle (per "When you're out of planned
-  work") when items (1)–(3) in §0 are all Done.
+  work") when the in-scope items (ARC-170 → ARC-172) are all Done.
 
 ## Use the right skills + tools for the job
 - **Download skills as needed** via **`/find-skills`** (frontend/design, testing, TanStack/React,
@@ -135,10 +134,10 @@ planned work").
   projects/milestones/scope. **Skip blocked issues** until their blocker is removed by a human.
 
 ## When you're out of planned work — STOP
-If, after orienting, items (1)–(3) in §0 are all Done (or their only remaining issues are blocked
-or Board-Integration), no unblocked in-scope issue remains, and there's nothing to break down:
+If, after orienting, the in-scope items (ARC-170 → ARC-172) are all Done (or their only remaining
+issues are blocked), no unblocked in-scope issue remains, and there's nothing to break down:
 **Stop. Make no code changes.** Sync the board, then end with: *"daily-use build scope complete (or
-only blocked / human-gated / Board-Integration work remains). Awaiting human."* **Idling safely is
+only blocked / human-gated work remains). Awaiting human."* **Idling safely is
 the correct outcome — never manufacture work to fill a run.**
 
 ## 3. Implement on the Linear branch
