@@ -322,6 +322,22 @@ export async function getDailyRun(
   return rollupDailyRun(date, rows);
 }
 
+/**
+ * The instant (ISO, UTC) of the user's most recent collect run across all days, or
+ * null if they have never collected. Powers the dashboard's truthful "last run"
+ * (ARC-171): the latest run's finish time, falling back to its start while it's still
+ * in progress — so the home card never disappears the moment a fresh day begins (which
+ * a today-only {@link getDailyRun} would). RLS scopes to the user's own rows.
+ */
+export async function getLastCollectRunAt(db: Db, userId: string): Promise<string | null> {
+  const rows = await db<{ last_run_at: string | null }[]>`
+    select max(coalesce(finished_at, started_at)) as last_run_at
+    from activities
+    where user_id = ${userId}
+      and type = 'collect'`;
+  return rows[0]?.last_run_at ?? null;
+}
+
 // ── target titles (the collect search keys) ───────────────────────────────
 export async function listTargetTitles(
   db: Db,
