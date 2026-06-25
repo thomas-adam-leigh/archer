@@ -17,6 +17,7 @@ import {
   createInterruptProposal,
   createProfileVersion,
   createRun,
+  createThread,
   decideAccount,
   decideInterruptProposal,
   type Enums,
@@ -1780,6 +1781,172 @@ const gCover = mk()
         await failActivity(db, activity.id, message);
         return c.json({ error: message }, 500);
       }
+    },
+  )
+  // ── Autonomous cover-letter generation (ARC-?? / the "no human click" chain) ─
+  // The reactive endpoint the event engine POSTs when a candidacy enters
+  // `awaiting_cover_letter`: the DB trigger archer_cover_letter_gate fires
+  // archer_event_post('/commands/cover-letter/'||id) (pg_net), and this handler
+  // does end-to-end what the operator previously did by hand — DRAFT (mirrors
+  // /cover-letters/run) then SUBMIT (mirrors /cover-letters/submit) — leaving the
+  // candidacy at `in_review` with a cover_letter_version proposal, ready for the
+  // existing review/revise/approve loop on the frontend. No caller thread exists
+  // (the DB fired this), so the owner is resolved from the CANDIDACY and a fresh
+  // system thread is minted to host the two runs.
+  //
+  // It is a SERVICE route (x-archer-secret) and is FIRE-AND-FORGET safe: the
+  // trigger discards the response, so anything that is "nothing to do" returns 200
+  // with {skipped, reason} (never an error the trigger would re-fire on), and the
+  // only 5xx path is a genuine mid-draft failure that left the candidacy untouched
+  // at `awaiting_cover_letter` so a later run simply retries:
+  //   • candidacy not found                       → 404
+  //   • status !== awaiting_cover_letter           → 200 {skipped:'not awaiting'}
+  //   • a non-draft version already exists for it  → 200 {skipped:'already drafted'}
+  // The draft only advances the candidacy AFTER a version row is created+proposed
+  // (exactly as /cover-letters/run does), so a Scribe failure before then can't
+  // strand the row in a half-state — it stays awaiting and is retried.
+  .openapi(
+    createRoute({
+      method: "post",
+      path: "/commands/cover-letter/{candidacyId}",
+      security: SERVICE_SECURITY,
+      request: {
+        params: z.object({ candidacyId: Uuid }),
+      },
+      responses: {
+        200: ok(),
+        401: ERR[401],
+        404: ERR[404],
+        500: ERR[500],
+      },
+    }),
+    async (c) => {
+      if (!authorized(c)) return c.json({ error: "unauthorized" }, 401);
+      const { candidacyId } = c.req.valid("param");
+      const db = getDb();
+
+      // Resolve the owner from the candidacy itself (no caller thread to read it
+      // from). Unknown candidacy is the one hard 404; everything else short-circuits
+      // to a 200 skip so the trigger never error-loops.
+      const candidacy = await getCandidacyContext(db, candidacyId);
+      if (!candidacy) return c.json({ error: "unknown candidacy" }, 404);
+      const userId = candidacy.user_id;
+
+      // Only act on a candidacy that is actually waiting for its letter. A row that
+      // already moved on (drafting / in_review / approved / …) is a no-op skip — the
+      // trigger can fire on a transient state we've since left.
+      if (candidacy.status !== "awaiting_cover_letter") {
+        return c.json({ candidacyId, skipped: true, reason: "not awaiting" });
+      }
+
+      // Idempotency guard: if a non-draft version already exists for this candidacy
+      // (proposed / approved / superseded), a draft has already been produced — don't
+      // mint a duplicate. (A stray 'draft' row never reached submit, so it doesn't
+      // count as "already drafted"; the run below will create + submit a new one.)
+      const existing = await listCoverLetterVersions(db, candidacyId);
+      if (existing.some((v) => v.status !== "draft")) {
+        return c.json({ candidacyId, skipped: true, reason: "already drafted" });
+      }
+
+      // One fresh system thread per generation hosts both runs (the draft run and the
+      // submit run), so the AG-UI event log lives on a real thread the owner can open.
+      const thread = await createThread(db, userId, "Cover letter");
+      const threadId = thread.id;
+
+      // ── DRAFT (mirrors /cover-letters/run) ──────────────────────────────────
+      // Candidate highlights woven into the letter: string attributes from the live
+      // profile version (the candidate's own words), as the manual run does.
+      const live = await getLiveProfileVersion(db, userId);
+      const attrs = (live?.attributes ?? {}) as Record<string, unknown>;
+      const highlights = Object.values(attrs)
+        .filter((v): v is string => typeof v === "string")
+        .slice(0, 3);
+
+      // The rich, specific context the Scribe grounds the letter in — the role's
+      // posting body, the company's About, and the candidate's résumé — in one join;
+      // every field is independently nullable, so the draft degrades gracefully and
+      // role/company fall back to the candidacy row.
+      const enriched = await getCoverLetterContext(db, candidacyId);
+
+      const draftRun = await createRun(db, {
+        threadId,
+        input: { candidacyId } as Json,
+      });
+      const context = {
+        roleTitle: enriched?.roleTitle ?? candidacy.posting_title,
+        companyName: enriched?.companyName ?? candidacy.company_name,
+        highlights,
+        resumeText: enriched?.resumeText ?? null,
+        companyAbout: enriched?.companyAbout ?? null,
+        jobDescription: enriched?.jobDescription ?? null,
+      };
+      // The Scribe is the swappable LLM boundary; if it throws, NO version exists yet
+      // and the candidacy is still `awaiting_cover_letter`, so the 500 is retry-safe.
+      const letter = await getScribe()(context);
+      const draftEvents = scribeRun({ threadId, runId: draftRun.id, context, content: letter });
+      await appendEvents(db, threadId, draftRun.id, draftEvents);
+      const draftStatus = statusFromEvents(draftEvents);
+      await finishRun(db, draftRun.id, {
+        status: draftStatus,
+        outcome: outcomeFromEvents(draftEvents) ?? null,
+      });
+
+      // Fold the run's shared state and persist the assembled letter as a proposed
+      // (submitted) version, then advance the candidacy into drafting — only now, once
+      // a version row exists, do we move the status off `awaiting_cover_letter`.
+      const content = draftContent(restoreThread(draftEvents).state);
+      const version = await createCoverLetterVersion(db, {
+        candidacyId,
+        userId,
+        label: "scribe draft",
+        content,
+      });
+      await submitCoverLetterVersion(db, version.id);
+      await setCandidacyStatus(db, candidacyId, "drafting");
+
+      // ── SUBMIT (mirrors /cover-letters/submit) ──────────────────────────────
+      // Drive the submit run that re-presents the letter and ends on the approve /
+      // reject / approve-with-edits interrupt, then back that interrupt with a
+      // cover_letter_version proposal — which advances the candidacy drafting →
+      // in_review, where the existing review loop takes over.
+      const submitRun = await createRun(db, {
+        threadId,
+        input: { candidacyId, versionId: version.id } as Json,
+      });
+      const submitEvents = coverLetterSubmitRun({
+        threadId,
+        runId: submitRun.id,
+        versionId: version.id,
+        content,
+      });
+      await appendEvents(db, threadId, submitRun.id, submitEvents);
+      await finishRun(db, submitRun.id, {
+        status: statusFromEvents(submitEvents),
+        outcome: outcomeFromEvents(submitEvents) ?? null,
+      });
+
+      const [interrupt] = interruptsFromEvents(submitEvents);
+      const proposal = await submitCoverLetterVersionProposal(db, {
+        candidacyId,
+        userId,
+        versionId: version.id,
+        title: "Approve your cover letter",
+        interrupt: interrupt
+          ? {
+              threadId,
+              runId: submitRun.id,
+              interruptId: interrupt.id,
+              toolCallId: interrupt.toolCallId,
+            }
+          : undefined,
+      });
+
+      return c.json({
+        candidacyId,
+        versionId: version.id,
+        proposalId: proposal.id,
+        status: "in_review",
+      });
     },
   );
 
