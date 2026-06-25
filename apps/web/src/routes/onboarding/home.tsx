@@ -6,10 +6,10 @@ import {
 	useBoards,
 	useDailyRun,
 	useNegativeCriteria,
+	useSchedule,
 	useSignOut,
 	useSuggestedTitles,
 } from "#/lib/hooks.ts";
-import { nextRun } from "#/lib/next-run.ts";
 import { progressSegmentForRoute } from "#/lib/onboarding-flow.ts";
 import { useOnboardingResume } from "#/lib/onboarding-guard.ts";
 import { OnboardingGate } from "./route.tsx";
@@ -38,6 +38,7 @@ function HomeRoute() {
 	const titles = useSuggestedTitles();
 	const criteria = useNegativeCriteria();
 	const boards = useBoards();
+	const schedule = useSchedule();
 	const dailyRun = useDailyRun();
 	const activities = useActivities();
 	const signOut = useSignOut();
@@ -50,7 +51,7 @@ function HomeRoute() {
 			signingOut={signOut.isPending}
 		>
 			<HomeDashboard
-				nextRun={nextRun(new Date())}
+				schedule={schedule}
 				titles={titles.data ?? []}
 				ruleOuts={criteria.data ?? []}
 				boards={boards}

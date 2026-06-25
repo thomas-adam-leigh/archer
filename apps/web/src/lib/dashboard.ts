@@ -186,6 +186,41 @@ export function runTrailLines(
 	}));
 }
 
+// ── collection schedule (the real next/last run) ─────────────────────────────
+/**
+ * The one declared collection schedule (ARC-171), so the dashboard renders the
+ * real next/last run instead of a hardcoded guess (the bug ARC-172 fixes).
+ * `schedule` is the `archer-collect-daily` cron expression; `nextRunAt` is the
+ * next fire computed from it (UTC ISO); `lastRunAt` is the user's most recent
+ * actual collect run (UTC ISO), or `null` when none has happened yet.
+ */
+export interface CollectionSchedule {
+	schedule: string;
+	nextRunAt: string;
+	lastRunAt: string | null;
+}
+
+/** Read the real collection schedule + next/last run for the home card. */
+export async function fetchSchedule(
+	session: Session,
+	get: DashboardGet = apiGet,
+): Promise<CollectionSchedule> {
+	const resp = await get<{
+		user: string;
+		schedule: string;
+		nextRunAt: string;
+		lastRunAt: string | null;
+	}>(
+		`/collection/schedule?user=${encodeURIComponent(session.user.id)}`,
+		session.accessToken,
+	);
+	return {
+		schedule: resp.schedule,
+		nextRunAt: resp.nextRunAt,
+		lastRunAt: resp.lastRunAt,
+	};
+}
+
 // ── activity feed ────────────────────────────────────────────────────────────
 /** The activity-type values an activity row can carry. */
 export type ActivityType =

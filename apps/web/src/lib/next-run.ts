@@ -1,15 +1,13 @@
 /**
- * Archer's run schedule — when the next weekday sweep fires.
+ * Formatting for Archer's real run schedule (ARC-172).
  *
- * Archer runs every weekday (Mon–Fri) at 08:00 and 13:00, then rests. The home
- * screen shows the next upcoming slot as a friendly "{label} · {time}" (e.g.
- * "Today · 13:00", "Tomorrow · 08:00", "Thursday · 08:00"). Ported verbatim from
- * the design spec's `nextRunText`/`fmtRun`, kept pure (a `now` is passed in) so
- * the rollover logic is unit-tested without faking the clock.
+ * The schedule is no longer guessed in the client — the API serves the one
+ * declared collection schedule (ARC-171: `GET /collection/schedule` →
+ * { schedule, nextRunAt, lastRunAt }). These pure helpers turn those instants and
+ * the cron string into the friendly copy the home card shows, in the user's local
+ * timezone. Kept pure (a `now` is passed in) so the relative-day logic is
+ * unit-tested without faking the clock.
  */
-
-/** The weekday hours (24h) Archer sweeps the boards. */
-const RUN_HOURS = [8, 13] as const;
 
 const DAY_NAMES = [
 	"Sunday",
@@ -21,52 +19,50 @@ const DAY_NAMES = [
 	"Saturday",
 ] as const;
 
-/** A formatted next-run slot for display. */
+/** A formatted run instant for display ("Today · 08:00"). */
 export interface NextRun {
-	/** "Today", "Tomorrow", or the weekday name (e.g. "Thursday"). */
+	/** "Today", "Tomorrow", "Yesterday", or the weekday name (e.g. "Thursday"). */
 	label: string;
-	/** Zero-padded 24h time, e.g. "08:00". */
+	/** Zero-padded 24h local time, e.g. "08:00". */
 	time: string;
 }
 
-function isWeekday(day: number): boolean {
-	return day >= 1 && day <= 5;
+/** The zero-padded 24h local time of an instant. */
+function timeOf(at: Date): string {
+	return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 }
 
-function sameDay(a: Date, b: Date): boolean {
-	return a.toDateString() === b.toDateString();
-}
-
-/** Format a resolved run instant relative to `now` (Today/Tomorrow/weekday). */
-function format(run: Date, now: Date): NextRun {
-	const tomorrow = new Date(now);
-	tomorrow.setDate(now.getDate() + 1);
-	const label = sameDay(run, now)
-		? "Today"
-		: sameDay(run, tomorrow)
-			? "Tomorrow"
-			: DAY_NAMES[run.getDay()];
-	return { label, time: `${String(run.getHours()).padStart(2, "0")}:00` };
+/** The local calendar day an instant falls on (midnight, local). */
+function startOfDay(at: Date): number {
+	return new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime();
 }
 
 /**
- * The next weekday run slot strictly after `now`. Scans forward day by day (up to
- * two weeks, which always lands on a weekday) and returns the first 08:00/13:00
- * slot in the future; the two-week bound can't realistically be hit, so it falls
- * back to the canonical Monday 08:00.
+ * Format a real run instant relative to `now`, in local time: Today / Tomorrow /
+ * Yesterday for the adjacent days, otherwise the weekday name. Works for both the
+ * upcoming next run and the most recent last run.
  */
-export function nextRun(now: Date): NextRun {
-	const cursor = new Date(now);
-	for (let ahead = 0; ahead < 14; ahead += 1) {
-		if (isWeekday(cursor.getDay())) {
-			for (const hour of RUN_HOURS) {
-				const slot = new Date(cursor);
-				slot.setHours(hour, 0, 0, 0);
-				if (slot > now) return format(slot, now);
-			}
-		}
-		cursor.setDate(cursor.getDate() + 1);
-		cursor.setHours(0, 0, 0, 0);
-	}
-	return { label: "Monday", time: "08:00" };
+export function formatRun(at: Date, now: Date): NextRun {
+	const days = Math.round((startOfDay(at) - startOfDay(now)) / 86_400_000);
+	const label =
+		days === 0
+			? "Today"
+			: days === 1
+				? "Tomorrow"
+				: days === -1
+					? "Yesterday"
+					: DAY_NAMES[at.getDay()];
+	return { label, time: timeOf(at) };
+}
+
+/**
+ * The cadence sentence under the next run, derived from the declared cron's
+ * day-of-week field and the local time of the upcoming run — so it stays truthful
+ * to whatever schedule the API reports (e.g. weekday `1-5` → "every weekday").
+ */
+export function scheduleCadence(cron: string, runAt: Date): string {
+	const dow = cron.trim().split(/\s+/)[4] ?? "*";
+	const cadence =
+		dow === "1-5" ? "every weekday" : dow === "*" ? "every day" : "on schedule";
+	return `Archer runs ${cadence} at ${timeOf(runAt)}, then rests.`;
 }
