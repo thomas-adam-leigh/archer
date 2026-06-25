@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { LlmRequestError } from "./errors";
-import { createOpenAiCompatibleProvider, type FetchLike } from "./openai-compatible";
+import {
+  createOpenAiCompatibleProvider,
+  type FetchLike,
+  stripReasoning,
+} from "./openai-compatible";
 import { createMinimaxProvider, createOpenRouterProvider } from "./providers";
 import type { LlmMessage } from "./types";
 
@@ -87,6 +91,30 @@ describe("createOpenAiCompatibleProvider — complete", () => {
     expect(bodyOf(calls[0].init).model).toBe("MiniMax-M2.1");
   });
 
+  it("strips a reasoning model's <think> chain-of-thought from the answer", async () => {
+    const { fetch } = fakeFetch(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: "<think>weigh the role, draft, self-critique…</think>\n\nDear Team,",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+    const llm = createOpenAiCompatibleProvider({
+      name: "minimax",
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "k",
+      defaultModel: "MiniMax-M3",
+      fetch,
+    });
+    const out = await llm.complete(MESSAGES);
+    expect(out.text).toBe("Dear Team,");
+  });
+
   it("throws LlmRequestError on a non-2xx response", async () => {
     const { fetch } = fakeFetch(
       new Response("rate limited", { status: 429, statusText: "Too Many Requests" }),
@@ -167,5 +195,23 @@ describe("provider factories", () => {
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers["http-referer"]).toBe("https://archer.dev");
     expect(headers["x-openrouter-title"]).toBe("Archer");
+  });
+});
+
+describe("stripReasoning", () => {
+  it("drops a <think>…</think> block and keeps the answer that follows", () => {
+    expect(
+      stripReasoning(
+        "<think>let me reason…\nDraft 1: …\nbetter:</think>\n\nDear Team,\nhi\nKind regards,",
+      ),
+    ).toBe("Dear Team,\nhi\nKind regards,");
+  });
+
+  it("is a no-op on content with no reasoning block", () => {
+    expect(stripReasoning("Dear Team,\nhi\nKind regards,")).toBe("Dear Team,\nhi\nKind regards,");
+  });
+
+  it("drops an unclosed think block rather than returning raw reasoning", () => {
+    expect(stripReasoning("<think>thinking and never finished…")).toBe("");
   });
 });
