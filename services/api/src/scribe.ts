@@ -27,20 +27,46 @@ const SYSTEM_PROMPT =
   "subject line. Open with 'Dear <company> Hiring Team,' and sign off with 'Kind " +
   "regards,' on its own line (no name).";
 
-/** Project the drafting context onto the LLM chat contract. */
+/** Per-field budget for the free-text context sections (résumé / job description /
+ *  company About). These arrive from the DB unbounded — a long résumé or a wall of
+ *  posting boilerplate could otherwise dwarf the instructions and blow the model's
+ *  context window. ~4000 chars each keeps any single source substantial but capped;
+ *  the head is what matters most for a cover letter, so we truncate the tail. */
+const FIELD_BUDGET = 4000;
+
+/** Trim a free-text field to its budget for the prompt, marking where it was cut so
+ *  the model knows it's reading an excerpt (and never silently invents the rest).
+ *  Returns undefined for blank/absent input, so the section is dropped entirely. */
+function clip(value: string | null | undefined): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  return text.length > FIELD_BUDGET ? `${text.slice(0, FIELD_BUDGET)}…[truncated]` : text;
+}
+
+/** Project the drafting context onto the LLM chat contract. The user message is
+ *  built as labelled sections — the role + job description, the company + its About,
+ *  the candidate's résumé, then the highlights — so the model can ground specifics
+ *  in real text instead of inventing them. Each rich section is included only when
+ *  present (any may be absent) and clipped to a budget so the prompt can't blow up. */
 function toMessages(ctx: ScribeContext): LlmMessage[] {
   const company = ctx.companyName?.trim() || "the company";
   const highlights = (ctx.highlights ?? []).map((h) => h.trim()).filter(Boolean);
-  const detail = [
+  const jobDescription = clip(ctx.jobDescription);
+  const companyAbout = clip(ctx.companyAbout);
+  const resumeText = clip(ctx.resumeText);
+  const sections = [
     `Role: ${ctx.roleTitle}`,
+    jobDescription ? `Job description:\n${jobDescription}` : undefined,
     `Company: ${company}`,
+    companyAbout ? `About ${company}:\n${companyAbout}` : undefined,
+    resumeText ? `Candidate résumé:\n${resumeText}` : undefined,
     highlights.length > 0
       ? `Candidate highlights:\n- ${highlights.join("\n- ")}`
       : "Candidate highlights: (none provided — keep it sincere but generic)",
-  ].join("\n");
+  ].filter((s): s is string => s !== undefined);
   return [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: detail },
+    { role: "user", content: sections.join("\n\n") },
   ];
 }
 

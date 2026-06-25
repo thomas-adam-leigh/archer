@@ -27,6 +27,7 @@ import {
   getCandidacyContext,
   getCandidacyDetail,
   getCompanyDetail,
+  getCoverLetterContext,
   getCoverLetterVersion,
   getDailyRun,
   getLiveProfileVersion,
@@ -1504,13 +1505,25 @@ const gCover = mk()
             .filter((v): v is string => typeof v === "string")
             .slice(0, 3);
 
+      // The rich, specific context the Scribe grounds the letter in: the role's
+      // posting body, the company's About (description + any enrichment summary),
+      // and the candidate's résumé — one join over candidacy → posting → company +
+      // the owner's profile. Every field is independently nullable (no posting body,
+      // an un-enriched company, no résumé on file), so the draft degrades gracefully;
+      // the role title / company name fall back to the gate's candidacy row if the
+      // (already-validated) candidacy somehow can't be re-read here.
+      const enriched = await getCoverLetterContext(db, candidacyId);
+
       const run = await createRun(db, { threadId, input: body as unknown as Json });
       // Draft the letter with the real, swappable LLM (mock in tests, deterministic
       // assembler when no key); the run loop stays pure (see ./scribe.ts, ./agui.ts).
       const context = {
-        roleTitle: candidacy.posting_title,
-        companyName: candidacy.company_name,
+        roleTitle: enriched?.roleTitle ?? candidacy.posting_title,
+        companyName: enriched?.companyName ?? candidacy.company_name,
         highlights,
+        resumeText: enriched?.resumeText ?? null,
+        companyAbout: enriched?.companyAbout ?? null,
+        jobDescription: enriched?.jobDescription ?? null,
       };
       const letter = await getScribe()(context);
       const events = scribeRun({ threadId, runId: run.id, context, content: letter });
