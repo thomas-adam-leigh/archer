@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { nextRun } from "#/lib/next-run.ts";
+import { formatRun, scheduleCadence } from "#/lib/next-run.ts";
 
 /** Build a local-time Date (months are 0-based) for a fixed clock in tests. */
 function at(
@@ -12,70 +12,59 @@ function at(
 	return new Date(year, month - 1, day, hour, minute);
 }
 
-describe("nextRun", () => {
-	test("before the morning slot → Today · 08:00", () => {
-		// Wed 2026-06-24, 06:30 → next slot is today at 08:00.
-		expect(nextRun(at(2026, 6, 24, 6, 30))).toEqual({
+describe("formatRun", () => {
+	const now = at(2026, 6, 24, 9, 0); // Wed 2026-06-24, 09:00 local
+
+	test("same calendar day → Today + the local time", () => {
+		expect(formatRun(at(2026, 6, 24, 6, 0), now)).toEqual({
 			label: "Today",
-			time: "08:00",
+			time: "06:00",
 		});
 	});
 
-	test("between the two slots → Today · 13:00", () => {
-		// Wed 2026-06-24, 09:00 → 08:00 has passed, next is today at 13:00.
-		expect(nextRun(at(2026, 6, 24, 9, 0))).toEqual({
-			label: "Today",
-			time: "13:00",
-		});
-	});
-
-	test("after the last slot on a weekday → Tomorrow · 08:00", () => {
-		// Wed 2026-06-24, 18:00 → both slots passed, next is Thursday at 08:00.
-		expect(nextRun(at(2026, 6, 24, 18, 0))).toEqual({
+	test("the next day → Tomorrow", () => {
+		expect(formatRun(at(2026, 6, 25, 8, 30), now)).toEqual({
 			label: "Tomorrow",
-			time: "08:00",
+			time: "08:30",
 		});
 	});
 
-	test("exactly on a slot rolls forward (strictly after now)", () => {
-		// Wed 2026-06-24, 08:00 sharp → not in the future, next is today 13:00.
-		expect(nextRun(at(2026, 6, 24, 8, 0))).toEqual({
-			label: "Today",
-			time: "13:00",
+	test("the previous day → Yesterday (a past last-run)", () => {
+		expect(formatRun(at(2026, 6, 23, 8, 2), now)).toEqual({
+			label: "Yesterday",
+			time: "08:02",
 		});
 	});
 
-	test("Friday evening skips the weekend → Monday · 08:00", () => {
-		// Fri 2026-06-26, 18:00 → Sat/Sun rest, next is Monday at 08:00 (a weekday
-		// name, not "Tomorrow").
-		expect(nextRun(at(2026, 6, 26, 18, 0))).toEqual({
+	test("a further-off weekday uses its name", () => {
+		// Mon 2026-06-29 is several days ahead → the weekday name, not Today/Tomorrow.
+		expect(formatRun(at(2026, 6, 29, 8, 0), now)).toEqual({
 			label: "Monday",
 			time: "08:00",
 		});
 	});
 
-	test("Saturday → Monday · 08:00", () => {
-		// Sat 2026-06-27, any time → next weekday slot is Monday at 08:00.
-		expect(nextRun(at(2026, 6, 27, 10, 0))).toEqual({
-			label: "Monday",
-			time: "08:00",
-		});
+	test("renders the real minutes, not a hardcoded :00", () => {
+		expect(formatRun(at(2026, 6, 24, 8, 45), now).time).toBe("08:45");
+	});
+});
+
+describe("scheduleCadence", () => {
+	test("a weekday cron (dow 1-5) reads 'every weekday' at the local run time", () => {
+		expect(scheduleCadence("0 6 * * 1-5", at(2026, 6, 24, 8, 0))).toBe(
+			"Archer runs every weekday at 08:00, then rests.",
+		);
 	});
 
-	test("Sunday → Tomorrow · 08:00 (Monday is the next day)", () => {
-		// Sun 2026-06-28 → Monday is literally tomorrow, so the friendly label wins.
-		expect(nextRun(at(2026, 6, 28, 10, 0))).toEqual({
-			label: "Tomorrow",
-			time: "08:00",
-		});
+	test("a daily cron (dow *) reads 'every day'", () => {
+		expect(scheduleCadence("0 6 * * *", at(2026, 6, 24, 8, 0))).toBe(
+			"Archer runs every day at 08:00, then rests.",
+		);
 	});
 
-	test("midweek future weekday uses its name", () => {
-		// Tue 2026-06-23, 18:00 → Wednesday at 08:00 (named, not Today/Tomorrow…
-		// Wednesday IS tomorrow here, so expect Tomorrow).
-		expect(nextRun(at(2026, 6, 23, 18, 0))).toEqual({
-			label: "Tomorrow",
-			time: "08:00",
-		});
+	test("the time comes from the run instant, in local time", () => {
+		expect(scheduleCadence("30 5 * * 1-5", at(2026, 6, 24, 7, 30))).toBe(
+			"Archer runs every weekday at 07:30, then rests.",
+		);
 	});
 });

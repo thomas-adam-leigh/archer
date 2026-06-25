@@ -17,13 +17,14 @@ import {
 	activityFeed,
 	type BoardStatus,
 	boardCollectState,
+	type CollectionSchedule,
 	type DailyRun,
 	dailyRunHeadline,
 	type FeedItem,
 	researchingNow,
 	runTrailLines,
 } from "#/lib/dashboard.ts";
-import type { NextRun } from "#/lib/next-run.ts";
+import { formatRun, scheduleCadence } from "#/lib/next-run.ts";
 import type { NegativeCriterion } from "#/lib/preferences.ts";
 
 /**
@@ -57,6 +58,65 @@ function Eyebrow({ children }: { children: string }) {
 /** A muted single-line note used for loading / empty / error states. */
 function Note({ children }: { children: string }) {
 	return <p className="text-[13px] text-[var(--txt3)]">{children}</p>;
+}
+
+/**
+ * Archer's next scheduled run, the cadence, and the last actual run — all from the
+ * real API schedule (ARC-172), rendered in the user's local timezone. Honest empty
+ * state: when no run has happened yet we say so rather than imply one did.
+ */
+function NextRunCard({
+	schedule,
+}: {
+	schedule: QueryView<CollectionSchedule>;
+}) {
+	const data = schedule.data;
+	const now = new Date();
+	const next = data ? formatRun(new Date(data.nextRunAt), now) : null;
+	const last = data?.lastRunAt
+		? formatRun(new Date(data.lastRunAt), now)
+		: null;
+	return (
+		<section
+			data-testid="home-next-run"
+			className="flex items-center gap-[15px] rounded-[18px] border border-[var(--line)] bg-[var(--card)] px-5 py-[18px]"
+		>
+			<div className="flex size-[46px] shrink-0 items-center justify-center rounded-[13px] border border-brand/28 bg-brand/12 text-[var(--accent)]">
+				<Clock className="size-[22px]" />
+			</div>
+			<div className="flex-1">
+				<div className="mb-[3px] text-[11px] font-bold uppercase tracking-[0.09em] text-[var(--txt3)]">
+					Next run
+				</div>
+				{schedule.isPending ? (
+					<Note>Loading schedule…</Note>
+				) : schedule.isError || !data || !next ? (
+					<Note>Couldn't load the schedule just now.</Note>
+				) : (
+					<>
+						<div
+							data-testid="home-next-run-time"
+							className="font-heading text-[19px] font-semibold text-[var(--txt)]"
+						>
+							{next.label} · {next.time}
+						</div>
+						<div
+							data-testid="home-cadence"
+							className="mt-[3px] text-[13px] text-[var(--txt2)]"
+						>
+							{scheduleCadence(data.schedule, new Date(data.nextRunAt))}
+						</div>
+						<div
+							data-testid="home-last-run"
+							className="mt-[3px] text-[12px] text-[var(--txt3)]"
+						>
+							{last ? `Last run · ${last.label} ${last.time}` : "No runs yet."}
+						</div>
+					</>
+				)}
+			</div>
+		</section>
+	);
 }
 
 const FEED_ICONS: Record<
@@ -243,7 +303,7 @@ function ActivityFeed({
 }
 
 export function HomeDashboard({
-	nextRun,
+	schedule,
 	titles,
 	ruleOuts,
 	boards,
@@ -252,7 +312,7 @@ export function HomeDashboard({
 	onStartOver,
 	startingOver = false,
 }: {
-	nextRun: NextRun;
+	schedule: QueryView<CollectionSchedule>;
 	titles: string[];
 	ruleOuts: NegativeCriterion[];
 	boards: QueryView<BoardStatus[]>;
@@ -290,29 +350,8 @@ export function HomeDashboard({
 			</p>
 
 			<div className="mx-auto flex max-w-[460px] flex-col gap-3.5 text-left">
-				{/* Next run */}
-				<section
-					data-testid="home-next-run"
-					className="flex items-center gap-[15px] rounded-[18px] border border-[var(--line)] bg-[var(--card)] px-5 py-[18px]"
-				>
-					<div className="flex size-[46px] shrink-0 items-center justify-center rounded-[13px] border border-brand/28 bg-brand/12 text-[var(--accent)]">
-						<Clock className="size-[22px]" />
-					</div>
-					<div className="flex-1">
-						<div className="mb-[3px] text-[11px] font-bold uppercase tracking-[0.09em] text-[var(--txt3)]">
-							Next run
-						</div>
-						<div
-							data-testid="home-next-run-time"
-							className="font-heading text-[19px] font-semibold text-[var(--txt)]"
-						>
-							{nextRun.label} · {nextRun.time}
-						</div>
-						<div className="mt-[3px] text-[13px] text-[var(--txt2)]">
-							Archer runs every weekday at 08:00 and 13:00, then rests.
-						</div>
-					</div>
-				</section>
+				{/* Next run — the real schedule + next/last run from the API */}
+				<NextRunCard schedule={schedule} />
 
 				{/* Where I'll look — the live onboarding outputs */}
 				<section

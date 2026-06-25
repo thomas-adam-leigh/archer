@@ -50,6 +50,41 @@ function stubHomeBackend() {
 	cy.intercept("GET", "**/boards", { statusCode: 200, body: { boards: BOARDS } }).as(
 		"boards",
 	);
+	// The real collection schedule (ARC-172): a weekday cron, a future next run, and
+	// a recent last run. Times are UTC ISO; the card renders them in local time.
+	cy.intercept("GET", "**/collection/schedule*", {
+		statusCode: 200,
+		body: {
+			user: "test-user-id",
+			schedule: "0 6 * * 1-5",
+			nextRunAt: "2026-06-29T06:00:00Z",
+			lastRunAt: "2026-06-24T06:02:00Z",
+		},
+	}).as("schedule");
+}
+
+/** The empty run + feed reads the next-run card tests don't otherwise care about. */
+function stubEmptyRunAndFeed() {
+	cy.intercept({ method: "GET", url: /\/activities\/daily/ }, {
+		statusCode: 200,
+		body: {
+			user: "test-user-id",
+			run: {
+				date: "2026-06-24",
+				status: null,
+				jobsNew: 0,
+				postingsNew: 0,
+				counts: { found: 0, nothing_today: 0, not_integrated: 0, failed: 0, collecting: 0 },
+				boards: [],
+				startedAt: null,
+				finishedAt: null,
+			},
+		},
+	}).as("dailyRun");
+	cy.intercept({ method: "GET", url: /\/activities\?/ }, {
+		statusCode: 200,
+		body: { user: "test-user-id", activities: [] },
+	}).as("activities");
 }
 
 /** Visit home with a restored session so the guard treats us as signed-in. */
@@ -195,5 +230,51 @@ describe("Home dashboard — live data (M1)", () => {
 		cy.get('[data-testid="home-researching"]').should("not.exist");
 		// Boards still render at launch (they're seeded, not user data).
 		cy.get('[data-testid="home-board"]').should("have.length", BOARDS.length);
+	});
+
+	// ARC-172 — the next-run card now reads the real API schedule, not a hardcoded
+	// "08:00 and 13:00". The runner's timezone isn't fixed, so we assert the shape of
+	// the rendered local times (a weekday label + HH:MM) rather than exact hours, and
+	// that the old hardcoded copy is gone.
+	it("renders the real next run, cadence and last run from the schedule API", () => {
+		stubEmptyRunAndFeed();
+		visitHome();
+
+		cy.get('[data-testid="home-next-run"]').should("be.visible");
+		cy.get('[data-testid="home-next-run-time"]')
+			.invoke("text")
+			.should(
+				"match",
+				/^(Today|Tomorrow|Yesterday|Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday) · \d{2}:\d{2}$/,
+			);
+		cy.get('[data-testid="home-cadence"]')
+			.should("contain.text", "every weekday")
+			.invoke("text")
+			.should("match", /at \d{2}:\d{2}/);
+		cy.get('[data-testid="home-last-run"]')
+			.should("contain.text", "Last run")
+			.invoke("text")
+			.should("match", /\d{2}:\d{2}/);
+		// The hardcoded fiction ARC-172 removed must not resurface.
+		cy.get('[data-testid="home-next-run"]').should(
+			"not.contain.text",
+			"08:00 and 13:00",
+		);
+	});
+
+	it("shows an honest empty state when no run has happened yet", () => {
+		cy.intercept("GET", "**/collection/schedule*", {
+			statusCode: 200,
+			body: {
+				user: "test-user-id",
+				schedule: "0 6 * * 1-5",
+				nextRunAt: "2026-06-29T06:00:00Z",
+				lastRunAt: null,
+			},
+		}).as("scheduleNoRun");
+		stubEmptyRunAndFeed();
+		visitHome();
+
+		cy.get('[data-testid="home-last-run"]').should("have.text", "No runs yet.");
 	});
 });

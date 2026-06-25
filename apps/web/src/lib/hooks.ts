@@ -42,8 +42,10 @@ import {
 import {
 	type ActivityItem,
 	type BoardStatus,
+	type CollectionSchedule,
 	type DailyRun,
 	fetchDailyRun,
+	fetchSchedule,
 	listActivities,
 	listBoards,
 } from "#/lib/dashboard.ts";
@@ -114,6 +116,7 @@ export const queryKeys = {
 	suggestedTitles: (userId: string) =>
 		["preferences", "suggested-titles", userId] as const,
 	boards: () => ["dashboard", "boards"] as const,
+	schedule: (userId: string) => ["dashboard", "schedule", userId] as const,
 	dailyRun: (userId: string) => ["dashboard", "daily-run", userId] as const,
 	activities: (userId: string) => ["dashboard", "activities", userId] as const,
 	jobs: (userId: string) => ["jobs", "feed", userId] as const,
@@ -305,6 +308,24 @@ export function useBoards() {
 		queryFn: () => listBoards(requireSession(session)),
 		enabled: Boolean(session),
 		...DASHBOARD_QUERY_CACHE,
+	});
+}
+
+/**
+ * Read the real collection schedule + next/last run for the home card (ARC-172);
+ * signed-in only. Polls so the "last run" updates live once a run lands and the
+ * "next run" rolls over after a fire, instead of showing a stale instant.
+ */
+export function useSchedule() {
+	const session = useSession();
+	return useQuery<CollectionSchedule>({
+		queryKey: session
+			? queryKeys.schedule(session.user.id)
+			: ["dashboard", "schedule", "anonymous"],
+		queryFn: () => fetchSchedule(requireSession(session)),
+		enabled: Boolean(session),
+		...DASHBOARD_QUERY_CACHE,
+		refetchInterval: 30_000,
 	});
 }
 
