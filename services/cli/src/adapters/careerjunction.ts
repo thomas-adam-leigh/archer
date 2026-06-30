@@ -1,5 +1,6 @@
 import type { Enums } from "@archer/db";
 import type { Page } from "patchright-core";
+import { careerjunctionApplier } from "./careerjunction-apply.js";
 import { parseProxy, withSession } from "./harness.js";
 import type { BoardAdapter, CollectContext, ScrapedPosting } from "./types.js";
 
@@ -185,7 +186,7 @@ function extractCards(page: Page): Promise<RawCard[]> {
 }
 
 /** Authenticate if needed; reuses a persisted session and only logs in when logged out. */
-async function ensureLoggedIn(
+export async function ensureLoggedIn(
   page: Page,
   creds: CollectContext["creds"],
   log: (m: string) => void,
@@ -269,4 +270,5 @@ export const careerjunction: BoardAdapter = {
       },
     );
   },
+  apply: careerjunctionApplier,
 };
