@@ -15,4 +15,9 @@ export function getAdapter(slug: string): BoardAdapter | undefined {
   return ADAPTERS[slug];
 }
 
+/** The board's apply implementation, or undefined when its apply path isn't mapped. */
+export function getApplier(slug: string) {
+  return ADAPTERS[slug]?.apply;
+}
+
 export * from "./types.js";

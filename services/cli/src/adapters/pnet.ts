@@ -1,6 +1,7 @@
 import type { Enums } from "@archer/db";
 import type { Page } from "patchright-core";
 import { parseProxy, withSession } from "./harness.js";
+import { pnetApplier } from "./pnet-apply.js";
 import type { BoardAdapter, CollectContext, ScrapedPosting } from "./types.js";
 
 /**
@@ -307,4 +308,5 @@ export const pnet: BoardAdapter = {
       },
     );
   },
+  apply: pnetApplier,
 };

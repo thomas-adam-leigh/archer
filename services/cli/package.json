@@ -17,6 +17,7 @@
     "@archer/db": "workspace:*",
     "@archer/llm": "workspace:*",
     "commander": "^15.0.0",
+    "docx": "^9.7.1",
     "hono": "^4.12.26",
     "patchright-core": "1.61.1"
   },
