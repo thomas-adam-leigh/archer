@@ -14,12 +14,24 @@ import {
   transitionCandidacy,
 } from "@archer/db";
 import type { Command } from "commander";
+import { ensureCoverLetterDocx } from "../adapters/cover-letters-storage.js";
+import { getApplier } from "../adapters/index.js";
 import { CliError, type GlobalOpts, output, readJsonFixture, run } from "../context.js";
+
+/** Signatory appended to the cover-letter sign-off. The stored letters stop at
+ *  "Kind regards,"; this name closes them. (Single-user for now — source from the
+ *  profile when Archer goes multi-user.) */
+const SIGNATORY = "Thomas Adam Leigh";
 
 /** The role/company/board the apply targets, plus the approved letter it submits. */
 export interface ApplyContext {
-  candidacy: { id: string; role: string; company: string | null; boardSlug: string };
+  candidacy: { id: string; role: string; company: string | null; boardSlug: string; url: string };
   coverLetter: { versionId: string; content: string };
+  /** Resolve the approved cover letter as a .docx file to upload — rendered and
+   *  persisted to the `cover-letters` Storage bucket on first call (idempotent). Only
+   *  the real board adapters call this; the stub/fixture adapters don't, so they stay
+   *  network-free. */
+  resolveDocx: () => Promise<{ fileName: string; bytes: Buffer }>;
   log: (msg: string) => void;
 }
 
@@ -102,9 +114,11 @@ export async function runApply(
     confirmMode?: ApplyConfirmMode;
   },
 ): Promise<ApplySummary> {
-  const apply = args.apply ?? stubApplier;
   const candidacy = await getCandidacyContext(db, args.candidacyId);
   if (!candidacy) throw new CliError(`unknown candidacy: ${args.candidacyId}`);
+  // The board's real apply adapter (or an injected one for tests); a board without a
+  // mapped apply path falls back to the deterministic stub.
+  const apply = args.apply ?? getApplier(candidacy.board_slug) ?? stubApplier;
 
   const base = {
     candidacyId: candidacy.id,
@@ -169,8 +183,17 @@ export async function runApply(
         role: candidacy.posting_title,
         company: candidacy.company_name,
         boardSlug: candidacy.board_slug,
+        url: candidacy.posting_url,
       },
       coverLetter: { versionId: version.id, content: version.content },
+      resolveDocx: () =>
+        ensureCoverLetterDocx(db, version, {
+          userId: candidacy.user_id,
+          candidacyId: candidacy.id,
+          signatory: SIGNATORY,
+          company: candidacy.company_name,
+          role: candidacy.posting_title,
+        }),
       log: (m) => console.error(m),
     });
 

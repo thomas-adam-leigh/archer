@@ -1,4 +1,5 @@
 import type { Enums } from "@archer/db";
+import type { Applier } from "../commands/apply.js";
 
 /** One job ad as scraped from a board, before it's written as a Posting. */
 export interface ScrapedPosting {
@@ -23,10 +24,13 @@ export interface CollectContext {
   log: (msg: string) => void;
 }
 
-/** A board-specific collect (and, later, apply) implementation. */
+/** A board-specific collect and (optionally) apply implementation. */
 export interface BoardAdapter {
   slug: string;
   collect(ctx: CollectContext): Promise<ScrapedPosting[]>;
+  /** Drive the board's application form. Absent until a board's apply path is mapped;
+   *  the apply boundary falls back to the stub adapter for boards without one. */
+  apply?: Applier;
 }
 
 /** Thrown by a board adapter whose collect path hasn't been integrated yet. */

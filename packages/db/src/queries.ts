@@ -588,6 +588,8 @@ export interface CandidacyContext {
   company_name: string | null;
   /** The board the posting came from — the apply adapter dispatches per board. */
   board_slug: string;
+  /** The posting's URL on the board — the apply adapter navigates here to apply. */
+  posting_url: string;
   /** ARC-165: when the owner confirmed this approved candidacy may apply, or null
    *  when still awaiting apply-confirm. The apply orchestration's confirm gate reads
    *  this; apply is refused while it is null (per ARCHER_APPLY_CONFIRM_MODE). */
@@ -604,7 +606,7 @@ export async function getCandidacyContext(
 ): Promise<CandidacyContext | undefined> {
   const rows = await db<CandidacyContext[]>`
     select c.id, c.user_id, c.status, p.title as posting_title,
-           p.board_slug, co.name as company_name, c.apply_confirmed_at
+           p.board_slug, p.url as posting_url, co.name as company_name, c.apply_confirmed_at
     from candidacies c
     join postings p on p.id = c.posting_id
     left join companies co on co.id = p.company_id
@@ -2620,6 +2622,27 @@ export async function recordCoverLetterSpokenNote(
   const rows = await db<CoverLetterVersion[]>`
     update cover_letter_versions
     set details = details || ${db.json({ spokenNote: note } as never)}
+    where id = ${versionId}
+    returning *`;
+  if (!rows[0]) {
+    throw new Error(`cover-letter version ${versionId} not found`);
+  }
+  return rows[0];
+}
+
+/** Record the rendered cover-letter .docx artifact on the version: merges
+ *  `{ path, fileName, renderedAt }` under `details.docx` (preserving other keys), so
+ *  the apply adapter can download the exact approved file from the `cover-letters`
+ *  Storage bucket. Throws if the version does not exist. */
+export async function setCoverLetterDocxRef(
+  db: Db,
+  versionId: string,
+  ref: { path: string; fileName: string },
+): Promise<CoverLetterVersion> {
+  const docx = { ...ref, renderedAt: new Date().toISOString() };
+  const rows = await db<CoverLetterVersion[]>`
+    update cover_letter_versions
+    set details = details || ${db.json({ docx } as never)}
     where id = ${versionId}
     returning *`;
   if (!rows[0]) {
