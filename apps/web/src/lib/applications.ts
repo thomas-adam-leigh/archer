@@ -15,7 +15,7 @@
  * is injectable so the pure shaping helpers stay testable offline.
  */
 
-import { apiGet } from "#/lib/api.ts";
+import { apiGet, apiPost } from "#/lib/api.ts";
 import type { Session } from "#/lib/auth.ts";
 import type { CandidacyStatus, ExternalFormStatus } from "#/lib/jobs.ts";
 
@@ -23,6 +23,13 @@ import type { CandidacyStatus, ExternalFormStatus } from "#/lib/jobs.ts";
 export type ApplicationsGet = <T>(
 	path: string,
 	accessToken: string,
+) => Promise<T>;
+
+/** The POST surface the apply-confirm needs — injectable for offline tests. */
+export type ApplicationsPost = <T>(
+	path: string,
+	accessToken: string,
+	body?: unknown,
 ) => Promise<T>;
 
 /**
@@ -72,6 +79,31 @@ export async function listApplications(
 		session.accessToken,
 	);
 	return resp.applications;
+}
+
+/** The result of confirming an apply (ARC-165): the go-ahead is stamped and the box
+ *  apply-runner will submit; the candidacy stays `approved` (confirmed) until it does. */
+export interface ApplyConfirmResult {
+	candidacyId: string;
+	status: CandidacyStatus;
+	confirmed: boolean;
+	queued: boolean;
+}
+
+/**
+ * Confirm the owner's go-ahead to apply for a candidacy (ARC-165). Stamps the
+ * confirmation only — the browser apply runs on the box host runner (not the API
+ * container, ARC-168), which polls for confirmed candidacies and submits them.
+ */
+export async function confirmApply(
+	session: Session,
+	candidacyId: string,
+	post: ApplicationsPost = apiPost,
+): Promise<ApplyConfirmResult> {
+	return await post<ApplyConfirmResult>(
+		`/candidacies/${encodeURIComponent(candidacyId)}/apply-confirm`,
+		session.accessToken,
+	);
 }
 
 // ── presentation helpers (pure) ──────────────────────────────────────────────

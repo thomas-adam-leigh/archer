@@ -17,6 +17,8 @@ import {
 import { type AccountStatus, completeOnboarding } from "#/lib/accounts.ts";
 import {
 	type ApplicationListItem,
+	type ApplyConfirmResult,
+	confirmApply,
 	listApplications,
 } from "#/lib/applications.ts";
 import type { Session } from "#/lib/auth.ts";
@@ -497,6 +499,26 @@ export function useApplications() {
 		enabled: Boolean(session),
 		...DASHBOARD_QUERY_CACHE,
 		refetchInterval: 30_000,
+	});
+}
+
+/**
+ * Confirm the apply for a candidacy (ARC-165) — the owner's explicit go-ahead. Stamps
+ * the confirmation; the box apply-runner then submits. Invalidates the applications
+ * list so the card flips from "Awaiting your confirmation" to "Confirmed — applying".
+ */
+export function useApplyConfirm() {
+	const session = useSession();
+	const queryClient = useQueryClient();
+	return useMutation<ApplyConfirmResult, Error, { candidacyId: string }>({
+		mutationFn: (vars) => confirmApply(requireSession(session), vars.candidacyId),
+		onSuccess: () => {
+			if (session) {
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.applications(session.user.id),
+				});
+			}
+		},
 	});
 }
 

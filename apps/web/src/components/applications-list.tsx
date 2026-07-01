@@ -1,4 +1,4 @@
-import { Building2, ExternalLink, SendHorizonal } from "lucide-react";
+import { Building2, ExternalLink, Loader2, SendHorizonal } from "lucide-react";
 import { InlineErrorState } from "#/components/ui/error-state.tsx";
 import {
 	type ApplicationBadge,
@@ -6,6 +6,7 @@ import {
 	applicationBadge,
 	coverLetterSentLabel,
 } from "#/lib/applications.ts";
+import { useApplyConfirm } from "#/lib/hooks.ts";
 import { versionDate } from "#/lib/profile-overview.ts";
 
 /**
@@ -58,7 +59,43 @@ function Pill({
 	);
 }
 
-/** One application card — read-only; shows its state, what was sent, and when. */
+/**
+ * The owner's one call to action on the applications list: confirm the apply (ARC-165).
+ * Shown only while a candidacy is `approved` and not yet confirmed. Confirming stamps
+ * the go-ahead; the box apply-runner then submits and the card flips to "applying".
+ */
+function ApplyConfirmButton({ candidacyId }: { candidacyId: string }) {
+	const confirm = useApplyConfirm();
+	return (
+		<div className="mt-1 flex flex-col items-start gap-1.5">
+			<button
+				type="button"
+				data-testid="applications-apply-confirm"
+				onClick={() => confirm.mutate({ candidacyId })}
+				disabled={confirm.isPending}
+				className="flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,var(--accent-2),var(--accent))] px-4 py-2 text-[13px] font-bold text-[#160a02] shadow-[0_8px_20px_var(--glow)] transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+			>
+				{confirm.isPending ? (
+					<Loader2 className="size-[15px] animate-spin" />
+				) : (
+					<SendHorizonal className="size-[15px]" strokeWidth={2.4} />
+				)}
+				Confirm &amp; apply
+			</button>
+			{confirm.isError ? (
+				<span
+					data-testid="applications-apply-error"
+					className="text-[12px] text-red-400"
+				>
+					Couldn't confirm the apply. Please try again.
+				</span>
+			) : null}
+		</div>
+	);
+}
+
+/** One application card — shows its state, what was sent, and when; the awaiting-
+ *  confirm one also carries the Confirm & apply action. */
 function ApplicationCard({
 	item,
 	boardName,
@@ -102,6 +139,9 @@ function ApplicationCard({
 						</a>
 					) : null}
 				</div>
+				{item.status === "approved" && !item.apply_confirmed_at ? (
+					<ApplyConfirmButton candidacyId={item.id} />
+				) : null}
 			</div>
 		</li>
 	);
