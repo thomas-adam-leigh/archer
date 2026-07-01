@@ -69,16 +69,11 @@ describe("POST /candidacies/{id}/apply-confirm (ARC-165)", () => {
     delete process.env.SUPABASE_JWT_SECRET;
   });
 
-  it("confirms then fires the apply for the owner (200)", async () => {
+  it("confirms + queues the apply for the box runner (200) — no in-container apply", async () => {
     mockGet.mockResolvedValue(candidacy(USER_A, "approved"));
     mockConfirm.mockResolvedValue({
       ...candidacy(USER_A, "approved"),
       apply_confirmed_at: "2026-06-24T02:00:00Z",
-    });
-    mockCli.mockResolvedValue({
-      code: 0,
-      stdout: JSON.stringify({ candidacyId: CANDIDACY, status: "applied", outcome: "submitted" }),
-      stderr: "",
     });
 
     const res = await app.request(
@@ -86,10 +81,14 @@ describe("POST /candidacies/{id}/apply-confirm (ARC-165)", () => {
       bearer(signJwt(USER_A)),
     );
     expect(res.status).toBe(200);
-    expect((await res.json()).status).toBe("applied");
-    // Confirmation was stamped BEFORE the apply fired.
+    const body = await res.json();
+    expect(body.confirmed).toBe(true);
+    expect(body.queued).toBe(true);
+    expect(body.status).toBe("approved");
     expect(mockConfirm).toHaveBeenCalledWith(expect.anything(), CANDIDACY);
-    expect(mockCli).toHaveBeenCalledWith(["apply", CANDIDACY, "--json"]);
+    // Apply is browser automation — it runs on the box host runner, NOT here. The
+    // endpoint must NOT invoke the CLI in the container (ARC-168).
+    expect(mockCli).not.toHaveBeenCalled();
   });
 
   it("409s a candidacy that is not awaiting apply-confirm (e.g. still drafting) — no apply", async () => {
@@ -128,19 +127,5 @@ describe("POST /candidacies/{id}/apply-confirm (ARC-165)", () => {
     const res = await app.request(`/candidacies/${CANDIDACY}/apply-confirm`, { method: "POST" });
     expect(res.status).toBe(401);
     expect(mockGet).not.toHaveBeenCalled();
-  });
-
-  it("502s when the apply CLI fails (after confirmation)", async () => {
-    mockGet.mockResolvedValue(candidacy(USER_A, "approved"));
-    mockConfirm.mockResolvedValue({
-      ...candidacy(USER_A, "approved"),
-      apply_confirmed_at: "2026-06-24T02:00:00Z",
-    });
-    mockCli.mockResolvedValue({ code: 1, stdout: "", stderr: "boom" });
-    const res = await app.request(
-      `/candidacies/${CANDIDACY}/apply-confirm`,
-      bearer(signJwt(USER_A)),
-    );
-    expect(res.status).toBe(502);
   });
 });

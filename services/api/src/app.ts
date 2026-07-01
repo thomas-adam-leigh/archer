@@ -483,11 +483,13 @@ const gFeed = mk()
   // Apply-confirm (ARC-165): the owner's explicit go-ahead on an approved candidacy —
   // the gate the one irreversible action (apply) waits behind. Approving a cover
   // letter does NOT auto-apply; the owner must confirm here, which stamps the
-  // confirmation and then fires the apply via the CLI (same "API runs the CLI" model
-  // as /commands/apply). JWT-scoped own rows: another user's candidacy 403s, a missing
-  // one 404s. Only an `approved` candidacy is awaiting confirmation — anything else
-  // (still drafting, already applying/applied, dismissed) is rejected 409, so you can
-  // neither confirm before the letter is approved nor re-confirm an in-flight apply.
+  // confirmation. The apply itself is browser automation that CANNOT run in this
+  // container (ARC-168) — the box host runner (infra/apply) polls for confirmed
+  // candidacies and runs `archer apply <id>` there (browser + Decodo). So this only
+  // stamps + returns the queued state; the candidacy stays `approved` until the runner
+  // moves it applying→applied. JWT-scoped own rows: another user's candidacy 403s, a
+  // missing one 404s. Only an `approved` candidacy is awaiting confirmation — anything
+  // else (still drafting, already applying/applied, dismissed) is rejected 409.
   .openapi(
     createRoute({
       method: "post",
@@ -500,7 +502,6 @@ const gFeed = mk()
         403: ERR[403],
         404: ERR[404],
         409: ERR[409],
-        502: ERR[502],
       },
     }),
     async (c) => {
@@ -519,13 +520,9 @@ const gFeed = mk()
           409,
         );
       }
-      // Confirmation stamped — fire the apply. The CLI re-reads the now-confirmed
-      // candidacy, so its apply-confirm gate passes and the application proceeds.
-      const res = await runCli(["apply", id, "--json"]);
-      if (res.code !== 0) {
-        return c.json({ error: res.stderr.trim() || "apply failed", code: res.code }, 502);
-      }
-      return c.json(JSON.parse(res.stdout));
+      // Confirmation stamped. The box apply-runner picks it up and applies; the
+      // candidacy is `approved` (confirmed) until it does, then applying→applied.
+      return c.json({ candidacyId: id, status: confirmed.status, confirmed: true, queued: true });
     },
   )
   // Activities feed (ARC-43): a user's own runs (collect/match/enrich/cover_letter/
